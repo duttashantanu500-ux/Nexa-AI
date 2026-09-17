@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+:root {
+  --background: #fafafa;
+  --foreground: #111111;
+  --sidebar: #f4f4f5;
+  --sidebar-border: #e4e4e7;
+  --card: #ffffff;
+  --muted: #71717a;
+  --accent: #18181b;
+  --border: #e4e4e7;
+  --ring: #a1a1aa;
+  --user-bubble: #18181b;
+  --user-bubble-fg: #fafafa;
+  --assistant-bubble: transparent;
+}
+
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --sidebar: #0f0f11;
+  --sidebar-border: #27272a;
+  --card: #18181b;
+  --muted: #a1a1aa;
+  --accent: #fafafa;
+  --border: #27272a;
+  --ring: #52525b;
+  --user-bubble: #27272a;
+  --user-bubble-fg: #fafafa;
+  --assistant-bubble: transparent;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Clean scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Message prose */
+.prose-nexa {
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+.prose-nexa p {
+  margin-bottom: 0.75em;
+}
+.prose-nexa ul, .prose-nexa ol {
+  margin: 0.5em 0 0.75em 1.25em;
+}
+.prose-nexa li {
+  margin-bottom: 0.25em;
+}
+.prose-nexa strong {
+  font-weight: 600;
+}
