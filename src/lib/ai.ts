@@ -15,6 +15,8 @@ export interface AIRequest {
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 type Provider = "groq" | "gemini" | "openai" | "anthropic" | "openrouter" | "ollama";
 
+export const NO_CLOUD_PROVIDER = "NO_CLOUD_PROVIDER";
+
 const defaultModels: Record<Provider, string> = {
   groq: "llama-3.3-70b-versatile",
   gemini: "gemini-2.0-flash",
@@ -57,6 +59,12 @@ function configuredProvider(): { provider: Provider; apiKey?: string; model: str
   const apiKey = process.env[`${provider.toUpperCase()}_API_KEY`];
   if (provider !== "ollama" && !apiKey) return null;
   return { provider, apiKey, model: process.env.NEXA_AI_MODEL || defaultModels[provider] };
+}
+
+export function hasCloudProvider(): boolean {
+  return ["groq", "gemini", "openai", "anthropic", "openrouter"].some(
+    (provider) => Boolean(process.env[`${provider.toUpperCase()}_API_KEY`])
+  );
 }
 
 async function readResponse(response: Response): Promise<Record<string, unknown>> {
@@ -114,10 +122,21 @@ export async function callNexaIntelligence(request: AIRequest): Promise<string> 
     try {
       const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
       if (response.ok) return hideProviderNames(String((await response.json()).content || ""));
+      if (response.status !== 503) throw new Error("Nexa Intelligence is unavailable");
     } catch {
-      // Keep chat usable when the server is unavailable.
+      // The browser engine below keeps chat usable when the server is unavailable.
+    }
+    try {
+      const { generateBrowserResponse } = await import("./browser-ai/chat-engine");
+      return hideProviderNames(await generateBrowserResponse({ systemPrompt, messages }));
+    } catch (error) {
+      console.error("Nexa Intelligence browser engine failed:", error);
     }
     return generateContextAwareResponse(request);
+  }
+
+  if (!hasCloudProvider() && !configuredProvider()?.provider.includes("ollama")) {
+    throw new Error(NO_CLOUD_PROVIDER);
   }
 
   try {

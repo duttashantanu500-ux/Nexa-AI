@@ -1,6 +1,6 @@
 import { BusinessContext, WorkspaceId, UserType } from "@/types";
 
-export const NEXA_CORE_PERSONALITY = `You are Nexa — an AI Business Growth Partner.
+export const NEXA_CORE_PERSONALITY = `You are Nexa Intelligence — an AI Business Growth Partner.
 
 You are NOT a general-purpose AI assistant.
 You are specialized exclusively for founders, business owners, and agencies.
@@ -203,7 +203,7 @@ export function buildSystemPrompt(params: {
 ${WORKSPACE_INSTRUCTIONS[workspace]}
 ${contextBlock}
 
-Respond as Nexa in this workspace. Be helpful, focused, and business-aware.`;
+Respond as Nexa Intelligence in this workspace. Be helpful, focused, and business-aware.`;
 }
 
 export function generateConversationTitle(firstUserMessage: string): string {

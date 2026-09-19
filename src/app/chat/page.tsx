@@ -285,7 +285,7 @@ export default function ChatPage() {
   if (!state || !state.user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-muted text-sm">Loading Nexa…</p>
+        <p className="text-muted text-sm">Loading Nexa Intelligence…</p>
       </div>
     );
   }
@@ -322,7 +322,7 @@ export default function ChatPage() {
         <div className="md:hidden fixed inset-0 z-50 flex">
           <div className="w-72 max-w-[85vw] bg-sidebar border-r border-sidebar-border flex flex-col">
             <div className="flex items-center justify-between p-3 border-b border-sidebar-border">
-              <span className="font-semibold">Nexa</span>
+              <span className="font-semibold">Nexa Intelligence</span>
               <button onClick={() => setMobileSidebar(false)}>
                 <X className="w-5 h-5" />
               </button>
@@ -480,7 +480,7 @@ export default function ChatPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={`Message Nexa in ${WORKSPACES.find((w) => w.id === state.currentWorkspace)?.name}…`}
+                placeholder={`Message Nexa Intelligence in ${WORKSPACES.find((w) => w.id === state.currentWorkspace)?.name}…`}
                 rows={1}
                 className="flex-1 resize-none bg-transparent text-sm outline-none max-h-40 py-2.5 placeholder:text-muted"
                 style={{ minHeight: "42px" }}
@@ -495,7 +495,7 @@ export default function ChatPage() {
               </button>
             </div>
             <p className="text-[11px] text-muted text-center mt-2">
-              Nexa is focused on business growth for founders, owners & agencies.
+              Nexa Intelligence is focused on business growth for founders, owners & agencies.
             </p>
           </div>
         </div>
@@ -525,7 +525,7 @@ function SidebarContent({
     <>
       <div className="p-3">
         <div className="flex items-center gap-2 px-2 mb-4">
-          <span className="font-semibold text-lg tracking-tight">Nexa</span>
+          <span className="font-semibold text-lg tracking-tight">Nexa Intelligence</span>
         </div>
 
         <button
