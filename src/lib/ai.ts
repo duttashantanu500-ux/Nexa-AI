@@ -28,7 +28,7 @@ const defaultModels: Record<Provider, string> = {
 
 const providerNames = /\b(groq|gemini|openai|anthropic|openrouter|ollama|llama(?:[-\s\d.]|\w)*|gpt(?:[-\s\d.]|\w)*|claude(?:[-\s\d.]|\w)*)\b/gi;
 
-function hideProviderNames(text: string): string {
+export function hideProviderNames(text: string): string {
   return text.replace(providerNames, "Nexa Intelligence");
 }
 

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { callNexaIntelligence, hasCloudProvider, NO_CLOUD_PROVIDER } from "@/lib/ai";
 import type { AIRequest } from "@/lib/ai";
 
+export const runtime = "nodejs";
+
 export async function POST(request: Request) {
   try {
     if (!hasCloudProvider() && !process.env.OLLAMA_BASE_URL) {

@@ -10,8 +10,8 @@ import {
   createId,
   getRelevantMemories,
 } from "@/lib/storage";
-import { callNexaIntelligence, fetchWebsiteContent } from "@/lib/ai";
-import { generateConversationTitle } from "@/lib/prompts";
+import { fetchWebsiteContent, hideProviderNames } from "@/lib/ai";
+import { buildSystemPrompt, generateConversationTitle } from "@/lib/prompts";
 import {
   AppState,
   Conversation,
@@ -113,8 +113,15 @@ export default function ChatPage() {
   };
 
   const switchWorkspace = (ws: WorkspaceId) => {
-    persistState({ currentWorkspace: ws });
-    // Do not auto-create or auto-greet
+    const nextConversation = state?.conversations.find(
+      (conversation) => conversation.workspace === ws
+    );
+    persistState({
+      currentWorkspace: ws,
+      currentConversationId: nextConversation?.id || null,
+    });
+    setMessages(nextConversation ? loadMessages(nextConversation.id) : []);
+    setMobileSidebar(false);
   };
 
   const handleSend = async () => {
@@ -208,7 +215,7 @@ export default function ChatPage() {
         websiteContent = await fetchWebsiteContent(urlMatch[0]);
       }
 
-      const responseText = await callNexaIntelligence({
+      const aiRequest = {
         workspace: state.currentWorkspace,
         userType: state.user.userType,
         businessContext: state.businessContext,
@@ -217,7 +224,34 @@ export default function ChatPage() {
         userName: state.user.name,
         websiteContent,
         imageDataUrl: currentImage?.dataUrl,
-      });
+      };
+
+      let responseText: string;
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(aiRequest),
+        });
+        if (!response.ok) throw new Error("Nexa Intelligence API unavailable");
+        const data = (await response.json()) as { content?: string };
+        if (!data.content) throw new Error("Nexa Intelligence returned no content");
+        responseText = data.content;
+      } catch (error) {
+        console.error("Nexa Intelligence API request failed:", error);
+        const { generateBrowserResponse } = await import("@/lib/browser-ai/chat-engine");
+        const systemPrompt = buildSystemPrompt({
+          workspace: aiRequest.workspace,
+          userType: aiRequest.userType,
+          businessContext: aiRequest.businessContext,
+          memories: aiRequest.memories,
+          userName: aiRequest.userName,
+        });
+        responseText = hideProviderNames(await generateBrowserResponse({
+          systemPrompt,
+          messages: recent.map((message) => ({ ...message })),
+        }));
+      }
 
       // Final dedup check
       const currentMsgs = loadMessages(conversationId);
