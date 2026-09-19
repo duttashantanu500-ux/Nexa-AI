@@ -10,8 +10,8 @@ import {
   createId,
   getRelevantMemories,
 } from "@/lib/storage";
-import { fetchWebsiteContent, hideProviderNames } from "@/lib/ai";
-import { buildSystemPrompt, generateConversationTitle } from "@/lib/prompts";
+import { fetchWebsiteContent } from "@/lib/ai";
+import { generateConversationTitle } from "@/lib/prompts";
 import {
   AppState,
   Conversation,
@@ -113,15 +113,21 @@ export default function ChatPage() {
   };
 
   const switchWorkspace = (ws: WorkspaceId) => {
-    const nextConversation = state?.conversations.find(
-      (conversation) => conversation.workspace === ws
+    // When switching workspace, clear the current conversation
+    // so we don't show a conversation from another workspace
+    const currentConv = state?.conversations.find(
+      (c) => c.id === state.currentConversationId
     );
-    persistState({
-      currentWorkspace: ws,
-      currentConversationId: nextConversation?.id || null,
-    });
-    setMessages(nextConversation ? loadMessages(nextConversation.id) : []);
-    setMobileSidebar(false);
+
+    if (currentConv && currentConv.workspace !== ws) {
+      persistState({
+        currentWorkspace: ws,
+        currentConversationId: null,
+      });
+      setMessages([]);
+    } else {
+      persistState({ currentWorkspace: ws });
+    }
   };
 
   const handleSend = async () => {
@@ -215,42 +221,52 @@ export default function ChatPage() {
         websiteContent = await fetchWebsiteContent(urlMatch[0]);
       }
 
-      const aiRequest = {
-        workspace: state.currentWorkspace,
-        userType: state.user.userType,
-        businessContext: state.businessContext,
-        memories: relevantMemories,
-        recentMessages: recent,
-        userName: state.user.name,
-        websiteContent,
-        imageDataUrl: currentImage?.dataUrl,
-      };
-
-      let responseText: string;
+      // Call server API (so environment variables / API keys work)
+      let responseText = "";
       try {
-        const response = await fetch("/api/chat", {
+        const apiRes = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(aiRequest),
+          body: JSON.stringify({
+            workspace: state.currentWorkspace,
+            userType: state.user.userType,
+            businessContext: state.businessContext,
+            memories: relevantMemories,
+            recentMessages: recent,
+            userName: state.user.name,
+            websiteContent,
+            imageDataUrl: currentImage?.dataUrl,
+          }),
         });
-        if (!response.ok) throw new Error("Nexa Intelligence API unavailable");
-        const data = (await response.json()) as { content?: string };
-        if (!data.content) throw new Error("Nexa Intelligence returned no content");
-        responseText = data.content;
-      } catch (error) {
-        console.error("Nexa Intelligence API request failed:", error);
-        const { generateBrowserResponse } = await import("@/lib/browser-ai/chat-engine");
-        const systemPrompt = buildSystemPrompt({
-          workspace: aiRequest.workspace,
-          userType: aiRequest.userType,
-          businessContext: aiRequest.businessContext,
-          memories: aiRequest.memories,
-          userName: aiRequest.userName,
-        });
-        responseText = hideProviderNames(await generateBrowserResponse({
-          systemPrompt,
-          messages: recent.map((message) => ({ ...message })),
-        }));
+
+        const apiData = await apiRes.json();
+
+        if (!apiRes.ok) {
+          throw new Error(apiData.error || "Failed to get response");
+        }
+
+        responseText = apiData.content || "";
+
+        // If server signals browser engine, use client-side model
+        if (responseText === "__USE_BROWSER_ENGINE__") {
+          try {
+            const { NexaBrowserAI } = await import("@/lib/browser-ai/chat-engine.js");
+            if (!(window as any).__nexaBrowserAI) {
+              (window as any).__nexaBrowserAI = new NexaBrowserAI({
+                systemPrompt: "You are Nexa, an AI Business Growth Partner for founders, business owners and agencies. Be practical and focused on business growth.",
+              });
+              await (window as any).__nexaBrowserAI.loadModel();
+            }
+            const browserAI = (window as any).__nexaBrowserAI;
+            responseText = await browserAI.sendMessage(userMessage.content);
+          } catch (browserErr) {
+            console.error("Browser engine failed:", browserErr);
+            responseText = "I'm currently unable to generate a response. Please check that your API key is correctly set in Vercel environment variables, then redeploy.";
+          }
+        }
+      } catch (err) {
+        console.error("Chat API error:", err);
+        responseText = "Sorry, I couldn't generate a response right now. Please try again.";
       }
 
       // Final dedup check
@@ -319,7 +335,7 @@ export default function ChatPage() {
   if (!state || !state.user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-muted text-sm">Loading Nexa Intelligence…</p>
+        <p className="text-muted text-sm">Loading Nexa…</p>
       </div>
     );
   }
@@ -356,7 +372,7 @@ export default function ChatPage() {
         <div className="md:hidden fixed inset-0 z-50 flex">
           <div className="w-72 max-w-[85vw] bg-sidebar border-r border-sidebar-border flex flex-col">
             <div className="flex items-center justify-between p-3 border-b border-sidebar-border">
-              <span className="font-semibold">Nexa Intelligence</span>
+              <span className="font-semibold">Nexa</span>
               <button onClick={() => setMobileSidebar(false)}>
                 <X className="w-5 h-5" />
               </button>
@@ -514,7 +530,7 @@ export default function ChatPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={`Message Nexa Intelligence in ${WORKSPACES.find((w) => w.id === state.currentWorkspace)?.name}…`}
+                placeholder={`Message Nexa in ${WORKSPACES.find((w) => w.id === state.currentWorkspace)?.name}…`}
                 rows={1}
                 className="flex-1 resize-none bg-transparent text-sm outline-none max-h-40 py-2.5 placeholder:text-muted"
                 style={{ minHeight: "42px" }}
@@ -529,7 +545,7 @@ export default function ChatPage() {
               </button>
             </div>
             <p className="text-[11px] text-muted text-center mt-2">
-              Nexa Intelligence is focused on business growth for founders, owners & agencies.
+              Nexa is focused on business growth for founders, owners & agencies.
             </p>
           </div>
         </div>
@@ -559,7 +575,7 @@ function SidebarContent({
     <>
       <div className="p-3">
         <div className="flex items-center gap-2 px-2 mb-4">
-          <span className="font-semibold text-lg tracking-tight">Nexa Intelligence</span>
+          <span className="font-semibold text-lg tracking-tight">Nexa</span>
         </div>
 
         <button

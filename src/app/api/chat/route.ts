@@ -1,19 +1,45 @@
-import { NextResponse } from "next/server";
-import { callNexaIntelligence, hasCloudProvider, NO_CLOUD_PROVIDER } from "@/lib/ai";
-import type { AIRequest } from "@/lib/ai";
+import { NextRequest, NextResponse } from "next/server";
+import { callNexaIntelligence } from "@/lib/ai";
 
-export const runtime = "nodejs";
-
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    if (!hasCloudProvider() && !process.env.OLLAMA_BASE_URL) {
-      return NextResponse.json({ error: NO_CLOUD_PROVIDER }, { status: 503 });
+    const body = await req.json();
+
+    const {
+      workspace,
+      userType,
+      businessContext,
+      memories,
+      recentMessages,
+      userName,
+      websiteContent,
+      imageDataUrl,
+    } = body;
+
+    if (!workspace || !userType) {
+      return NextResponse.json(
+        { error: "Missing required fields" },
+        { status: 400 }
+      );
     }
-    const body = (await request.json()) as AIRequest;
-    const content = await callNexaIntelligence(body);
-    return NextResponse.json({ content });
-  } catch (error) {
-    console.error("Nexa Intelligence API error:", error);
-    return NextResponse.json({ error: "Unable to generate a response" }, { status: 500 });
+
+    const response = await callNexaIntelligence({
+      workspace,
+      userType,
+      businessContext: businessContext || null,
+      memories: memories || [],
+      recentMessages: recentMessages || [],
+      userName,
+      websiteContent,
+      imageDataUrl,
+    });
+
+    return NextResponse.json({ content: response });
+  } catch (err: any) {
+    console.error("[Nexa Chat API] Error:", err);
+    return NextResponse.json(
+      { error: err?.message || "Failed to generate response" },
+      { status: 500 }
+    );
   }
 }
