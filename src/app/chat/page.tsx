@@ -31,6 +31,22 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+}
+
 export default function ChatPage() {
   const router = useRouter();
   const [state, setState] = useState<AppState | null>(null);
@@ -55,9 +71,7 @@ export default function ChatPage() {
       return;
     }
     setState(s);
-    if (s.currentConversationId) {
-      setMessages(loadMessages(s.currentConversationId));
-    }
+    if (s.currentConversationId) setMessages(loadMessages(s.currentConversationId));
   }, [router]);
 
   useEffect(() => {
@@ -73,13 +87,12 @@ export default function ChatPage() {
     });
   }, []);
 
-  const createNewConversation = (workspace?: WorkspaceId) => {
+  const createNewConversation = () => {
     if (!state?.user) return;
-    const ws = workspace || state.currentWorkspace;
     const conv: Conversation = {
       id: createId(),
       userId: state.user.id,
-      workspace: ws,
+      workspace: state.currentWorkspace,
       title: "New conversation",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -88,7 +101,6 @@ export default function ChatPage() {
     persistState({
       conversations: [conv, ...state.conversations],
       currentConversationId: conv.id,
-      currentWorkspace: ws,
     });
     setMessages([]);
     setMobileSidebar(false);
@@ -194,7 +206,7 @@ export default function ChatPage() {
       const urlMatch = userMessage.content.match(/https?:\/\/[^\s)]+/i);
       if (urlMatch) {
         try {
-          websiteContent = await fetchWebsiteContent(urlMatch[0]);
+          websiteContent = await withTimeout(fetchWebsiteContent(urlMatch[0]), 8000);
         } catch {
           websiteContent = undefined;
         }
@@ -202,20 +214,23 @@ export default function ChatPage() {
 
       let responseText = "";
       try {
-        const apiRes = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            workspace: state.currentWorkspace,
-            userType: state.user.userType,
-            businessContext: state.businessContext,
-            memories: relevantMemories,
-            recentMessages: recent,
-            userName: state.user.name,
-            websiteContent,
-            imageDataUrl: currentImage?.dataUrl,
+        const apiRes = await withTimeout(
+          fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              workspace: state.currentWorkspace,
+              userType: state.user.userType,
+              businessContext: state.businessContext,
+              memories: relevantMemories,
+              recentMessages: recent,
+              userName: state.user.name,
+              websiteContent,
+              imageDataUrl: currentImage?.dataUrl,
+            }),
           }),
-        });
+          20000
+        );
 
         const apiData = await apiRes.json().catch(() => ({}));
         responseText = (apiData && apiData.content) || "";
@@ -240,11 +255,15 @@ export default function ChatPage() {
             const browserAI = (window as any).__nexaBrowserAI;
             let prompt = userMessage.content;
             if (websiteContent) prompt += "\n\nWebsite content to use:\n" + websiteContent.slice(0, 6000);
-            if (currentImage) prompt += "\n\nThe user attached an image. Give practical business feedback based on what they asked.";
-            responseText = await browserAI.sendMessage(prompt);
+            if (currentImage) {
+              prompt +=
+                "\n\nThe user attached an image. Give practical business feedback based on what they asked.";
+            }
+            responseText = await withTimeout(browserAI.sendMessage(prompt), 10000);
           } catch (browserErr) {
             console.error("Browser engine failed:", browserErr);
-            responseText = "I am having a short connection issue right now. Please try that again in a moment.";
+            responseText =
+              "I could not finish that reply just now. Please try again in a moment.";
           }
         }
 
@@ -254,11 +273,13 @@ export default function ChatPage() {
           /could not reach any AI provider/i.test(responseText) ||
           /GROQ_API_KEY|GEMINI_API_KEY|OPENAI_API_KEY/i.test(responseText)
         ) {
-          responseText = "I am having a short connection issue right now. Please try that again in a moment.";
+          responseText =
+            "I could not finish that reply just now. Please try again in a moment.";
         }
       } catch (err) {
         console.error("Chat API error:", err);
-        responseText = "I am having a short connection issue right now. Please try that again in a moment.";
+        responseText =
+          "I could not finish that reply just now. Please try again in a moment.";
       }
 
       const currentMsgs = loadMessages(conversationId);
@@ -280,7 +301,11 @@ export default function ChatPage() {
         saveMessages(conversationId, finalMessages);
         const conversations = (state.conversations || []).map((c) =>
           c.id === conversationId
-            ? { ...c, updatedAt: new Date().toISOString(), messageCount: finalMessages.length }
+            ? {
+                ...c,
+                updatedAt: new Date().toISOString(),
+                messageCount: finalMessages.length,
+              }
             : c
         );
         persistState({ conversations });
@@ -291,7 +316,7 @@ export default function ChatPage() {
         id: createId(),
         conversationId,
         role: "assistant",
-        content: "I am having a short connection issue right now. Please try that again in a moment.",
+        content: "I could not finish that reply just now. Please try again in a moment.",
         createdAt: new Date().toISOString(),
         requestId,
       };
@@ -326,7 +351,7 @@ export default function ChatPage() {
     <div className="flex flex-col h-full">
       <div className="p-3 border-b border-sidebar-border">
         <button
-          onClick={() => createNewConversation()}
+          onClick={createNewConversation}
           className="w-full flex items-center gap-2 rounded-lg bg-accent text-background px-3 py-2 text-sm font-medium"
         >
           <Plus className="w-4 h-4" /> New chat
@@ -339,7 +364,9 @@ export default function ChatPage() {
             onClick={() => switchWorkspace(w.id)}
             className={cn(
               "text-xs px-2 py-1 rounded-md",
-              state.currentWorkspace === w.id ? "bg-accent/15 text-foreground" : "text-muted hover:bg-sidebar"
+              state.currentWorkspace === w.id
+                ? "bg-accent/15 text-foreground"
+                : "text-muted hover:bg-sidebar"
             )}
           >
             {w.emoji} {w.name}
@@ -439,7 +466,10 @@ export default function ChatPage() {
             )}
 
             {messages.map((m) => (
-              <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+              <div
+                key={m.id}
+                className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
+              >
                 <div
                   className={cn(
                     "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap",
@@ -474,7 +504,11 @@ export default function ChatPage() {
           <div className="max-w-3xl mx-auto">
             {pendingImage && (
               <div className="mb-2 flex items-center gap-2 rounded-lg border border-border bg-card p-2">
-                <img src={pendingImage.dataUrl} alt="preview" className="h-14 w-14 rounded object-cover" />
+                <img
+                  src={pendingImage.dataUrl}
+                  alt="preview"
+                  className="h-14 w-14 rounded object-cover"
+                />
                 <span className="text-xs text-muted truncate flex-1">{pendingImage.name}</span>
                 <button onClick={() => setPendingImage(null)} className="p-1">
                   <X className="w-4 h-4" />
@@ -509,7 +543,9 @@ export default function ChatPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={`Message Nexa in ${WORKSPACES.find((w) => w.id === state.currentWorkspace)?.name}…`}
+                placeholder={`Message Nexa in ${
+                  WORKSPACES.find((w) => w.id === state.currentWorkspace)?.name
+                }…`}
                 rows={1}
                 className="flex-1 resize-none bg-transparent text-sm outline-none max-h-40 py-2.5 placeholder:text-muted"
               />
