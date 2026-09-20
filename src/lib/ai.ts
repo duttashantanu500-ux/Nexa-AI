@@ -16,54 +16,14 @@ export interface AIRequest {
   websiteContent?: string;
 }
 
-type ProviderId = "groq" | "gemini" | "openai" | "openrouter" | "anthropic";
-
-interface ProviderConfig {
-  id: ProviderId;
-  baseUrl: string;
-  model: string;
-  apiKeyEnv: string;
-}
-
-const CLOUD_PROVIDERS: ProviderConfig[] = [
-  {
-    id: "groq",
-    baseUrl: "https://api.groq.com/openai/v1",
-    model: "llama-3.3-70b-versatile",
-    apiKeyEnv: "GROQ_API_KEY",
-  },
-  {
-    id: "gemini",
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-    model: "gemini-3.6-flash",
-    apiKeyEnv: "GEMINI_API_KEY",
-  },
-  {
-    id: "openai",
-    baseUrl: "https://api.openai.com/v1",
-    model: "gpt-4o-mini",
-    apiKeyEnv: "OPENAI_API_KEY",
-  },
-  {
-    id: "openrouter",
-    baseUrl: "https://openrouter.ai/api/v1",
-    model: "meta-llama/llama-3.3-70b-instruct",
-    apiKeyEnv: "OPENROUTER_API_KEY",
-  },
-];
+/** Signal for client to use free browser AI. Never show raw provider errors to users. */
+export const BROWSER_ENGINE_SIGNAL = "__USE_BROWSER_ENGINE__";
 
 function getApiKey(envName: string): string | null {
-  const raw =
-    process.env[envName] ||
-    process.env.NEXA_API_KEY ||
-    null;
+  const raw = process.env[envName] || null;
   if (!raw) return null;
   const cleaned = raw.trim();
   return cleaned.length > 0 ? cleaned : null;
-}
-
-export function getConfiguredProviders(): string[] {
-  return CLOUD_PROVIDERS.filter((p) => !!getApiKey(p.apiKeyEnv)).map((p) => p.id);
 }
 
 export async function callNexaIntelligence(
@@ -77,84 +37,90 @@ export async function callNexaIntelligence(
     userName: request.userName,
   });
 
-  const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
-    { role: "system", content: systemPrompt },
-    ...request.recentMessages.map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    })),
-  ];
+  const textMessages: { role: "system" | "user" | "assistant"; content: string }[] =
+    [
+      { role: "system", content: systemPrompt },
+      ...request.recentMessages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+    ];
 
-  if (request.websiteContent && messages.length > 1) {
-    const last = messages[messages.length - 1];
+  if (request.websiteContent && textMessages.length > 1) {
+    const last = textMessages[textMessages.length - 1];
     if (last.role === "user") {
-      last.content += `\n\n[Website content for analysis]\n${request.websiteContent.slice(0, 12000)}`;
+      last.content +=
+        `\n\nHere is the website content to analyze:\n` +
+        request.websiteContent.slice(0, 12000);
     }
   }
 
-  if (request.imageDataUrl && messages.length > 1) {
-    const last = messages[messages.length - 1];
-    if (last.role === "user") {
-      last.content += `\n\n[User attached an image. Analyze it in the context of the current workspace and business goals.]`;
-    }
-  }
+  const groqKey = getApiKey("GROQ_API_KEY");
+  const geminiKey = getApiKey("GEMINI_API_KEY");
 
-  const errors: string[] = [];
-  const configured = getConfiguredProviders();
-
-  if (configured.length === 0) {
-    return (
-      "No AI API keys were found on the server. " +
-      "In Vercel → Project → Settings → Environment Variables, add GROQ_API_KEY " +
-      "(recommended, free), GEMINI_API_KEY, or OPENAI_API_KEY for Production, then Redeploy."
-    );
-  }
-
-  for (const config of CLOUD_PROVIDERS) {
-    const apiKey = getApiKey(config.apiKeyEnv);
-    if (!apiKey) continue;
-
+  // Prefer Gemini when an image is attached (vision)
+  if (request.imageDataUrl && geminiKey) {
     try {
-      const result = await callOpenAICompatible(config, apiKey, messages);
-      if (result && result.trim()) return result;
-      errors.push(`${config.id}: empty response`);
-    } catch (err: any) {
-      const msg = err?.message || String(err);
-      console.error(`[Nexa] ${config.id} failed:`, msg);
-      errors.push(`${config.id}: ${msg}`);
+      const result = await callGeminiNative({
+        apiKey: geminiKey,
+        systemPrompt,
+        messages: textMessages.filter((m) => m.role !== "system"),
+        imageDataUrl: request.imageDataUrl,
+      });
+      if (result?.trim()) return result;
+    } catch (err) {
+      console.error("[Nexa] gemini vision failed:", err);
     }
   }
 
-  return (
-    "I could not reach any AI provider with the keys currently configured.\n\n" +
-    `Detected keys for: ${configured.join(", ")}.\n` +
-    `Details: ${errors.slice(0, 3).join(" | ")}\n\n` +
-    "Please verify each key is valid (no extra spaces) and has access to the model, then redeploy."
-  );
+  // Groq first for normal chat
+  if (groqKey) {
+    try {
+      const result = await callOpenAICompatible({
+        baseUrl: "https://api.groq.com/openai/v1",
+        model: "llama-3.3-70b-versatile",
+        apiKey: groqKey,
+        messages: textMessages,
+      });
+      if (result?.trim()) return result;
+    } catch (err) {
+      console.error("[Nexa] groq failed:", err);
+    }
+  }
+
+  // Gemini text fallback
+  if (geminiKey) {
+    try {
+      const result = await callGeminiNative({
+        apiKey: geminiKey,
+        systemPrompt,
+        messages: textMessages.filter((m) => m.role !== "system"),
+      });
+      if (result?.trim()) return result;
+    } catch (err) {
+      console.error("[Nexa] gemini failed:", err);
+    }
+  }
+
+  // Silent handoff to free browser engine on the client
+  return BROWSER_ENGINE_SIGNAL;
 }
 
-async function callOpenAICompatible(
-  config: ProviderConfig,
-  apiKey: string,
-  messages: { role: string; content: string }[]
-): Promise<string | null> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${apiKey}`,
-  };
-
-  if (config.id === "openrouter") {
-    headers["HTTP-Referer"] =
-      process.env.NEXT_PUBLIC_APP_URL || "https://nexa-ai-beryl-one.vercel.app";
-    headers["X-Title"] = "Nexa";
-  }
-
-  const res = await fetch(`${config.baseUrl}/chat/completions`, {
+async function callOpenAICompatible(params: {
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  messages: { role: string; content: string }[];
+}): Promise<string | null> {
+  const res = await fetch(`${params.baseUrl}/chat/completions`, {
     method: "POST",
-    headers,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${params.apiKey}`,
+    },
     body: JSON.stringify({
-      model: config.model,
-      messages,
+      model: params.model,
+      messages: params.messages,
       temperature: 0.65,
       max_tokens: 2048,
     }),
@@ -162,11 +128,87 @@ async function callOpenAICompatible(
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`${res.status} ${errText.slice(0, 280)}`);
+    throw new Error(`${res.status} ${errText.slice(0, 200)}`);
   }
 
   const data = await res.json();
   return data.choices?.[0]?.message?.content || null;
+}
+
+/** Gemini native generateContent — supports text + optional image */
+async function callGeminiNative(params: {
+  apiKey: string;
+  systemPrompt: string;
+  messages: { role: string; content: string }[];
+  imageDataUrl?: string;
+}): Promise<string | null> {
+  const model = "gemini-2.5-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${params.apiKey}`;
+
+  const contents = params.messages.map((m, index) => {
+    const isLast = index === params.messages.length - 1;
+    const parts: any[] = [{ text: m.content }];
+
+    if (isLast && params.imageDataUrl && m.role === "user") {
+      const match = params.imageDataUrl.match(
+        /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/
+      );
+      if (match) {
+        parts.push({
+          inline_data: {
+            mime_type: match[1],
+            data: match[2],
+          },
+        });
+        parts[0] = {
+          text:
+            m.content +
+            "\n\nPlease analyze the attached image in context of this business request.",
+        };
+      }
+    }
+
+    return {
+      role: m.role === "assistant" ? "model" : "user",
+      parts,
+    };
+  });
+
+  // Gemini requires alternating roles; merge consecutive same roles if needed
+  const merged: typeof contents = [];
+  for (const c of contents) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.role === c.role) {
+      prev.parts = [...prev.parts, ...c.parts];
+    } else {
+      merged.push(c);
+    }
+  }
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: params.systemPrompt }] },
+      contents: merged,
+      generationConfig: {
+        temperature: 0.65,
+        maxOutputTokens: 2048,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`${res.status} ${errText.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const text =
+    data.candidates?.[0]?.content?.parts
+      ?.map((p: any) => p.text || "")
+      .join("") || null;
+  return text;
 }
 
 export async function fetchWebsiteContent(url: string): Promise<string> {
@@ -178,10 +220,10 @@ export async function fetchWebsiteContent(url: string): Promise<string> {
     });
     const data = await res.json();
     if (!res.ok) {
-      return `Could not fetch the website (${data.error || res.status}). Please paste the relevant content instead.`;
+      return `Could not fetch that website right now. ${data.error || ""}`.trim();
     }
-    return data.content || "No readable content extracted from the page.";
+    return data.content || "No readable content was found on that page.";
   } catch {
-    return "Could not fetch the website. Please paste the relevant content instead.";
+    return "Could not fetch that website right now. You can paste the page text instead.";
   }
 }
