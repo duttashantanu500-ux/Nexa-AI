@@ -40,7 +40,6 @@ async function fetchWithTimeout(
   }
 }
 
-// Current free-tier friendly Gemini models (tried in order)
 const GEMINI_MODELS = [
   "gemini-3.8-flash",
   "gemini-3.6-flash",
@@ -50,6 +49,16 @@ const GEMINI_MODELS = [
 ];
 
 const GROQ_MODELS = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"];
+
+// DeepSeek: very cheap, scales to thousands of users
+const DEEPSEEK_MODELS = ["deepseek-chat", "deepseek-reasoner"];
+
+// OpenRouter: many models behind one key; good scale option
+const OPENROUTER_MODELS = [
+  "deepseek/deepseek-chat-v3-0324",
+  "google/gemini-2.5-flash",
+  "meta-llama/llama-3.3-70b-instruct",
+];
 
 export async function callNexaIntelligence(
   request: AIRequest
@@ -80,10 +89,16 @@ export async function callNexaIntelligence(
     }
   }
 
-  const geminiKey = getApiKey("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY");
+  const geminiKey = getApiKey(
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENERATIVE_AI_API_KEY"
+  );
   const groqKey = getApiKey("GROQ_API_KEY");
+  const deepseekKey = getApiKey("DEEPSEEK_API_KEY");
+  const openrouterKey = getApiKey("OPENROUTER_API_KEY");
 
-  // 1) Gemini first (free tier is strong and supports images)
+  // 1) Gemini (free tier + images)
   if (geminiKey) {
     for (const model of GEMINI_MODELS) {
       try {
@@ -101,7 +116,7 @@ export async function callNexaIntelligence(
     }
   }
 
-  // 2) Groq second
+  // 2) Groq (fast free/paid)
   if (groqKey) {
     for (const model of GROQ_MODELS) {
       try {
@@ -118,6 +133,46 @@ export async function callNexaIntelligence(
     }
   }
 
+  // 3) DeepSeek (cheap scale for thousands of users)
+  if (deepseekKey) {
+    for (const model of DEEPSEEK_MODELS) {
+      try {
+        const result = await callOpenAICompatible({
+          baseUrl: "https://api.deepseek.com",
+          model,
+          apiKey: deepseekKey,
+          messages: textMessages,
+        });
+        if (result?.trim()) return result;
+      } catch (err: any) {
+        console.error(`[Nexa] deepseek ${model}:`, err?.message || err);
+      }
+    }
+  }
+
+  // 4) OpenRouter (multi-model scale backup)
+  if (openrouterKey) {
+    for (const model of OPENROUTER_MODELS) {
+      try {
+        const result = await callOpenAICompatible({
+          baseUrl: "https://openrouter.ai/api/v1",
+          model,
+          apiKey: openrouterKey,
+          messages: textMessages,
+          extraHeaders: {
+            "HTTP-Referer":
+              process.env.NEXT_PUBLIC_APP_URL ||
+              "https://nexa-ai-beryl-one.vercel.app",
+            "X-Title": "Nexa",
+          },
+        });
+        if (result?.trim()) return result;
+      } catch (err: any) {
+        console.error(`[Nexa] openrouter ${model}:`, err?.message || err);
+      }
+    }
+  }
+
   return BROWSER_ENGINE_SIGNAL;
 }
 
@@ -126,12 +181,14 @@ async function callOpenAICompatible(params: {
   model: string;
   apiKey: string;
   messages: { role: string; content: string }[];
+  extraHeaders?: Record<string, string>;
 }): Promise<string | null> {
   const res = await fetchWithTimeout(`${params.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${params.apiKey}`,
+      ...(params.extraHeaders || {}),
     },
     body: JSON.stringify({
       model: params.model,
@@ -188,7 +245,6 @@ async function callGeminiNative(params: {
     };
   });
 
-  // Gemini needs alternating roles
   const merged: typeof contents = [];
   for (const c of contents) {
     const prev = merged[merged.length - 1];
@@ -199,7 +255,6 @@ async function callGeminiNative(params: {
     }
   }
 
-  // Must start with user
   if (merged.length && merged[0].role !== "user") {
     merged.unshift({ role: "user", parts: [{ text: "Continue." }] });
   }
