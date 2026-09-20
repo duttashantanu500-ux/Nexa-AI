@@ -16,81 +16,56 @@ export interface AIRequest {
   websiteContent?: string;
 }
 
-type ProviderId =
-  | "groq"
-  | "gemini"
-  | "openai"
-  | "anthropic"
-  | "openrouter"
-  | "browser"
-  | "auto";
+type ProviderId = "groq" | "gemini" | "openai" | "openrouter" | "anthropic";
 
 interface ProviderConfig {
   id: ProviderId;
-  baseUrl?: string;
-  model?: string;
-  apiKeyEnv?: string;
+  baseUrl: string;
+  model: string;
+  apiKeyEnv: string;
 }
 
-/**
- * Nexa Intelligence
- * -----------------
- * Users only ever see "Nexa Intelligence".
- * Supports:
- *  - Cloud providers (Groq, Gemini, OpenAI, Anthropic, OpenRouter)
- *  - Browser engine (Transformers.js – zero cost, unlimited)
- *
- * Priority is controlled by NEXA_PROVIDER env variable.
- */
-
-const CLOUD_PROVIDERS: Record<string, ProviderConfig> = {
-  groq: {
+const CLOUD_PROVIDERS: ProviderConfig[] = [
+  {
     id: "groq",
     baseUrl: "https://api.groq.com/openai/v1",
     model: "llama-3.3-70b-versatile",
     apiKeyEnv: "GROQ_API_KEY",
   },
-  gemini: {
+  {
     id: "gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     model: "gemini-2.0-flash",
     apiKeyEnv: "GEMINI_API_KEY",
   },
-  openai: {
+  {
     id: "openai",
     baseUrl: "https://api.openai.com/v1",
     model: "gpt-4o-mini",
     apiKeyEnv: "OPENAI_API_KEY",
   },
-  anthropic: {
-    id: "anthropic",
-    baseUrl: "https://api.anthropic.com/v1",
-    model: "claude-3-5-sonnet-latest",
-    apiKeyEnv: "ANTHROPIC_API_KEY",
-  },
-  openrouter: {
+  {
     id: "openrouter",
     baseUrl: "https://openrouter.ai/api/v1",
     model: "meta-llama/llama-3.3-70b-instruct",
     apiKeyEnv: "OPENROUTER_API_KEY",
   },
-};
+];
 
-function getPreferredProvider(): ProviderId {
-  const forced = (process.env.NEXA_PROVIDER || "auto").toLowerCase() as ProviderId;
-  if (forced && forced !== "auto") return forced;
-  return "auto";
+function getApiKey(envName: string): string | null {
+  const raw =
+    process.env[envName] ||
+    process.env.NEXA_API_KEY ||
+    null;
+  if (!raw) return null;
+  const cleaned = raw.trim();
+  return cleaned.length > 0 ? cleaned : null;
 }
 
-function getApiKey(envName?: string): string | null {
-  if (!envName) return null;
-  return process.env[envName] || process.env.NEXA_API_KEY || null;
+export function getConfiguredProviders(): string[] {
+  return CLOUD_PROVIDERS.filter((p) => !!getApiKey(p.apiKeyEnv)).map((p) => p.id);
 }
 
-/**
- * Main entry point used by the rest of the app.
- * Never exposes provider or model names.
- */
 export async function callNexaIntelligence(
   request: AIRequest
 ): Promise<string> {
@@ -110,7 +85,6 @@ export async function callNexaIntelligence(
     })),
   ];
 
-  // Attach extra context
   if (request.websiteContent && messages.length > 1) {
     const last = messages[messages.length - 1];
     if (last.role === "user") {
@@ -125,53 +99,53 @@ export async function callNexaIntelligence(
     }
   }
 
-  const preferred = getPreferredProvider();
+  const errors: string[] = [];
+  const configured = getConfiguredProviders();
 
-  // 1. Try cloud providers first (unless browser is forced)
-  if (preferred !== "browser") {
-    const order: ProviderId[] =
-      preferred === "auto"
-        ? ["groq", "gemini", "openai", "openrouter", "anthropic"]
-        : [preferred];
+  if (configured.length === 0) {
+    return (
+      "No AI API keys were found on the server. " +
+      "In Vercel → Project → Settings → Environment Variables, add GROQ_API_KEY " +
+      "(recommended, free), GEMINI_API_KEY, or OPENAI_API_KEY for Production, then Redeploy."
+    );
+  }
 
-    for (const id of order) {
-      const config = CLOUD_PROVIDERS[id];
-      if (!config) continue;
+  for (const config of CLOUD_PROVIDERS) {
+    const apiKey = getApiKey(config.apiKeyEnv);
+    if (!apiKey) continue;
 
-      const apiKey = getApiKey(config.apiKeyEnv);
-      if (!apiKey) continue;
-
-      try {
-        const result = await callCloudProvider(config, apiKey, messages);
-        if (result) return result;
-      } catch (err) {
-        console.error(`[Nexa] ${id} failed:`, err);
-      }
+    try {
+      const result = await callOpenAICompatible(config, apiKey, messages);
+      if (result && result.trim()) return result;
+      errors.push(`${config.id}: empty response`);
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      console.error(`[Nexa] ${config.id} failed:`, msg);
+      errors.push(`${config.id}: ${msg}`);
     }
   }
 
-  // 2. Browser engine fallback is handled on the client side.
-  //    Here we return a special signal so the client can use Transformers.js
-  //    (Because Transformers.js must run in the browser, not on the server)
-  return "__USE_BROWSER_ENGINE__";
+  return (
+    "I could not reach any AI provider with the keys currently configured.\n\n" +
+    `Detected keys for: ${configured.join(", ")}.\n` +
+    `Details: ${errors.slice(0, 3).join(" | ")}\n\n` +
+    "Please verify each key is valid (no extra spaces) and has access to the model, then redeploy."
+  );
 }
 
-async function callCloudProvider(
+async function callOpenAICompatible(
   config: ProviderConfig,
   apiKey: string,
   messages: { role: string; content: string }[]
 ): Promise<string | null> {
-  if (config.id === "anthropic") {
-    return callAnthropic(config, apiKey, messages);
-  }
-
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${apiKey}`,
   };
 
   if (config.id === "openrouter") {
-    headers["HTTP-Referer"] = process.env.NEXT_PUBLIC_APP_URL || "https://nexa.app";
+    headers["HTTP-Referer"] =
+      process.env.NEXT_PUBLIC_APP_URL || "https://nexa-ai-beryl-one.vercel.app";
     headers["X-Title"] = "Nexa";
   }
 
@@ -188,55 +162,13 @@ async function callCloudProvider(
 
   if (!res.ok) {
     const errText = await res.text();
-    console.error(`[Nexa] ${config.id} error:`, errText);
-    return null;
+    throw new Error(`${res.status} ${errText.slice(0, 280)}`);
   }
 
   const data = await res.json();
   return data.choices?.[0]?.message?.content || null;
 }
 
-async function callAnthropic(
-  config: ProviderConfig,
-  apiKey: string,
-  messages: { role: string; content: string }[]
-): Promise<string | null> {
-  const system = messages.find((m) => m.role === "system")?.content || "";
-  const chatMessages = messages
-    .filter((m) => m.role !== "system")
-    .map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    }));
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: config.model,
-      max_tokens: 2048,
-      system,
-      messages: chatMessages,
-    }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    console.error("[Nexa] Anthropic error:", errText);
-    return null;
-  }
-
-  const data = await res.json();
-  return data.content?.[0]?.text || null;
-}
-
-/**
- * Website content fetcher
- */
 export async function fetchWebsiteContent(url: string): Promise<string> {
   try {
     const res = await fetch("/api/fetch-website", {
