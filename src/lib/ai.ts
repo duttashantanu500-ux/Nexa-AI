@@ -16,7 +16,6 @@ export interface AIRequest {
   websiteContent?: string;
 }
 
-/** Signal for client to use free browser AI. Never show raw provider errors to users. */
 export const BROWSER_ENGINE_SIGNAL = "__USE_BROWSER_ENGINE__";
 
 function getApiKey(envName: string): string | null {
@@ -24,6 +23,20 @@ function getApiKey(envName: string): string | null {
   if (!raw) return null;
   const cleaned = raw.trim();
   return cleaned.length > 0 ? cleaned : null;
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  ms = 12000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function callNexaIntelligence(
@@ -58,51 +71,58 @@ export async function callNexaIntelligence(
   const groqKey = getApiKey("GROQ_API_KEY");
   const geminiKey = getApiKey("GEMINI_API_KEY");
 
-  // Prefer Gemini when an image is attached (vision)
+  // Vision: Gemini first when image is attached
   if (request.imageDataUrl && geminiKey) {
-    try {
-      const result = await callGeminiNative({
-        apiKey: geminiKey,
-        systemPrompt,
-        messages: textMessages.filter((m) => m.role !== "system"),
-        imageDataUrl: request.imageDataUrl,
-      });
-      if (result?.trim()) return result;
-    } catch (err) {
-      console.error("[Nexa] gemini vision failed:", err);
+    for (const model of ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"]) {
+      try {
+        const result = await callGeminiNative({
+          apiKey: geminiKey,
+          model,
+          systemPrompt,
+          messages: textMessages.filter((m) => m.role !== "system"),
+          imageDataUrl: request.imageDataUrl,
+        });
+        if (result?.trim()) return result;
+      } catch (err) {
+        console.error(`[Nexa] gemini vision ${model} failed:`, err);
+      }
     }
   }
 
-  // Groq first for normal chat
+  // Groq text (prefer fast free-tier friendly model)
   if (groqKey) {
-    try {
-      const result = await callOpenAICompatible({
-        baseUrl: "https://api.groq.com/openai/v1",
-        model: "llama-3.3-70b-versatile",
-        apiKey: groqKey,
-        messages: textMessages,
-      });
-      if (result?.trim()) return result;
-    } catch (err) {
-      console.error("[Nexa] groq failed:", err);
+    for (const model of ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]) {
+      try {
+        const result = await callOpenAICompatible({
+          baseUrl: "https://api.groq.com/openai/v1",
+          model,
+          apiKey: groqKey,
+          messages: textMessages,
+        });
+        if (result?.trim()) return result;
+      } catch (err) {
+        console.error(`[Nexa] groq ${model} failed:`, err);
+      }
     }
   }
 
   // Gemini text fallback
   if (geminiKey) {
-    try {
-      const result = await callGeminiNative({
-        apiKey: geminiKey,
-        systemPrompt,
-        messages: textMessages.filter((m) => m.role !== "system"),
-      });
-      if (result?.trim()) return result;
-    } catch (err) {
-      console.error("[Nexa] gemini failed:", err);
+    for (const model of ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"]) {
+      try {
+        const result = await callGeminiNative({
+          apiKey: geminiKey,
+          model,
+          systemPrompt,
+          messages: textMessages.filter((m) => m.role !== "system"),
+        });
+        if (result?.trim()) return result;
+      } catch (err) {
+        console.error(`[Nexa] gemini ${model} failed:`, err);
+      }
     }
   }
 
-  // Silent handoff to free browser engine on the client
   return BROWSER_ENGINE_SIGNAL;
 }
 
@@ -112,7 +132,7 @@ async function callOpenAICompatible(params: {
   apiKey: string;
   messages: { role: string; content: string }[];
 }): Promise<string | null> {
-  const res = await fetch(`${params.baseUrl}/chat/completions`, {
+  const res = await fetchWithTimeout(`${params.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -135,15 +155,14 @@ async function callOpenAICompatible(params: {
   return data.choices?.[0]?.message?.content || null;
 }
 
-/** Gemini native generateContent — supports text + optional image */
 async function callGeminiNative(params: {
   apiKey: string;
+  model: string;
   systemPrompt: string;
   messages: { role: string; content: string }[];
   imageDataUrl?: string;
 }): Promise<string | null> {
-  const model = "gemini-2.5-flash";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${params.apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${params.model}:generateContent?key=${params.apiKey}`;
 
   const contents = params.messages.map((m, index) => {
     const isLast = index === params.messages.length - 1;
@@ -174,7 +193,6 @@ async function callGeminiNative(params: {
     };
   });
 
-  // Gemini requires alternating roles; merge consecutive same roles if needed
   const merged: typeof contents = [];
   for (const c of contents) {
     const prev = merged[merged.length - 1];
@@ -185,7 +203,7 @@ async function callGeminiNative(params: {
     }
   }
 
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
