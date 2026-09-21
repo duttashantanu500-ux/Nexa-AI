@@ -208,7 +208,7 @@ export default function OnboardingPage() {
 
             {userType === "agency" && (
               <>
-                <Field label="Agency name" value={form.businessName || ""} onChange={(v) => update("agencyType", v)} />
+                <Field label="Agency name" value={form.businessName || ""} onChange={(v) => update("businessName", v)} />
                 <Field label="Agency type" value={form.agencyType || ""} onChange={(v) => update("agencyType", v)} placeholder="Marketing, Design, Development…" />
                 <Field label="Services" value={form.servicesOffered || ""} onChange={(v) => update("servicesOffered", v)} textarea />
                 <Field label="Industries served" value={form.industriesServed || ""} onChange={(v) => update("industriesServed", v)} />
