@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { loadAppState, saveAppState, addMemory } from "@/lib/storage";
+import { loadAppState, saveAppState, addMemory } from "@/lib/conversationStore";
 import { UserType, BusinessContext, UserProfile } from "@/types";
 
 const USER_TYPES: { id: UserType; label: string; emoji: string; desc: string }[] = [
@@ -17,6 +17,7 @@ export default function OnboardingPage() {
   const [userType, setUserType] = useState<UserType | null>(null);
   const [form, setForm] = useState<BusinessContext>({});
   const [loading, setLoading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [user, setUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
@@ -42,33 +43,59 @@ export default function OnboardingPage() {
     setStep("details");
   };
 
-  const handleFinish = () => {
+  const analyzeWebsiteIfProvided = async (): Promise<string | undefined> => {
+    const site = (form.website || "").trim();
+    if (!site) return undefined;
+    setAnalyzing(true);
+    try {
+      const res = await fetch("/api/analyze-website", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: site }),
+      });
+      const data = await res.json();
+      return data.summary || undefined;
+    } catch {
+      return undefined;
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleFinish = async () => {
     if (!userType || !user) return;
     setLoading(true);
 
-    // Build initial memories from onboarding
-    let memories = loadAppState().memories || [];
+    const websiteSummary = await analyzeWebsiteIfProvided();
+    const context: BusinessContext = {
+      ...form,
+      websiteSummary,
+    };
 
-    if (form.businessName) {
-      memories = addMemory(memories, `Business name: ${form.businessName}`, "business", 9, "onboarding");
+    let memories = loadAppState().memories || [];
+    if (context.businessName) {
+      memories = addMemory(memories, `Business name: ${context.businessName}`, "business", 9, "onboarding");
     }
-    if (form.industry) {
-      memories = addMemory(memories, `Industry: ${form.industry}${form.subIndustry ? ` / ${form.subIndustry}` : ""}`, "industry", 8, "onboarding");
+    if (context.industry) {
+      memories = addMemory(memories, `Industry: ${context.industry}`, "industry", 8, "onboarding");
     }
-    if (form.targetCustomer || form.targetCustomers) {
-      memories = addMemory(memories, `Target customer: ${form.targetCustomer || form.targetCustomers}`, "target_customer", 9, "onboarding");
+    if (context.targetCustomer || context.targetCustomers || context.targetClients) {
+      memories = addMemory(
+        memories,
+        `Target: ${context.targetCustomer || context.targetCustomers || context.targetClients}`,
+        "target_customer",
+        9,
+        "onboarding"
+      );
     }
-    if (form.mainGoal) {
-      memories = addMemory(memories, `Main goal: ${form.mainGoal}`, "goal", 9, "onboarding");
+    if (context.mainGoal) {
+      memories = addMemory(memories, `Main goal: ${context.mainGoal}`, "goal", 9, "onboarding");
     }
-    if (form.biggestChallenge) {
-      memories = addMemory(memories, `Biggest challenge: ${form.biggestChallenge}`, "challenge", 8, "onboarding");
+    if (context.whatBuilding) {
+      memories = addMemory(memories, `Building: ${context.whatBuilding}`, "product", 8, "onboarding");
     }
-    if (form.whatBuilding) {
-      memories = addMemory(memories, `Building: ${form.whatBuilding}`, "product", 8, "onboarding");
-    }
-    if (form.problemSolved) {
-      memories = addMemory(memories, `Problem solved: ${form.problemSolved}`, "value_prop", 8, "onboarding");
+    if (websiteSummary) {
+      memories = addMemory(memories, `Website summary: ${websiteSummary.slice(0, 280)}`, "website", 6, "onboarding");
     }
 
     const updatedUser: UserProfile = {
@@ -80,9 +107,11 @@ export default function OnboardingPage() {
 
     saveAppState({
       user: updatedUser,
-      businessContext: form,
+      businessContext: context,
       memories,
       currentWorkspace: "strategy",
+      currentConversationId: null,
+      conversations: [],
     });
 
     setLoading(false);
@@ -104,14 +133,13 @@ export default function OnboardingPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Welcome to Nexa</h1>
           <p className="text-muted text-sm">
             {step === "type"
-              ? "First, tell us who you are."
-              : "Help Nexa understand your business."}
+              ? "What are you building?"
+              : "A few details so Nexa can help you grow."}
           </p>
         </div>
 
         {step === "type" && (
           <div className="space-y-3">
-            <p className="text-sm font-medium text-center mb-4">What best describes you?</p>
             {USER_TYPES.map((t) => (
               <button
                 key={t.id}
@@ -125,11 +153,8 @@ export default function OnboardingPage() {
                 </div>
               </button>
             ))}
-
             <p className="text-xs text-muted text-center pt-4">
-              Nexa is currently built for founders, business owners and agencies.
-              <br />
-              Other professions are not supported at this time.
+              Nexa is built for founders, business owners and agencies.
             </p>
           </div>
         )}
@@ -140,25 +165,20 @@ export default function OnboardingPage() {
               onClick={() => setStep("type")}
               className="text-sm text-muted hover:text-foreground"
             >
-              ← Change type
+              ← Back
             </button>
 
-            {/* Common fields */}
-            <Field label="What should Nexa call you?" value={form.name || ""} onChange={(v) => update("name", v)} placeholder="Your first name" />
-            <Field label="Age (optional)" value={form.age || ""} onChange={(v) => update("age", v)} placeholder="e.g. 28" />
+            <Field label="Your name" value={form.name || ""} onChange={(v) => update("name", v)} placeholder="First name" />
 
             {userType === "founder" && (
               <>
-                <Field label="Startup / Business name" value={form.businessName || ""} onChange={(v) => update("businessName", v)} />
-                <Field label="Industry" value={form.industry || ""} onChange={(v) => update("industry", v)} placeholder="e.g. SaaS, Fintech, E-commerce" />
-                <Field label="Sub-industry (optional)" value={form.subIndustry || ""} onChange={(v) => update("subIndustry", v)} />
+                <Field label="Startup / business name" value={form.businessName || ""} onChange={(v) => update("businessName", v)} />
+                <Field label="Industry" value={form.industry || ""} onChange={(v) => update("industry", v)} placeholder="e.g. Fashion, SaaS, Health" />
                 <Field label="What are you building?" value={form.whatBuilding || ""} onChange={(v) => update("whatBuilding", v)} textarea />
-                <Field label="What problem does it solve?" value={form.problemSolved || ""} onChange={(v) => update("problemSolved", v)} textarea />
                 <Field label="Target customer" value={form.targetCustomer || ""} onChange={(v) => update("targetCustomer", v)} />
-                <Field label="Current stage" value={form.stage || ""} onChange={(v) => update("stage", v)} placeholder="Idea / MVP / Early revenue / Growth..." />
+                <Field label="Current stage" value={form.stage || ""} onChange={(v) => update("stage", v)} placeholder="Idea / MVP / Early revenue / Growth" />
+                <Field label="Main goal" value={form.mainGoal || ""} onChange={(v) => update("mainGoal", v)} textarea />
                 <Field label="Website (optional)" value={form.website || ""} onChange={(v) => update("website", v)} placeholder="https://" />
-                <Field label="Main business goal right now" value={form.mainGoal || ""} onChange={(v) => update("mainGoal", v)} textarea />
-                <Field label="Biggest current challenge" value={form.biggestChallenge || ""} onChange={(v) => update("biggestChallenge", v)} textarea />
               </>
             )}
 
@@ -166,38 +186,37 @@ export default function OnboardingPage() {
               <>
                 <Field label="Business name" value={form.businessName || ""} onChange={(v) => update("businessName", v)} />
                 <Field label="Industry" value={form.industry || ""} onChange={(v) => update("industry", v)} />
-                <Field label="Sub-industry (optional)" value={form.subIndustry || ""} onChange={(v) => update("subIndustry", v)} />
-                <Field label="Business type" value={form.businessType || ""} onChange={(v) => update("businessType", v)} placeholder="e.g. Retail, Service, Online store" />
-                <Field label="Products / Services" value={form.productsServices || ""} onChange={(v) => update("productsServices", v)} textarea />
+                <Field label="Business type" value={form.businessType || ""} onChange={(v) => update("businessType", v)} placeholder="Retail, Service, Online store…" />
+                <Field label="Products / services" value={form.productsServices || ""} onChange={(v) => update("productsServices", v)} textarea />
                 <Field label="Target customers" value={form.targetCustomers || ""} onChange={(v) => update("targetCustomers", v)} />
-                <Field label="Location / Market" value={form.location || ""} onChange={(v) => update("location", v)} />
-                <Field label="Website (optional)" value={form.website || ""} onChange={(v) => update("website", v)} />
-                <Field label="Main business goal" value={form.mainGoal || ""} onChange={(v) => update("mainGoal", v)} textarea />
-                <Field label="Biggest current challenge" value={form.biggestChallenge || ""} onChange={(v) => update("biggestChallenge", v)} textarea />
+                <Field label="Location / market" value={form.location || ""} onChange={(v) => update("location", v)} />
+                <Field label="Main goal" value={form.mainGoal || ""} onChange={(v) => update("mainGoal", v)} textarea />
+                <Field label="Website (optional)" value={form.website || ""} onChange={(v) => update("website", v)} placeholder="https://" />
               </>
             )}
 
             {userType === "agency" && (
               <>
                 <Field label="Agency name" value={form.businessName || ""} onChange={(v) => update("businessName", v)} />
-                <Field label="Agency type" value={form.agencyType || ""} onChange={(v) => update("agencyType", v)} placeholder="e.g. Marketing, Design, Development" />
-                <Field label="Industry / Focus" value={form.industry || ""} onChange={(v) => update("industry", v)} />
-                <Field label="Services offered" value={form.servicesOffered || ""} onChange={(v) => update("servicesOffered", v)} textarea />
-                <Field label="Industries you serve" value={form.industriesServed || ""} onChange={(v) => update("industriesServed", v)} />
+                <Field label="Agency type" value={form.agencyType || ""} onChange={(v) => update("agencyType", v)} placeholder="Marketing, Design, Development…" />
+                <Field label="Services" value={form.servicesOffered || ""} onChange={(v) => update("servicesOffered", v)} textarea />
+                <Field label="Industries served" value={form.industriesServed || ""} onChange={(v) => update("industriesServed", v)} />
                 <Field label="Target clients" value={form.targetClients || ""} onChange={(v) => update("targetClients", v)} />
-                <Field label="Location / Market" value={form.location || ""} onChange={(v) => update("location", v)} />
-                <Field label="Website (optional)" value={form.website || ""} onChange={(v) => update("website", v)} />
                 <Field label="Main growth goal" value={form.mainGoal || ""} onChange={(v) => update("mainGoal", v)} textarea />
-                <Field label="Biggest current challenge" value={form.biggestChallenge || ""} onChange={(v) => update("biggestChallenge", v)} textarea />
+                <Field label="Website (optional)" value={form.website || ""} onChange={(v) => update("website", v)} placeholder="https://" />
               </>
             )}
 
             <button
               onClick={handleFinish}
-              disabled={loading || !form.businessName}
+              disabled={loading || analyzing || !form.businessName}
               className="w-full rounded-lg bg-accent text-background py-3 text-sm font-medium hover:opacity-90 transition disabled:opacity-50 mt-4"
             >
-              {loading ? "Setting up Nexa…" : "Enter Nexa"}
+              {analyzing
+                ? "Reviewing website…"
+                : loading
+                  ? "Setting up Nexa…"
+                  : "Enter Nexa"}
             </button>
           </div>
         )}
