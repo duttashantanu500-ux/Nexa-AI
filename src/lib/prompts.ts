@@ -46,7 +46,7 @@ You receive:
 - User business context
 - Long term memory
 - Recent conversation
-- Any images or website content
+- Any images or website summary
 
 Use all of it intelligently.`;
 
@@ -121,8 +121,8 @@ export function buildSystemPrompt(params: {
     if (businessContext.problemSolved) {
       contextBlock += `Problem it solves: ${businessContext.problemSolved}\n`;
     }
-    if (businessContext.targetCustomer || businessContext.targetCustomers) {
-      contextBlock += `Target customer: ${businessContext.targetCustomer || businessContext.targetCustomers}\n`;
+    if (businessContext.targetCustomer || businessContext.targetCustomers || businessContext.targetClients) {
+      contextBlock += `Target: ${businessContext.targetCustomer || businessContext.targetCustomers || businessContext.targetClients}\n`;
     }
     if (businessContext.stage) {
       contextBlock += `Stage: ${businessContext.stage}\n`;
@@ -141,6 +141,9 @@ export function buildSystemPrompt(params: {
     }
     if (businessContext.website) {
       contextBlock += `Website: ${businessContext.website}\n`;
+    }
+    if (businessContext.websiteSummary) {
+      contextBlock += `Website summary: ${businessContext.websiteSummary.slice(0, 700)}\n`;
     }
     if (businessContext.location) {
       contextBlock += `Location / Market: ${businessContext.location}\n`;
@@ -165,7 +168,6 @@ Respond as Nexa in this workspace. Write like a real person. Keep punctuation li
 export function generateConversationTitle(firstUserMessage: string): string {
   const cleaned = firstUserMessage.trim().replace(/\s+/g, " ");
   if (cleaned.length <= 40) return cleaned;
-
   const words = cleaned.split(" ").slice(0, 6);
   let title = words.join(" ");
   if (cleaned.length > title.length) title += "...";
