@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { loadAppState, saveAppState } from "@/lib/storage";
+import {
+  isSupabaseConfigured,
+  signInWithEmail,
+  signInWithGoogle,
+} from "@/lib/auth";
+import { loadAppState } from "@/lib/conversationStore";
 import Link from "next/link";
 
 export default function LoginPage() {
@@ -11,12 +16,28 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const supabaseReady = isSupabaseConfigured();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
+    if (supabaseReady) {
+      const result = await signInWithEmail({ email, password });
+      if (result.error) {
+        setError(result.error);
+        setLoading(false);
+        return;
+      }
+      const state = loadAppState();
+      setLoading(false);
+      if (!state.user?.onboardingCompleted) router.push("/onboarding");
+      else router.push("/chat");
+      return;
+    }
+
+    // Local fallback
     const stored = localStorage.getItem("nexa_auth");
     if (!stored) {
       setError("No account found. Please sign up.");
@@ -32,11 +53,8 @@ export default function LoginPage() {
       ) {
         const state = loadAppState();
         if (state.user) {
-          if (!state.user.onboardingCompleted) {
-            router.push("/onboarding");
-          } else {
-            router.push("/chat");
-          }
+          if (!state.user.onboardingCompleted) router.push("/onboarding");
+          else router.push("/chat");
         } else {
           setError("Session data missing. Please sign up again.");
         }
@@ -46,8 +64,22 @@ export default function LoginPage() {
     } catch {
       setError("Something went wrong.");
     }
-
     setLoading(false);
+  };
+
+  const handleGoogle = async () => {
+    setError("");
+    setLoading(true);
+    if (!supabaseReady) {
+      setError("Add Supabase keys in Vercel to use Google sign-in.");
+      setLoading(false);
+      return;
+    }
+    const result = await signInWithGoogle();
+    if (result.error) {
+      setError(result.error);
+      setLoading(false);
+    }
   };
 
   return (
@@ -92,6 +124,24 @@ export default function LoginPage() {
             {loading ? "Signing in…" : "Log in"}
           </button>
         </form>
+
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-border" />
+          </div>
+          <div className="relative flex justify-center text-xs">
+            <span className="bg-background px-2 text-muted">or</span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleGoogle}
+          disabled={loading}
+          className="w-full rounded-lg border border-border bg-card py-2.5 text-sm font-medium hover:bg-sidebar transition disabled:opacity-50"
+        >
+          Continue with Google
+        </button>
 
         <p className="text-center text-sm text-muted">
           No account?{" "}
