@@ -17,29 +17,28 @@ export interface UserProfile {
 }
 
 export interface BusinessContext {
-  // Common
-  name?: string; // what Nexa should call them
-  age?: string;
+  name?: string;
   businessName?: string;
   industry?: string;
   subIndustry?: string;
   website?: string;
+  websiteSummary?: string;
   mainGoal?: string;
   biggestChallenge?: string;
 
-  // Founder specific
+  // Founder
   whatBuilding?: string;
   problemSolved?: string;
   targetCustomer?: string;
   stage?: string;
 
-  // Business Owner specific
+  // Business Owner
   businessType?: string;
   productsServices?: string;
   targetCustomers?: string;
   location?: string;
 
-  // Agency specific
+  // Agency
   agencyType?: string;
   servicesOffered?: string;
   industriesServed?: string;
@@ -49,11 +48,11 @@ export interface BusinessContext {
 export interface MemoryItem {
   id: string;
   content: string;
-  category: string; // e.g. "positioning", "target_customer", "goal", "brand_voice"
-  importance: number; // 1-10
+  category: string;
+  importance: number;
   createdAt: string;
   updatedAt: string;
-  source?: string; // conversation id or "onboarding"
+  source?: string;
 }
 
 export interface Message {
@@ -62,7 +61,8 @@ export interface Message {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt: string;
-  requestId?: string; // for deduplication
+  requestId?: string;
+  status?: "sending" | "complete" | "error";
   attachments?: Attachment[];
 }
 
@@ -70,7 +70,7 @@ export interface Attachment {
   id: string;
   type: "image" | "file";
   name: string;
-  url: string; // data URL or path
+  url: string;
   mimeType?: string;
 }
 
