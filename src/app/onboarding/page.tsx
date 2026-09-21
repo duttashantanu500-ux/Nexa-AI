@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { loadAppState, saveAppState, addMemory } from "@/lib/conversationStore";
+import { persistOnboardingCloud } from "@/lib/auth";
 import { UserType, BusinessContext, UserProfile } from "@/types";
 
 const USER_TYPES: { id: UserType; label: string; emoji: string; desc: string }[] = [
@@ -114,6 +115,16 @@ export default function OnboardingPage() {
       conversations: [],
     });
 
+    try {
+      await persistOnboardingCloud({
+        user: updatedUser,
+        businessContext: context,
+        memories,
+      });
+    } catch (err) {
+      console.error("[Nexa] cloud onboarding sync failed", err);
+    }
+
     setLoading(false);
     router.push("/chat");
   };
@@ -197,7 +208,7 @@ export default function OnboardingPage() {
 
             {userType === "agency" && (
               <>
-                <Field label="Agency name" value={form.businessName || ""} onChange={(v) => update("businessName", v)} />
+                <Field label="Agency name" value={form.businessName || ""} onChange={(v) => update("agencyType", v)} />
                 <Field label="Agency type" value={form.agencyType || ""} onChange={(v) => update("agencyType", v)} placeholder="Marketing, Design, Development…" />
                 <Field label="Services" value={form.servicesOffered || ""} onChange={(v) => update("servicesOffered", v)} textarea />
                 <Field label="Industries served" value={form.industriesServed || ""} onChange={(v) => update("industriesServed", v)} />
