@@ -8,13 +8,14 @@ import {
   loadMessages,
   saveMessages,
   createId,
+  createConversation,
   getRelevantMemories,
-} from "@/lib/storage";
-import { fetchWebsiteContent } from "@/lib/ai";
-import { generateConversationTitle } from "@/lib/prompts";
+  generateConversationTitle,
+  hasAssistantForRequest,
+  addMessage,
+} from "@/lib/conversationStore";
 import {
   AppState,
-  Conversation,
   Message,
   WorkspaceId,
   WORKSPACES,
@@ -53,6 +54,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [lastErrorRequestId, setLastErrorRequestId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [pendingImage, setPendingImage] = useState<{ dataUrl: string; name: string } | null>(null);
@@ -71,7 +73,9 @@ export default function ChatPage() {
       return;
     }
     setState(s);
-    if (s.currentConversationId) setMessages(loadMessages(s.currentConversationId));
+    if (s.currentConversationId) {
+      setMessages(loadMessages(s.currentConversationId));
+    }
   }, [router]);
 
   useEffect(() => {
@@ -89,20 +93,17 @@ export default function ChatPage() {
 
   const createNewConversation = () => {
     if (!state?.user) return;
-    const conv: Conversation = {
-      id: createId(),
+    const conv = createConversation({
       userId: state.user.id,
       workspace: state.currentWorkspace,
-      title: "New conversation",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      messageCount: 0,
-    };
+    });
     persistState({
-      conversations: [conv, ...state.conversations],
+      conversations: [conv, ...(state.conversations || []).filter((c) => c.id !== conv.id)],
       currentConversationId: conv.id,
+      currentWorkspace: state.currentWorkspace,
     });
     setMessages([]);
+    setLastErrorRequestId(null);
     setMobileSidebar(false);
   };
 
@@ -111,42 +112,146 @@ export default function ChatPage() {
     if (!conv) return;
     persistState({ currentConversationId: id, currentWorkspace: conv.workspace });
     setMessages(loadMessages(id));
+    setLastErrorRequestId(null);
     setMobileSidebar(false);
   };
 
   const switchWorkspace = (ws: WorkspaceId) => {
-    const currentConv = state?.conversations.find((c) => c.id === state.currentConversationId);
-    if (currentConv && currentConv.workspace !== ws) {
+    if (!state) return;
+    // Never mix workspaces — clear active chat when leaving its workspace
+    const currentConv = state.conversations.find((c) => c.id === state.currentConversationId);
+    if (!currentConv || currentConv.workspace !== ws) {
       persistState({ currentWorkspace: ws, currentConversationId: null });
       setMessages([]);
+      setLastErrorRequestId(null);
     } else {
       persistState({ currentWorkspace: ws });
     }
   };
 
+  const runGeneration = async (params: {
+    conversationId: string;
+    workspace: WorkspaceId;
+    requestId: string;
+    userContent: string;
+    imageDataUrl?: string;
+    history: Message[];
+  }) => {
+    if (!state?.user) return;
+
+    // Snapshot business context at start of request
+    const businessContext = state.businessContext;
+    const memories = getRelevantMemories(state.memories || []).map((m) => ({
+      content: m.content,
+      category: m.category,
+    }));
+
+    const recent = params.history
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .slice(-12)
+      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+
+    // Include stored website summary only (no live URL fetch from chat)
+    const websiteContent = businessContext?.websiteSummary || undefined;
+
+    let responseText = "";
+    let failed = false;
+
+    try {
+      const apiRes = await withTimeout(
+        fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            workspace: params.workspace,
+            userType: state.user.userType,
+            businessContext,
+            memories,
+            recentMessages: recent,
+            userName: state.user.name,
+            websiteContent,
+            imageDataUrl: params.imageDataUrl,
+          }),
+        }),
+        25000
+      );
+
+      const apiData = await apiRes.json().catch(() => ({}));
+      responseText = (apiData && apiData.content) || "";
+
+      const looksBroken =
+        !responseText ||
+        responseText === "__USE_BROWSER_ENGINE__" ||
+        /could not reach any AI provider/i.test(responseText) ||
+        /Invalid API Key/i.test(responseText) ||
+        /GROQ_API_KEY|GEMINI_API_KEY|OPENAI_API_KEY|DEEPSEEK/i.test(responseText);
+
+      if (looksBroken || !apiRes.ok) {
+        failed = true;
+        responseText = "Something went wrong. Try again.";
+      }
+    } catch {
+      failed = true;
+      responseText = "Something went wrong. Try again.";
+    }
+
+    // Always write to the ORIGINAL conversation — never the currently selected one
+    if (!hasAssistantForRequest(params.conversationId, params.requestId)) {
+      const assistantMessage: Message = {
+        id: createId(),
+        conversationId: params.conversationId,
+        role: "assistant",
+        content: responseText,
+        createdAt: new Date().toISOString(),
+        requestId: params.requestId,
+        status: failed ? "error" : "complete",
+      };
+      const finalMessages = addMessage(params.conversationId, assistantMessage);
+
+      // Only update visible messages if user is still on this conversation
+      const latest = loadAppState();
+      if (latest.currentConversationId === params.conversationId) {
+        setMessages(finalMessages);
+        if (failed) setLastErrorRequestId(params.requestId);
+        else setLastErrorRequestId(null);
+      }
+
+      const conversations = (latest.conversations || []).map((c) =>
+        c.id === params.conversationId
+          ? {
+              ...c,
+              updatedAt: new Date().toISOString(),
+              messageCount: finalMessages.length,
+            }
+          : c
+      );
+      saveAppState({ conversations });
+      setState((prev) => (prev ? { ...prev, conversations } : prev));
+    }
+  };
+
   const handleSend = async () => {
     if ((!input.trim() && !pendingImage) || !state?.user || isGenerating) return;
+    if (requestInFlight.current) return;
 
+    // Capture workspace + conversation at send time
+    const workspaceAtSend = state.currentWorkspace;
     let conversationId = state.currentConversationId;
+
     if (!conversationId) {
-      const conv: Conversation = {
-        id: createId(),
+      const conv = createConversation({
         userId: state.user.id,
-        workspace: state.currentWorkspace,
-        title: "New conversation",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messageCount: 0,
-      };
+        workspace: workspaceAtSend,
+      });
       conversationId = conv.id;
       persistState({
-        conversations: [conv, ...state.conversations],
+        conversations: [conv, ...(state.conversations || [])],
         currentConversationId: conv.id,
+        currentWorkspace: workspaceAtSend,
       });
     }
 
     const requestId = createId();
-    if (requestInFlight.current) return;
     requestInFlight.current = requestId;
 
     const currentImage = pendingImage;
@@ -158,171 +263,87 @@ export default function ChatPage() {
       content: userContent,
       createdAt: new Date().toISOString(),
       requestId,
+      status: "complete",
       attachments: currentImage
-        ? [{ id: createId(), type: "image", name: currentImage.name, url: currentImage.dataUrl, mimeType: "image/*" }]
+        ? [
+            {
+              id: createId(),
+              type: "image",
+              name: currentImage.name,
+              url: currentImage.dataUrl,
+              mimeType: "image/*",
+            },
+          ]
         : undefined,
     };
 
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
+    const existing = loadMessages(conversationId);
+    const newMessages = [...existing, userMessage];
     saveMessages(conversationId, newMessages);
+    setMessages(newMessages);
     setInput("");
     setPendingImage(null);
     setIsGenerating(true);
+    setLastErrorRequestId(null);
 
-    if (messages.length === 0) {
+    // Auto-title once
+    if (existing.length === 0) {
       const title = generateConversationTitle(userMessage.content);
-      const conversations = state.conversations.map((c) =>
+      const conversations = (loadAppState().conversations || []).map((c) =>
         c.id === conversationId
           ? { ...c, title, updatedAt: new Date().toISOString(), messageCount: 1 }
           : c
       );
-      if (!state.conversations.find((c) => c.id === conversationId)) {
-        conversations.unshift({
-          id: conversationId,
-          userId: state.user.id,
-          workspace: state.currentWorkspace,
-          title,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          messageCount: 1,
-        });
-      }
-      persistState({ conversations });
+      saveAppState({ conversations });
+      setState((prev) => (prev ? { ...prev, conversations } : prev));
     }
 
     try {
-      const recent = newMessages
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .slice(-12)
-        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
-
-      const relevantMemories = getRelevantMemories(state.memories || []).map((m) => ({
-        content: m.content,
-        category: m.category,
-      }));
-
-      let websiteContent: string | undefined;
-      const urlMatch = userMessage.content.match(/https?:\/\/[^\s)]+/i);
-      if (urlMatch) {
-        try {
-          websiteContent = await withTimeout(fetchWebsiteContent(urlMatch[0]), 8000);
-        } catch {
-          websiteContent = undefined;
-        }
-      }
-
-      let responseText = "";
-      try {
-        const apiRes = await withTimeout(
-          fetch("/api/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              workspace: state.currentWorkspace,
-              userType: state.user.userType,
-              businessContext: state.businessContext,
-              memories: relevantMemories,
-              recentMessages: recent,
-              userName: state.user.name,
-              websiteContent,
-              imageDataUrl: currentImage?.dataUrl,
-            }),
-          }),
-          20000
-        );
-
-        const apiData = await apiRes.json().catch(() => ({}));
-        responseText = (apiData && apiData.content) || "";
-
-        const looksBroken =
-          !responseText ||
-          responseText === "__USE_BROWSER_ENGINE__" ||
-          /could not reach any AI provider/i.test(responseText) ||
-          /Invalid API Key/i.test(responseText) ||
-          /no credits remaining/i.test(responseText) ||
-          /GROQ_API_KEY|GEMINI_API_KEY|OPENAI_API_KEY/i.test(responseText);
-
-        if (looksBroken || !apiRes.ok) {
-          try {
-            const { NexaBrowserAI } = await import("@/lib/browser-ai/chat-engine.js");
-            if (!(window as any).__nexaBrowserAI) {
-              (window as any).__nexaBrowserAI = new NexaBrowserAI({
-                systemPrompt:
-                  "You are Nexa, a practical AI business growth partner for founders, business owners and agencies. Write in plain natural language. Keep punctuation light. Be useful and specific.",
-              });
-            }
-            const browserAI = (window as any).__nexaBrowserAI;
-            let prompt = userMessage.content;
-            if (websiteContent) prompt += "\n\nWebsite content to use:\n" + websiteContent.slice(0, 6000);
-            if (currentImage) {
-              prompt +=
-                "\n\nThe user attached an image. Give practical business feedback based on what they asked.";
-            }
-            responseText = await withTimeout(browserAI.sendMessage(prompt), 10000);
-          } catch (browserErr) {
-            console.error("Browser engine failed:", browserErr);
-            responseText =
-              "I could not finish that reply just now. Please try again in a moment.";
-          }
-        }
-
-        if (
-          !responseText ||
-          responseText === "__USE_BROWSER_ENGINE__" ||
-          /could not reach any AI provider/i.test(responseText) ||
-          /GROQ_API_KEY|GEMINI_API_KEY|OPENAI_API_KEY/i.test(responseText)
-        ) {
-          responseText =
-            "I could not finish that reply just now. Please try again in a moment.";
-        }
-      } catch (err) {
-        console.error("Chat API error:", err);
-        responseText =
-          "I could not finish that reply just now. Please try again in a moment.";
-      }
-
-      const currentMsgs = loadMessages(conversationId);
-      const alreadyHasResponse = currentMsgs.some(
-        (m) => m.role === "assistant" && m.requestId === requestId
-      );
-
-      if (!alreadyHasResponse) {
-        const assistantMessage: Message = {
-          id: createId(),
-          conversationId,
-          role: "assistant",
-          content: responseText,
-          createdAt: new Date().toISOString(),
-          requestId,
-        };
-        const finalMessages = [...currentMsgs, assistantMessage];
-        setMessages(finalMessages);
-        saveMessages(conversationId, finalMessages);
-        const conversations = (state.conversations || []).map((c) =>
-          c.id === conversationId
-            ? {
-                ...c,
-                updatedAt: new Date().toISOString(),
-                messageCount: finalMessages.length,
-              }
-            : c
-        );
-        persistState({ conversations });
-      }
-    } catch (err) {
-      console.error(err);
-      const errorMsg: Message = {
-        id: createId(),
+      await runGeneration({
         conversationId,
-        role: "assistant",
-        content: "I could not finish that reply just now. Please try again in a moment.",
-        createdAt: new Date().toISOString(),
+        workspace: workspaceAtSend,
         requestId,
-      };
-      const finalMessages = [...newMessages, errorMsg];
-      setMessages(finalMessages);
-      saveMessages(conversationId, finalMessages);
+        userContent,
+        imageDataUrl: currentImage?.dataUrl,
+        history: newMessages,
+      });
+    } finally {
+      setIsGenerating(false);
+      requestInFlight.current = null;
+    }
+  };
+
+  const handleRetry = async () => {
+    if (!state?.user || !state.currentConversationId || isGenerating) return;
+    const conversationId = state.currentConversationId;
+    const workspace = state.currentWorkspace;
+    const msgs = loadMessages(conversationId);
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+    if (!lastUser) return;
+
+    // Remove previous error assistant for same request if present
+    const cleaned = msgs.filter(
+      (m) =>
+        !(m.role === "assistant" && m.requestId === lastUser.requestId && m.status === "error")
+    );
+    saveMessages(conversationId, cleaned);
+    setMessages(cleaned);
+
+    const requestId = lastUser.requestId || createId();
+    if (requestInFlight.current) return;
+    requestInFlight.current = requestId;
+    setIsGenerating(true);
+    setLastErrorRequestId(null);
+
+    try {
+      await runGeneration({
+        conversationId,
+        workspace,
+        requestId,
+        userContent: lastUser.content,
+        imageDataUrl: lastUser.attachments?.find((a) => a.type === "image")?.url,
+        history: cleaned,
+      });
     } finally {
       setIsGenerating(false);
       requestInFlight.current = null;
@@ -345,7 +366,9 @@ export default function ChatPage() {
   }
 
   const currentConv = state.conversations.find((c) => c.id === state.currentConversationId);
-  const workspaceConvs = state.conversations.filter((c) => c.workspace === state.currentWorkspace);
+  const workspaceConvs = (state.conversations || []).filter(
+    (c) => c.workspace === state.currentWorkspace
+  );
 
   const Sidebar = (
     <div className="flex flex-col h-full">
@@ -387,6 +410,9 @@ export default function ChatPage() {
             <span className="truncate">{c.title}</span>
           </button>
         ))}
+        {workspaceConvs.length === 0 && (
+          <p className="text-xs text-muted px-2 py-3">No chats in this workspace yet.</p>
+        )}
       </div>
       <div className="p-2 border-t border-sidebar-border space-y-1">
         <button
@@ -496,6 +522,19 @@ export default function ChatPage() {
             {isGenerating && (
               <div className="text-sm text-muted animate-pulse px-1">Nexa is thinking…</div>
             )}
+
+            {!isGenerating && lastErrorRequestId && (
+              <div className="flex items-center gap-3 text-sm">
+                <span className="text-muted">Something went wrong.</span>
+                <button
+                  onClick={handleRetry}
+                  className="rounded-lg border border-border px-3 py-1.5 hover:bg-sidebar"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
             <div ref={messagesEndRef} />
           </div>
         </div>
@@ -504,11 +543,7 @@ export default function ChatPage() {
           <div className="max-w-3xl mx-auto">
             {pendingImage && (
               <div className="mb-2 flex items-center gap-2 rounded-lg border border-border bg-card p-2">
-                <img
-                  src={pendingImage.dataUrl}
-                  alt="preview"
-                  className="h-14 w-14 rounded object-cover"
-                />
+                <img src={pendingImage.dataUrl} alt="preview" className="h-14 w-14 rounded object-cover" />
                 <span className="text-xs text-muted truncate flex-1">{pendingImage.name}</span>
                 <button onClick={() => setPendingImage(null)} className="p-1">
                   <X className="w-4 h-4" />
@@ -558,7 +593,7 @@ export default function ChatPage() {
               </button>
             </div>
             <p className="text-[11px] text-muted text-center mt-2">
-              Nexa is focused on business growth for founders, owners and agencies.
+              Nexa — your AI business growth partner
             </p>
           </div>
         </div>
