@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createId, saveAppState } from "@/lib/storage";
+import {
+  isSupabaseConfigured,
+  signUpWithEmail,
+  signInWithGoogle,
+} from "@/lib/auth";
+import { createId, saveAppState } from "@/lib/conversationStore";
 import { UserProfile } from "@/types";
 import Link from "next/link";
 
@@ -13,8 +18,9 @@ export default function SignupPage() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const supabaseReady = isSupabaseConfigured();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
@@ -31,26 +37,50 @@ export default function SignupPage() {
       return;
     }
 
-    // Simple local auth for this version
+    if (supabaseReady) {
+      const result = await signUpWithEmail({ email, password, name });
+      if (result.error) {
+        setError(result.error);
+        setLoading(false);
+        return;
+      }
+      setLoading(false);
+      router.push("/onboarding");
+      return;
+    }
+
+    // Local fallback when Supabase env is not set
     const user: UserProfile = {
       id: createId(),
       email: email.toLowerCase().trim(),
       name: name.trim(),
-      userType: "founder", // temporary, set properly in onboarding
+      userType: "founder",
       createdAt: new Date().toISOString(),
       onboardingCompleted: false,
     };
-
-    // Store credentials lightly (demo only)
     localStorage.setItem(
       "nexa_auth",
       JSON.stringify({ email: user.email, password })
     );
-
     saveAppState({ user });
-
     setLoading(false);
     router.push("/onboarding");
+  };
+
+  const handleGoogle = async () => {
+    setError("");
+    setLoading(true);
+    if (!supabaseReady) {
+      setError("Add Supabase keys in Vercel to use Google sign-in.");
+      setLoading(false);
+      return;
+    }
+    const result = await signInWithGoogle();
+    if (result.error) {
+      setError(result.error);
+      setLoading(false);
+    }
+    // Redirect handled by OAuth
   };
 
   return (
@@ -58,9 +88,7 @@ export default function SignupPage() {
       <div className="w-full max-w-md space-y-8">
         <div className="text-center space-y-2">
           <h1 className="text-3xl font-semibold tracking-tight">Nexa</h1>
-          <p className="text-muted text-sm">
-            Your AI Business Growth Partner
-          </p>
+          <p className="text-muted text-sm">Your AI Business Growth Partner</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -98,9 +126,7 @@ export default function SignupPage() {
             />
           </div>
 
-          {error && (
-            <p className="text-sm text-red-500">{error}</p>
-          )}
+          {error && <p className="text-sm text-red-500">{error}</p>}
 
           <button
             type="submit"
@@ -110,6 +136,24 @@ export default function SignupPage() {
             {loading ? "Creating account…" : "Create account"}
           </button>
         </form>
+
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-border" />
+          </div>
+          <div className="relative flex justify-center text-xs">
+            <span className="bg-background px-2 text-muted">or</span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleGoogle}
+          disabled={loading}
+          className="w-full rounded-lg border border-border bg-card py-2.5 text-sm font-medium hover:bg-sidebar transition disabled:opacity-50"
+        >
+          Continue with Google
+        </button>
 
         <p className="text-center text-sm text-muted">
           Already have an account?{" "}
