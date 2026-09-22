@@ -14,6 +14,7 @@ import {
   hasAssistantForRequest,
   addMessage,
 } from "@/lib/conversationStore";
+import { WORKSPACE_EMPTY_STATE } from "@/lib/prompts";
 import {
   AppState,
   Message,
@@ -46,6 +47,13 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
       }
     );
   });
+}
+
+function displayTitle(title: string) {
+  if (!title || /^new conversation$/i.test(title) || /^new chat$/i.test(title)) {
+    return "Untitled";
+  }
+  return title;
 }
 
 export default function ChatPage() {
@@ -118,7 +126,6 @@ export default function ChatPage() {
 
   const switchWorkspace = (ws: WorkspaceId) => {
     if (!state) return;
-    // Never mix workspaces — clear active chat when leaving its workspace
     const currentConv = state.conversations.find((c) => c.id === state.currentConversationId);
     if (!currentConv || currentConv.workspace !== ws) {
       persistState({ currentWorkspace: ws, currentConversationId: null });
@@ -133,13 +140,11 @@ export default function ChatPage() {
     conversationId: string;
     workspace: WorkspaceId;
     requestId: string;
-    userContent: string;
     imageDataUrl?: string;
     history: Message[];
   }) => {
     if (!state?.user) return;
 
-    // Snapshot business context at start of request
     const businessContext = state.businessContext;
     const memories = getRelevantMemories(state.memories || []).map((m) => ({
       content: m.content,
@@ -151,7 +156,6 @@ export default function ChatPage() {
       .slice(-12)
       .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
-    // Include stored website summary only (no live URL fetch from chat)
     const websiteContent = businessContext?.websiteSummary || undefined;
 
     let responseText = "";
@@ -171,9 +175,10 @@ export default function ChatPage() {
             userName: state.user.name,
             websiteContent,
             imageDataUrl: params.imageDataUrl,
+            requestId: params.requestId,
           }),
         }),
-        25000
+        28000
       );
 
       const apiData = await apiRes.json().catch(() => ({}));
@@ -186,16 +191,16 @@ export default function ChatPage() {
         /Invalid API Key/i.test(responseText) ||
         /GROQ_API_KEY|GEMINI_API_KEY|OPENAI_API_KEY|DEEPSEEK/i.test(responseText);
 
-      if (looksBroken || !apiRes.ok) {
+      if (looksBroken || !apiRes.ok || apiData.success === false) {
         failed = true;
-        responseText = "Something went wrong. Try again.";
+        responseText = "Something went wrong while generating your response. Please try again.";
       }
     } catch {
       failed = true;
-      responseText = "Something went wrong. Try again.";
+      responseText = "Generation timed out. Please try again.";
     }
 
-    // Always write to the ORIGINAL conversation — never the currently selected one
+    // Ownership: only attach to original conversationId + requestId
     if (!hasAssistantForRequest(params.conversationId, params.requestId)) {
       const assistantMessage: Message = {
         id: createId(),
@@ -208,7 +213,6 @@ export default function ChatPage() {
       };
       const finalMessages = addMessage(params.conversationId, assistantMessage);
 
-      // Only update visible messages if user is still on this conversation
       const latest = loadAppState();
       if (latest.currentConversationId === params.conversationId) {
         setMessages(finalMessages);
@@ -234,7 +238,6 @@ export default function ChatPage() {
     if ((!input.trim() && !pendingImage) || !state?.user || isGenerating) return;
     if (requestInFlight.current) return;
 
-    // Capture workspace + conversation at send time
     const workspaceAtSend = state.currentWorkspace;
     let conversationId = state.currentConversationId;
 
@@ -286,7 +289,7 @@ export default function ChatPage() {
     setIsGenerating(true);
     setLastErrorRequestId(null);
 
-    // Auto-title once
+    // Auto-title once after first meaningful message
     if (existing.length === 0) {
       const title = generateConversationTitle(userMessage.content);
       const conversations = (loadAppState().conversations || []).map((c) =>
@@ -303,7 +306,6 @@ export default function ChatPage() {
         conversationId,
         workspace: workspaceAtSend,
         requestId,
-        userContent,
         imageDataUrl: currentImage?.dataUrl,
         history: newMessages,
       });
@@ -315,13 +317,15 @@ export default function ChatPage() {
 
   const handleRetry = async () => {
     if (!state?.user || !state.currentConversationId || isGenerating) return;
+    if (requestInFlight.current) return;
+
     const conversationId = state.currentConversationId;
     const workspace = state.currentWorkspace;
     const msgs = loadMessages(conversationId);
     const lastUser = [...msgs].reverse().find((m) => m.role === "user");
     if (!lastUser) return;
 
-    // Remove previous error assistant for same request if present
+    // Remove failed assistant replies for this user message
     const cleaned = msgs.filter(
       (m) =>
         !(m.role === "assistant" && m.requestId === lastUser.requestId && m.status === "error")
@@ -329,9 +333,16 @@ export default function ChatPage() {
     saveMessages(conversationId, cleaned);
     setMessages(cleaned);
 
-    const requestId = lastUser.requestId || createId();
-    if (requestInFlight.current) return;
-    requestInFlight.current = requestId;
+    // New attempt id, but keep association via same user message context
+    const attemptId = createId();
+    // Rewrite user message requestId so ownership tracks this attempt
+    const remapped = cleaned.map((m) =>
+      m.id === lastUser.id ? { ...m, requestId: attemptId } : m
+    );
+    saveMessages(conversationId, remapped);
+    setMessages(remapped);
+
+    requestInFlight.current = attemptId;
     setIsGenerating(true);
     setLastErrorRequestId(null);
 
@@ -339,10 +350,9 @@ export default function ChatPage() {
       await runGeneration({
         conversationId,
         workspace,
-        requestId,
-        userContent: lastUser.content,
+        requestId: attemptId,
         imageDataUrl: lastUser.attachments?.find((a) => a.type === "image")?.url,
-        history: cleaned,
+        history: remapped,
       });
     } finally {
       setIsGenerating(false);
@@ -366,9 +376,17 @@ export default function ChatPage() {
   }
 
   const currentConv = state.conversations.find((c) => c.id === state.currentConversationId);
-  const workspaceConvs = (state.conversations || []).filter(
-    (c) => c.workspace === state.currentWorkspace
-  );
+  const workspaceConvs = (state.conversations || [])
+    .filter((c) => c.workspace === state.currentWorkspace)
+    .filter((c) => {
+      if (c.id === state.currentConversationId) return true;
+      if ((c.messageCount || 0) > 0) return true;
+      if (c.title && !/^new conversation$/i.test(c.title)) return true;
+      return false;
+    });
+
+  const emptyPrompt =
+    WORKSPACE_EMPTY_STATE[state.currentWorkspace] || "What are you working on?";
 
   const Sidebar = (
     <div className="flex flex-col h-full">
@@ -407,7 +425,7 @@ export default function ChatPage() {
             )}
           >
             <MessageSquare className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{c.title}</span>
+            <span className="truncate">{displayTitle(c.title)}</span>
           </button>
         ))}
         {workspaceConvs.length === 0 && (
@@ -470,8 +488,8 @@ export default function ChatPage() {
               {WORKSPACES.find((w) => w.id === state.currentWorkspace)?.emoji}{" "}
               {WORKSPACES.find((w) => w.id === state.currentWorkspace)?.name}
             </div>
-            {currentConv && currentConv.title !== "New conversation" && (
-              <div className="text-xs text-muted truncate">{currentConv.title}</div>
+            {currentConv && (currentConv.messageCount > 0 || !/^new conversation$/i.test(currentConv.title)) && (
+              <div className="text-xs text-muted truncate">{displayTitle(currentConv.title)}</div>
             )}
           </div>
         </header>
@@ -481,13 +499,7 @@ export default function ChatPage() {
             {messages.length === 0 && !isGenerating && (
               <div className="text-center py-16 space-y-3">
                 <h1 className="text-xl font-semibold">Nexa</h1>
-                <p className="text-sm text-muted">
-                  Hi {state.user.name}
-                  {state.businessContext?.businessName
-                    ? ` · ${state.businessContext.businessName}`
-                    : ""}
-                  . What are you working on?
-                </p>
+                <p className="text-sm text-muted">{emptyPrompt}</p>
               </div>
             )}
 
