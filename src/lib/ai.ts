@@ -14,6 +14,16 @@ export interface AIRequest {
   userName?: string;
   imageDataUrl?: string;
   websiteContent?: string;
+  requestId?: string;
+}
+
+export interface AIResult {
+  success: boolean;
+  content: string;
+  provider?: string;
+  model?: string;
+  requestId?: string;
+  error?: string;
 }
 
 export const BROWSER_ENGINE_SIGNAL = "__USE_BROWSER_ENGINE__";
@@ -29,7 +39,7 @@ function getApiKey(...names: string[]): string | null {
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
-  ms = 15000
+  ms = 12000
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
@@ -40,29 +50,16 @@ async function fetchWithTimeout(
   }
 }
 
-const GEMINI_MODELS = [
-  "gemini-3.8-flash",
-  "gemini-3.6-flash",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-2.0-flash",
-];
-
-const GROQ_MODELS = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"];
-
-// DeepSeek: very cheap, scales to thousands of users
-const DEEPSEEK_MODELS = ["deepseek-chat", "deepseek-reasoner"];
-
-// OpenRouter: many models behind one key; good scale option
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"];
+const GROQ_MODELS = ["llama-3.1-8b-instant"];
+const DEEPSEEK_MODELS = ["deepseek-chat"];
 const OPENROUTER_MODELS = [
   "deepseek/deepseek-chat-v3-0324",
   "google/gemini-2.5-flash",
-  "meta-llama/llama-3.3-70b-instruct",
 ];
 
-export async function callNexaIntelligence(
-  request: AIRequest
-): Promise<string> {
+/** Main entry: Nexa Intelligence → AI Router → Provider */
+export async function generateNexaResponse(request: AIRequest): Promise<AIResult> {
   const systemPrompt = buildSystemPrompt({
     workspace: request.workspace,
     userType: request.userType,
@@ -84,8 +81,8 @@ export async function callNexaIntelligence(
     const last = textMessages[textMessages.length - 1];
     if (last.role === "user") {
       last.content +=
-        `\n\nHere is the website content to analyze:\n` +
-        request.websiteContent.slice(0, 12000);
+        `\n\nWebsite summary for context:\n` +
+        request.websiteContent.slice(0, 4000);
     }
   }
 
@@ -98,63 +95,66 @@ export async function callNexaIntelligence(
   const deepseekKey = getApiKey("DEEPSEEK_API_KEY");
   const openrouterKey = getApiKey("OPENROUTER_API_KEY");
 
-  // 1) Gemini (free tier + images)
-  if (geminiKey) {
+  // Prefer fast/cheap first when no image; Gemini first when image present
+  const hasImage = Boolean(request.imageDataUrl);
+
+  type Attempt = () => Promise<{ content: string; provider: string; model: string } | null>;
+  const attempts: Attempt[] = [];
+
+  const pushGemini = () => {
+    if (!geminiKey) return;
     for (const model of GEMINI_MODELS) {
-      try {
-        const result = await callGeminiNative({
+      attempts.push(async () => {
+        const content = await callGeminiNative({
           apiKey: geminiKey,
           model,
           systemPrompt,
           messages: textMessages.filter((m) => m.role !== "system"),
           imageDataUrl: request.imageDataUrl,
         });
-        if (result?.trim()) return result;
-      } catch (err: any) {
-        console.error(`[Nexa] gemini ${model}:`, err?.message || err);
-      }
+        if (content?.trim()) return { content: content.trim(), provider: "gemini", model };
+        return null;
+      });
     }
-  }
+  };
 
-  // 2) Groq (fast free/paid)
-  if (groqKey) {
+  const pushGroq = () => {
+    if (!groqKey || hasImage) return;
     for (const model of GROQ_MODELS) {
-      try {
-        const result = await callOpenAICompatible({
+      attempts.push(async () => {
+        const content = await callOpenAICompatible({
           baseUrl: "https://api.groq.com/openai/v1",
           model,
           apiKey: groqKey,
           messages: textMessages,
         });
-        if (result?.trim()) return result;
-      } catch (err: any) {
-        console.error(`[Nexa] groq ${model}:`, err?.message || err);
-      }
+        if (content?.trim()) return { content: content.trim(), provider: "groq", model };
+        return null;
+      });
     }
-  }
+  };
 
-  // 3) DeepSeek (cheap scale for thousands of users)
-  if (deepseekKey) {
+  const pushDeepseek = () => {
+    if (!deepseekKey || hasImage) return;
     for (const model of DEEPSEEK_MODELS) {
-      try {
-        const result = await callOpenAICompatible({
+      attempts.push(async () => {
+        const content = await callOpenAICompatible({
           baseUrl: "https://api.deepseek.com",
           model,
           apiKey: deepseekKey,
           messages: textMessages,
         });
-        if (result?.trim()) return result;
-      } catch (err: any) {
-        console.error(`[Nexa] deepseek ${model}:`, err?.message || err);
-      }
+        if (content?.trim()) return { content: content.trim(), provider: "deepseek", model };
+        return null;
+      });
     }
-  }
+  };
 
-  // 4) OpenRouter (multi-model scale backup)
-  if (openrouterKey) {
+  const pushOpenRouter = () => {
+    if (!openrouterKey || hasImage) return;
     for (const model of OPENROUTER_MODELS) {
-      try {
-        const result = await callOpenAICompatible({
+      attempts.push(async () => {
+        const content = await callOpenAICompatible({
           baseUrl: "https://openrouter.ai/api/v1",
           model,
           apiKey: openrouterKey,
@@ -166,14 +166,52 @@ export async function callNexaIntelligence(
             "X-Title": "Nexa",
           },
         });
-        if (result?.trim()) return result;
-      } catch (err: any) {
-        console.error(`[Nexa] openrouter ${model}:`, err?.message || err);
+        if (content?.trim()) return { content: content.trim(), provider: "openrouter", model };
+        return null;
+      });
+    }
+  };
+
+  if (hasImage) {
+    pushGemini();
+  } else {
+    // Speed-first order for text
+    pushGroq();
+    pushGemini();
+    pushDeepseek();
+    pushOpenRouter();
+  }
+
+  for (const attempt of attempts) {
+    try {
+      const result = await attempt();
+      if (result?.content) {
+        return {
+          success: true,
+          content: result.content,
+          provider: result.provider,
+          model: result.model,
+          requestId: request.requestId,
+        };
       }
+    } catch (err: any) {
+      console.error("[Nexa router]", err?.message || err);
+      // continue to next provider
     }
   }
 
-  return BROWSER_ENGINE_SIGNAL;
+  return {
+    success: false,
+    content: BROWSER_ENGINE_SIGNAL,
+    requestId: request.requestId,
+    error: "all_providers_failed",
+  };
+}
+
+/** Back-compat wrapper used by /api/chat */
+export async function callNexaIntelligence(request: AIRequest): Promise<string> {
+  const result = await generateNexaResponse(request);
+  return result.content;
 }
 
 async function callOpenAICompatible(params: {
@@ -183,28 +221,34 @@ async function callOpenAICompatible(params: {
   messages: { role: string; content: string }[];
   extraHeaders?: Record<string, string>;
 }): Promise<string | null> {
-  const res = await fetchWithTimeout(`${params.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${params.apiKey}`,
-      ...(params.extraHeaders || {}),
+  const res = await fetchWithTimeout(
+    `${params.baseUrl}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${params.apiKey}`,
+        ...(params.extraHeaders || {}),
+      },
+      body: JSON.stringify({
+        model: params.model,
+        messages: params.messages,
+        temperature: 0.6,
+        max_tokens: 1600,
+      }),
     },
-    body: JSON.stringify({
-      model: params.model,
-      messages: params.messages,
-      temperature: 0.65,
-      max_tokens: 2048,
-    }),
-  });
+    12000
+  );
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`${res.status} ${errText.slice(0, 220)}`);
+    throw new Error(`${res.status} ${errText.slice(0, 180)}`);
   }
 
   const data = await res.json();
-  return data.choices?.[0]?.message?.content || null;
+  const content = data.choices?.[0]?.message?.content;
+  if (!content || !String(content).trim()) return null;
+  return String(content);
 }
 
 async function callGeminiNative(params: {
@@ -231,11 +275,6 @@ async function callGeminiNative(params: {
             data: match[2],
           },
         });
-        parts[0] = {
-          text:
-            m.content +
-            "\n\nPlease analyze the attached image in context of this business request.",
-        };
       }
     }
 
@@ -259,25 +298,29 @@ async function callGeminiNative(params: {
     merged.unshift({ role: "user", parts: [{ text: "Continue." }] });
   }
 
-  const res = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": params.apiKey,
-    },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: params.systemPrompt }] },
-      contents: merged,
-      generationConfig: {
-        temperature: 0.65,
-        maxOutputTokens: 2048,
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": params.apiKey,
       },
-    }),
-  });
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: params.systemPrompt }] },
+        contents: merged,
+        generationConfig: {
+          temperature: 0.6,
+          maxOutputTokens: 1600,
+        },
+      }),
+    },
+    14000
+  );
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`${res.status} ${errText.slice(0, 220)}`);
+    throw new Error(`${res.status} ${errText.slice(0, 180)}`);
   }
 
   const data = await res.json();
@@ -285,22 +328,6 @@ async function callGeminiNative(params: {
     data.candidates?.[0]?.content?.parts
       ?.map((p: any) => p.text || "")
       .join("") || null;
+  if (!text?.trim()) return null;
   return text;
-}
-
-export async function fetchWebsiteContent(url: string): Promise<string> {
-  try {
-    const res = await fetch("/api/fetch-website", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      return `Could not fetch that website right now. ${data.error || ""}`.trim();
-    }
-    return data.content || "No readable content was found on that page.";
-  } catch {
-    return "Could not fetch that website right now. You can paste the page text instead.";
-  }
 }
