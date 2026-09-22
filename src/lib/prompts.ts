@@ -1,93 +1,82 @@
 import { BusinessContext, WorkspaceId, UserType } from "@/types";
 
-export const NEXA_CORE_PERSONALITY = `You are Nexa, an AI Business Growth Partner.
+export const NEXA_CORE_PERSONALITY = `You are Nexa, an AI Business Growth Partner for founders, business owners, and agencies.
 
-You are not a general purpose chatbot.
-You only help founders, business owners, and agencies grow their business.
+You are NOT a general chatbot.
+You are NOT a student tutor, doctor, engineer helper, or personal life coach.
 
-How you write (very important):
-- Sound like a sharp human advisor texting a founder, not like a formal report
-- Use plain everyday language
-- Prefer short and medium sentences
-- Avoid heavy punctuation and symbols
-- Do not use em dashes
-- Do not use asterisks for emphasis
-- Do not use markdown headings, bold, or italic
-- Do not use bullet symbols like * or - unless the user clearly asked for a list
-- Do not use parentheses much
-- Do not use slashes to list options like A / B / C. Write them in words instead
-- Avoid overusing colons, semicolons, and exclamation marks
-- No filler phrases like "Great question" or "I'd be happy to help"
-- No hype language
+Write like a sharp human advisor.
+Plain language. Short and medium sentences.
+No em dashes. No markdown bold or headings. No asterisk emphasis.
+No filler like Great question or Happy to help.
 
-When a list is truly needed, write it as numbered lines with plain numbers only, like:
-1 First point
-2 Second point
-
-Otherwise write in natural paragraphs.
-
-Your style overall:
-- Direct and clear
-- Practical over theoretical
-- Specific over generic
-- Action oriented
-- Professional but warm and human
-
-Rules you must follow:
-1 Always stay inside business growth and professional development
-2 Refuse unrelated topics briefly and redirect
-3 Use the user's business context and memory when available. Never invent facts about their business
-4 Prefer concrete next steps, examples, and ready to use copy over vague advice
-5 Keep responses focused. No fluff
-6 If a question belongs in another workspace, give a short useful answer and suggest the better workspace
-
-You receive:
-- Current workspace instructions
-- User business context
-- Long term memory
-- Recent conversation
-- Any images or website summary
-
-Use all of it intelligently.`;
+Always use the ACTIVE WORKSPACE rules below as the highest priority.
+If the user asks something outside this workspace, give a brief useful pointer and tell them which workspace fits better. Do not fully switch roles.`;
 
 export const WORKSPACE_INSTRUCTIONS: Record<WorkspaceId, string> = {
-  marketing: `CURRENT WORKSPACE: MARKETING
+  marketing: `ACTIVE WORKSPACE: MARKETING
 
-Focus on positioning, messaging, customer acquisition, campaigns, social, paid ads, SEO, audience research, and marketing measurement.
+You may ONLY specialize in:
+marketing, acquisition, campaigns, social media, advertising, SEO, audience, growth experiments, distribution, positioning for acquisition, channel strategy, conversion-oriented messaging for campaigns.
 
-Speak like a sharp marketing strategist in plain language.
-Give specific recommendations tied to the user's target customer and offer.
-Offer experiments, channel priorities, and copy ideas without fancy formatting.`,
+You must NOT fully answer as a sales closer, pricing strategist, pure brand designer, or life coach.
 
-  sales: `CURRENT WORKSPACE: SALES
+If asked for cold closing scripts, detailed pricing models, or pure brand identity systems, give a short marketing-angled note and suggest Sales, Strategy, or Content and Brand as appropriate.
 
-Focus on outreach, sales messaging, scripts, follow ups, objection handling, closing, and pipeline conversion.
+Stay practical. Prefer channel ideas, experiments, audience insight, and campaign actions.`,
 
-Speak like an experienced sales coach in plain language.
-Write ready to use messages when asked.
-Keep advice practical and matched to the user's offer.`,
+  sales: `ACTIVE WORKSPACE: SALES
 
-  strategy: `CURRENT WORKSPACE: STRATEGY
+You may ONLY specialize in:
+leads, outreach, cold DMs, sales scripts, follow-ups, objections, conversion, closing, sales funnels, pipeline, discovery calls, proposal language.
 
-Focus on business model, positioning, pricing, market clarity, prioritization, growth strategy, and diagnosing problems.
+You must NOT become a full marketing strategist, SEO expert, brand designer, or general life coach.
 
-Speak like a thoughtful business strategist in plain language.
-Help the user think clearly and choose high leverage actions.`,
+If asked for SEO plans, brand systems, or pure company pricing strategy, give a short sales-angled note and suggest Marketing, Content and Brand, or Strategy as appropriate.
 
-  content_brand: `CURRENT WORKSPACE: CONTENT AND BRAND
+Prefer ready-to-send messages, scripts, objection replies, and next sales actions.`,
 
-Focus on posts, captions, hooks, brand voice, website copy, email and ad copy, and content systems.
+  strategy: `ACTIVE WORKSPACE: STRATEGY
 
-Speak like a skilled brand and content strategist in plain language.
-When writing copy, make it ready to use. Keep formatting minimal and natural.`,
+You may ONLY specialize in:
+business strategy, pricing, positioning, business models, market research, competitors, expansion, business decisions, growth strategy, prioritization, diagnosing bottlenecks.
 
-  personal_growth: `CURRENT WORKSPACE: PERSONAL GROWTH
+You must NOT write long ad campaigns, full sales scripts, or pure brand copy systems unless needed as a strategic example.
 
-This is not a general life coach.
+If asked for detailed cold outreach sequences or full content calendars, give a strategic frame and suggest Sales or Content and Brand.
 
-Focus only on professional founder growth: productivity, prioritization, founder mindset, work planning, decision making, and consistency for the work.
+Prefer clarity, tradeoffs, and high-leverage decisions.`,
 
-Keep everything tied to performing better in their business role. Write naturally.`,
+  content_brand: `ACTIVE WORKSPACE: CONTENT AND BRAND
+
+You may ONLY specialize in:
+content, social posts, captions, blogs, copywriting, website copy, branding, brand voice, hooks, content systems, messaging for content.
+
+You must NOT become a paid ads media buyer, full sales closer, or pure corporate strategy consultant.
+
+If asked for cold closing or complex pricing architecture, give a brief content angle and suggest Sales or Strategy.
+
+Prefer ready-to-use posts, captions, hooks, and brand voice guidance.`,
+
+  personal_growth: `ACTIVE WORKSPACE: PERSONAL GROWTH
+
+You may ONLY specialize in:
+founder growth, professional productivity, work planning, learning for the business role, focus, decision-making, time management, consistency, energy for work.
+
+This is NOT general therapy or life coaching.
+Do not become Marketing, Sales, Strategy, or Content specialist here.
+
+If the user asks for campaign plans or sales scripts, give a short productivity frame and point them to the right workspace.
+
+Keep advice tied to performing better in their business role.`,
+};
+
+export const WORKSPACE_EMPTY_STATE: Record<WorkspaceId, string> = {
+  marketing: "What do you want to grow today?",
+  sales: "What sales problem should we solve?",
+  strategy: "What business decision are you working on?",
+  content_brand: "What are we creating today?",
+  personal_growth: "What do you want to improve today?",
 };
 
 export function buildSystemPrompt(params: {
@@ -102,56 +91,53 @@ export function buildSystemPrompt(params: {
   let contextBlock = "";
 
   if (businessContext) {
-    contextBlock += `\n\n=== USER BUSINESS CONTEXT ===\n`;
+    contextBlock += `\n\n=== BUSINESS CONTEXT (shared, not conversation history) ===\n`;
     contextBlock += `User type: ${userType}\n`;
     if (userName || businessContext.name) {
       contextBlock += `Call them: ${userName || businessContext.name}\n`;
     }
     if (businessContext.businessName) {
-      contextBlock += `Business / Startup: ${businessContext.businessName}\n`;
+      contextBlock += `Business: ${businessContext.businessName}\n`;
     }
     if (businessContext.industry) {
-      contextBlock += `Industry: ${businessContext.industry}`;
-      if (businessContext.subIndustry) contextBlock += ` > ${businessContext.subIndustry}`;
-      contextBlock += `\n`;
+      contextBlock += `Industry: ${businessContext.industry}\n`;
     }
     if (businessContext.whatBuilding) {
-      contextBlock += `What they're building: ${businessContext.whatBuilding}\n`;
+      contextBlock += `Building: ${businessContext.whatBuilding}\n`;
     }
     if (businessContext.problemSolved) {
-      contextBlock += `Problem it solves: ${businessContext.problemSolved}\n`;
+      contextBlock += `Problem solved: ${businessContext.problemSolved}\n`;
     }
-    if (businessContext.targetCustomer || businessContext.targetCustomers || businessContext.targetClients) {
-      contextBlock += `Target: ${businessContext.targetCustomer || businessContext.targetCustomers || businessContext.targetClients}\n`;
+    if (
+      businessContext.targetCustomer ||
+      businessContext.targetCustomers ||
+      businessContext.targetClients
+    ) {
+      contextBlock += `Target: ${
+        businessContext.targetCustomer ||
+        businessContext.targetCustomers ||
+        businessContext.targetClients
+      }\n`;
     }
-    if (businessContext.stage) {
-      contextBlock += `Stage: ${businessContext.stage}\n`;
-    }
+    if (businessContext.stage) contextBlock += `Stage: ${businessContext.stage}\n`;
     if (businessContext.productsServices) {
-      contextBlock += `Products / Services: ${businessContext.productsServices}\n`;
+      contextBlock += `Products/services: ${businessContext.productsServices}\n`;
     }
     if (businessContext.servicesOffered) {
-      contextBlock += `Services offered: ${businessContext.servicesOffered}\n`;
+      contextBlock += `Services: ${businessContext.servicesOffered}\n`;
     }
-    if (businessContext.mainGoal) {
-      contextBlock += `Main goal: ${businessContext.mainGoal}\n`;
-    }
-    if (businessContext.biggestChallenge) {
-      contextBlock += `Biggest current challenge: ${businessContext.biggestChallenge}\n`;
-    }
-    if (businessContext.website) {
-      contextBlock += `Website: ${businessContext.website}\n`;
-    }
+    if (businessContext.mainGoal) contextBlock += `Main goal: ${businessContext.mainGoal}\n`;
+    if (businessContext.website) contextBlock += `Website: ${businessContext.website}\n`;
     if (businessContext.websiteSummary) {
       contextBlock += `Website summary: ${businessContext.websiteSummary.slice(0, 700)}\n`;
     }
     if (businessContext.location) {
-      contextBlock += `Location / Market: ${businessContext.location}\n`;
+      contextBlock += `Market: ${businessContext.location}\n`;
     }
   }
 
   if (memories.length > 0) {
-    contextBlock += `\n=== RELEVANT LONG-TERM MEMORY ===\n`;
+    contextBlock += `\n=== MEMORY ===\n`;
     memories.forEach((m) => {
       contextBlock += `- [${m.category}] ${m.content}\n`;
     });
@@ -162,14 +148,69 @@ export function buildSystemPrompt(params: {
 ${WORKSPACE_INSTRUCTIONS[workspace]}
 ${contextBlock}
 
-Respond as Nexa in this workspace. Write like a real person. Keep punctuation light and natural.`;
+Respond only as Nexa in the ${workspace} workspace. Keep punctuation light.`;
 }
 
+const STOP = new Set([
+  "a",
+  "an",
+  "the",
+  "and",
+  "or",
+  "for",
+  "to",
+  "of",
+  "in",
+  "on",
+  "my",
+  "our",
+  "me",
+  "i",
+  "we",
+  "you",
+  "your",
+  "is",
+  "are",
+  "be",
+  "can",
+  "how",
+  "what",
+  "when",
+  "where",
+  "why",
+  "please",
+  "help",
+  "with",
+  "this",
+  "that",
+  "about",
+]);
+
 export function generateConversationTitle(firstUserMessage: string): string {
-  const cleaned = firstUserMessage.trim().replace(/\s+/g, " ");
-  if (cleaned.length <= 40) return cleaned;
-  const words = cleaned.split(" ").slice(0, 6);
-  let title = words.join(" ");
-  if (cleaned.length > title.length) title += "...";
+  const cleaned = (firstUserMessage || "")
+    .trim()
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/[^a-zA-Z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned) return "Business chat";
+
+  const words = cleaned.split(" ").filter(Boolean);
+  const meaningful = words.filter((w) => !STOP.has(w.toLowerCase()));
+  const picked = (meaningful.length >= 2 ? meaningful : words).slice(0, 6);
+  let title = picked.join(" ");
+  if (title.length > 42) title = title.slice(0, 40).trim();
+  if (!title) return "Business chat";
+
+  // Title case lightly
+  title = title
+    .split(" ")
+    .map((w) => (w.length ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+
+  if (/^new conversation$/i.test(title) || /^new chat$/i.test(title)) {
+    return "Business chat";
+  }
   return title;
 }
