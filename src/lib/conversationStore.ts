@@ -9,9 +9,9 @@ import {
   Conversation,
   Message,
   MemoryItem,
-  UserProfile,
   WorkspaceId,
 } from "@/types";
+import { generateConversationTitle as titleFromMessage } from "./prompts";
 
 const APP_KEY = "nexa_app_state_v2";
 const MSG_PREFIX = "nexa_msgs_v2_";
@@ -45,7 +45,6 @@ export function createId(): string {
 export function loadAppState(): AppState {
   if (typeof window === "undefined") return { ...defaultState };
   try {
-    // Migrate from v1 if needed
     const v2 = localStorage.getItem(APP_KEY);
     if (v2) return { ...defaultState, ...safeParse(v2, {}) };
 
@@ -77,6 +76,12 @@ export function getConversationsByWorkspace(workspace: WorkspaceId): Conversatio
   const state = loadAppState();
   return (state.conversations || [])
     .filter((c) => c.workspace === workspace)
+    .filter((c) => {
+      // Hide empty untitled chats from lists (still keep if currently open)
+      if (c.messageCount > 0) return true;
+      if (c.title && !/^new conversation$/i.test(c.title)) return true;
+      return false;
+    })
     .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }
 
@@ -130,7 +135,7 @@ export function deleteConversation(id: string): void {
   saveAppState({ conversations, currentConversationId: nextCurrent });
   try {
     localStorage.removeItem(MSG_PREFIX + id);
-    localStorage.removeItem("nexa_messages_" + id); // legacy
+    localStorage.removeItem("nexa_messages_" + id);
   } catch {
     /* ignore */
   }
@@ -142,7 +147,6 @@ export function loadMessages(conversationId: string): Message[] {
     const v2 = localStorage.getItem(MSG_PREFIX + conversationId);
     if (v2) return safeParse<Message[]>(v2, []);
 
-    // legacy key
     const v1 = localStorage.getItem("nexa_messages_" + conversationId);
     if (v1) {
       const msgs = safeParse<Message[]>(v1, []);
@@ -166,7 +170,6 @@ export function saveMessages(conversationId: string, messages: Message[]): void 
 
 export function addMessage(conversationId: string, message: Message): Message[] {
   const current = loadMessages(conversationId);
-  // Prevent duplicate by id or requestId+role
   if (current.some((m) => m.id === message.id)) return current;
   if (
     message.requestId &&
@@ -200,25 +203,15 @@ export function hasAssistantForRequest(
   requestId: string
 ): boolean {
   return loadMessages(conversationId).some(
-    (m) => m.role === "assistant" && m.requestId === requestId
+    (m) =>
+      m.role === "assistant" &&
+      m.requestId === requestId &&
+      m.status !== "error"
   );
 }
 
 export function generateConversationTitle(firstUserMessage: string): string {
-  const cleaned = (firstUserMessage || "").trim().replace(/\s+/g, " ");
-  if (!cleaned) return "New conversation";
-
-  // Strip URLs for cleaner titles
-  const noUrl = cleaned.replace(/https?:\/\/\S+/gi, "").trim();
-  const source = noUrl || cleaned;
-
-  const words = source.split(" ").filter(Boolean).slice(0, 6);
-  let title = words.join(" ");
-  if (title.length > 48) title = title.slice(0, 45).trim() + "…";
-  if (!title) return "New conversation";
-
-  // Capitalize first letter
-  return title.charAt(0).toUpperCase() + title.slice(1);
+  return titleFromMessage(firstUserMessage);
 }
 
 export function addMemory(
@@ -260,6 +253,3 @@ export function updateBusinessContext(
   saveAppState({ businessContext: next });
   return next;
 }
-
-// Back-compat exports used by older pages
-export { loadAppState as loadAppStateCompat };
