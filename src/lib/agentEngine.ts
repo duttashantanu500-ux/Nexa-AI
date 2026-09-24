@@ -22,6 +22,9 @@ export interface EngineDeliverable {
   title: string;
   content: string;
   rows?: ProspectRow[];
+  discovered?: ProspectRow[];
+  qualified?: ProspectRow[];
+  unverified?: ProspectRow[];
   sources: { title?: string; url: string }[];
   createdAt: string;
 }
@@ -41,7 +44,6 @@ function id() {
 }
 
 function normalizeGoal(goal: string) {
-  // Avoid Wikipedia matching Hindi TV "Saas" instead of SaaS software
   return goal
     .replace(/\bSaaS\b/gi, "software as a service")
     .replace(/\bB2B\b/gi, "business to business")
@@ -77,24 +79,9 @@ export function buildPlan(
       researchQuery,
       steps: [
         { id: id(), title: "Use business context", status: "pending" },
-        {
-          id: id(),
-          title: "Web search for candidates",
-          status: "pending",
-          tool: "web_search",
-        },
-        {
-          id: id(),
-          title: "Read top candidate pages",
-          status: "pending",
-          tool: "web_page_reader",
-        },
-        {
-          id: id(),
-          title: "Qualify and structure results",
-          status: "pending",
-          tool: "structured_data",
-        },
+        { id: id(), title: "Web search for candidates", status: "pending", tool: "web_search" },
+        { id: id(), title: "Read top candidate pages", status: "pending", tool: "web_page_reader" },
+        { id: id(), title: "Qualify against mission goal", status: "pending", tool: "structured_data" },
         { id: id(), title: "Produce deliverable", status: "pending" },
       ],
     };
@@ -106,18 +93,8 @@ export function buildPlan(
     researchQuery,
     steps: [
       { id: id(), title: "Clarify objective from business context", status: "pending" },
-      {
-        id: id(),
-        title: "Search for supporting information",
-        status: "pending",
-        tool: "web_search",
-      },
-      {
-        id: id(),
-        title: "Read key sources",
-        status: "pending",
-        tool: "web_page_reader",
-      },
+      { id: id(), title: "Search for supporting information", status: "pending", tool: "web_search" },
+      { id: id(), title: "Read key sources", status: "pending", tool: "web_page_reader" },
       { id: id(), title: "Write structured deliverable", status: "pending" },
     ],
   };
@@ -133,7 +110,7 @@ function buildSearchQueries(goal: string, business?: BusinessContext | null): st
     `${base} ${location} companies`,
     `software as a service companies ${location}`,
     `Indian software as a service companies list`,
-    "Freshworks Zoho Postman Chargebee BrowserStack Unicommerce", // known real names to seed wiki search — results still fetched live
+    "Freshworks Zoho Postman Chargebee BrowserStack Unicommerce",
     industry ? `${industry} companies ${location}` : "",
   ].filter((q) => q && q.length > 3);
 
@@ -142,7 +119,6 @@ function buildSearchQueries(goal: string, business?: BusinessContext | null): st
 
 function isNoiseHit(h: SearchHit): boolean {
   const t = `${h.title} ${h.snippet}`.toLowerCase();
-  // Filter Hindi soap / entertainment false positives from "SaaS"
   if (/kyunki saas|saas bahu|bahu thi|television series|tv series|film which was released/i.test(t))
     return true;
   if (/actress|actor|film director|soap opera/i.test(t)) return true;
@@ -152,10 +128,33 @@ function isNoiseHit(h: SearchHit): boolean {
 function looksLikeCompany(h: SearchHit): boolean {
   const t = `${h.title} ${h.snippet}`.toLowerCase();
   if (isNoiseHit(h)) return false;
-  if (/inc\.?|ltd|limited|company|software|platform|saas|startup|headquarter/i.test(t))
-    return true;
+  if (/inc\.?|ltd|limited|company|software|platform|startup|headquarter/i.test(t)) return true;
   if (/wikipedia\.org\/wiki\//i.test(h.url) && /\(company\)/i.test(h.title)) return true;
-  return !/wikipedia\.org\/wiki\//i.test(h.url); // non-wiki URLs kept
+  return !/wikipedia\.org\/wiki\//i.test(h.url);
+}
+
+/** Heuristic relevance to goal — conservative, never invents. */
+function qualifyAgainstGoal(
+  row: ProspectRow,
+  goal: string
+): "qualified" | "discovered" | "unverified" {
+  const g = goal.toLowerCase();
+  const blob = `${row.company} ${row.evidence} ${row.reason}`.toLowerCase();
+
+  const wantsIndia = /india|indian/.test(g);
+  const wantsSaas = /saas|software as a service|software/.test(g);
+  const wantsCompany = /compan|startup|business|customer|lead|prospect/.test(g);
+
+  let score = 0;
+  if (wantsIndia && /india|indian|bangalore|bengaluru|mumbai|delhi|hyderabad|chennai|pune|gurugram|gurgaon/.test(blob))
+    score += 2;
+  if (wantsSaas && /software|saas|platform|cloud|subscription|b2b/.test(blob)) score += 2;
+  if (wantsCompany && /company|inc|ltd|limited|startup|headquarter/.test(blob)) score += 1;
+  if (/wikipedia\.org/i.test(row.website) && !/\(company\)/i.test(row.company)) score -= 1;
+  if (row.evidence.length < 40) return "unverified";
+  if (score >= 3) return "qualified";
+  if (score >= 1) return "discovered";
+  return "unverified";
 }
 
 export async function executeResearchMission(params: {
@@ -188,7 +187,7 @@ export async function executeResearchMission(params: {
       activity.push(`Searching: "${q.slice(0, 90)}"`);
       const search = await webSearch(q, 10);
       if (!search.ok) {
-        activity.push(`Search issue: ${search.error}`);
+        activity.push(`Search issue: search unavailable for this query`);
         continue;
       }
       const batch = (((search.data as any)?.hits || []) as SearchHit[]).filter(
@@ -200,12 +199,10 @@ export async function executeResearchMission(params: {
       if (hits.filter(looksLikeCompany).length >= 10) break;
     }
 
-    // Prefer company-like hits
-    const ranked = [
+    hits = dedupeHits([
       ...hits.filter(looksLikeCompany),
       ...hits.filter((h) => !looksLikeCompany(h)),
-    ];
-    hits = dedupeHits(ranked);
+    ]);
 
     activity.push(`${hits.length} unique search results collected`);
     mark(1, hits.length > 0 ? "done" : "failed");
@@ -224,8 +221,11 @@ export async function executeResearchMission(params: {
           type: "report",
           title: "Research results",
           content:
-            "No public web results were found. Add GEMINI_API_KEY (Google Search grounding) or BRAVE_API_KEY / TAVILY_API_KEY / SERPER_API_KEY on Vercel for stronger commercial search.",
+            "No public web results were found for this query. Try different keywords or try again later.",
           rows: [],
+          discovered: [],
+          qualified: [],
+          unverified: [],
           sources: [],
           createdAt: new Date().toISOString(),
         },
@@ -239,14 +239,15 @@ export async function executeResearchMission(params: {
     for (const hit of hits.slice(0, maxPages)) {
       const page = await readWebPage(hit.url);
       if (!page.ok) {
-        activity.push(`Could not read ${hit.url}: ${page.error}`);
+        activity.push(`Could not read a page`);
         if (hit.snippet && hit.snippet.length > 20 && !isNoiseHit(hit)) {
           rows.push({
             company: cleanTitle(hit.title),
             website: hit.url,
-            reason: "Appeared in search results (page body could not be fetched)",
+            reason: "Found in search; page body could not be verified",
             evidence: hit.snippet.slice(0, 220),
             source: hit.url,
+            qualification: "unverified",
           });
           sources.push({ title: hit.title, url: hit.url });
         }
@@ -264,7 +265,7 @@ export async function executeResearchMission(params: {
       rows.push({
         company,
         website: extract.url,
-        reason: "Matched search intent and had a reachable public page",
+        reason: "Public page found and read",
         evidence: snippet,
         source: extract.url,
       });
@@ -301,26 +302,51 @@ export async function executeResearchMission(params: {
 
     mark(3, "running");
     const seen = new Set<string>();
-    const qualified = rows.filter((r) => {
+    const unique = rows.filter((r) => {
       const key = r.website.replace(/\/$/, "").toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);
-      return r.evidence.length > 15;
+      return true;
     });
-    activity.push(`${qualified.length} items qualified from real evidence`);
+
+    const tagged = unique.map((r) => ({
+      ...r,
+      qualification: r.qualification || qualifyAgainstGoal(r, params.goal),
+    }));
+
+    const qualified = tagged.filter((r) => r.qualification === "qualified");
+    const discovered = tagged.filter((r) => r.qualification === "discovered");
+    const unverified = tagged.filter((r) => r.qualification === "unverified");
+
+    activity.push(
+      `Qualified ${qualified.length} · Discovered ${discovered.length} · Unverified ${unverified.length}`
+    );
     mark(3, "done");
 
     mark(4, "running");
-    const lines = qualified.map(
-      (r, i) =>
-        `${i + 1}. ${r.company}\n   Website: ${r.website}\n   Why: ${r.reason}\n   Evidence: ${r.evidence}\n`
-    );
-    const content =
-      `Research deliverable for: ${params.goal}\n\n` +
-      `Found ${qualified.length} items with real evidence.\n\n` +
-      lines.join("\n");
+    const section = (title: string, list: ProspectRow[]) => {
+      if (!list.length) return `${title}: none\n`;
+      return (
+        `${title} (${list.length}):\n` +
+        list
+          .map(
+            (r, i) =>
+              `${i + 1}. ${r.company}\n   Website: ${r.website}\n   Why: ${r.reason}\n   Evidence: ${r.evidence}\n`
+          )
+          .join("\n") +
+        "\n"
+      );
+    };
 
-    activity.push(`Final report created (${qualified.length} rows)`);
+    const content =
+      `Research for: ${params.goal}\n\n` +
+      section("Qualified companies", qualified) +
+      "\n" +
+      section("Discovered websites", discovered) +
+      "\n" +
+      section("Unable to verify", unverified);
+
+    activity.push("Final report created");
     mark(4, "done");
 
     return {
@@ -333,20 +359,23 @@ export async function executeResearchMission(params: {
         type: "lead_list",
         title: `Results: ${params.goal.slice(0, 60)}`,
         content,
-        rows: qualified,
+        rows: tagged,
+        qualified,
+        discovered,
+        unverified,
         sources: dedupeSources(sources),
         createdAt: new Date().toISOString(),
       },
     };
   } catch (err: any) {
-    activity.push(`Engine error: ${err?.message || "unknown"}`);
+    activity.push("Engine error");
     return {
       ok: false,
       activity,
       progress: 0,
       status: "failed",
       steps,
-      error: err?.message || "Execution failed",
+      error: "Execution failed. Please try again.",
     };
   }
 }
