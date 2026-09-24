@@ -18,6 +18,7 @@ export default function HomePage() {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [goal, setGoal] = useState("");
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -34,13 +35,35 @@ export default function HomePage() {
     ensureDefaultAgents(s.user.id);
   }, [router]);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!user || !goal.trim() || creating) return;
     setCreating(true);
-    const m = createMission(user.id, goal.trim());
-    setGoal("");
-    setCreating(false);
-    router.push(`/missions/${m.id}`);
+    setError("");
+
+    try {
+      const businessContext = loadOperatorState().businessContext;
+      const res = await fetch("/api/missions/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goal: goal.trim(), businessContext }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.plan) {
+        throw new Error(data.error || "Could not create plan");
+      }
+
+      const m = createMission(user.id, goal.trim(), {
+        title: data.plan.title,
+        steps: data.plan.steps,
+        researchQuery: data.plan.researchQuery,
+      });
+      setGoal("");
+      router.push(`/missions/${m.id}`);
+    } catch (e: any) {
+      setError(e?.message || "Failed to create mission");
+    } finally {
+      setCreating(false);
+    }
   };
 
   if (!user) {
@@ -73,13 +96,14 @@ export default function HomePage() {
             rows={3}
             className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted"
           />
-          <div className="mt-2 flex justify-end">
+          <div className="mt-2 flex justify-end gap-2 items-center">
+            {error && <span className="text-xs text-red-600">{error}</span>}
             <button
               onClick={handleCreate}
               disabled={!goal.trim() || creating}
               className="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
             >
-              {creating ? "Creating…" : "Create Mission"}
+              {creating ? "Planning…" : "Create Mission"}
             </button>
           </div>
         </div>
