@@ -34,4 +34,5 @@ export interface ProspectRow {
   reason: string;
   evidence: string;
   source: string;
+  qualification?: "qualified" | "discovered" | "unverified";
 }
