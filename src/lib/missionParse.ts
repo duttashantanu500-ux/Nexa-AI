@@ -19,27 +19,15 @@ const LOCATION_HINTS =
 
 const QUANTITY_HINTS = /\b(\d{1,3})\b/;
 
-/** Extract category phrase after find/research verbs */
 function extractCategory(goal: string): string {
   const g = goal.trim();
-
-  // Strip leading verbs
   let rest = g
     .replace(/^(find|research|search for|look for|get|list|discover|identify)\s+/i, "")
     .trim();
-
-  // Remove quantity at start
   rest = rest.replace(/^\d{1,3}\s+/, "").trim();
-
-  // Cut at location preposition
   rest = rest.split(/\b(?:in|near|around|at|for|that|who|which|with)\b/i)[0].trim();
-
-  // Clean leftover
   rest = rest.replace(/\s+/g, " ").replace(/[.,]+$/, "").trim();
-
   if (rest.length >= 2) return rest;
-
-  // Fallback: full goal without numbers
   return g.replace(/\d+/g, "").trim() || "businesses";
 }
 
@@ -47,15 +35,12 @@ function extractLocation(goal: string): string | null {
   const m = goal.match(LOCATION_HINTS);
   if (m?.[2]) {
     const loc = m[2].trim();
-    // Avoid capturing "that may need..."
     if (/^(that|who|which|need|needs|may|the|a|an)\b/i.test(loc)) return null;
     return loc;
   }
-  // Common city/state names without preposition
-  const known =
-    goal.match(
-      /\b(Lucknow|Mumbai|Delhi|Bangalore|Bengaluru|Hyderabad|Chennai|Pune|Kolkata|California|Texas|New York|Germany|UK|United States|USA|India)\b/i
-    );
+  const known = goal.match(
+    /\b(Lucknow|Mumbai|Delhi|Bangalore|Bengaluru|Hyderabad|Chennai|Pune|Kolkata|Jaipur|Ahmedabad|California|Texas|New York|Florida|Germany|UK|United States|USA|India|London|Dubai|Singapore)\b/i
+  );
   return known ? known[1] : null;
 }
 
@@ -77,7 +62,36 @@ function extractQualification(goal: string): string | null {
   return null;
 }
 
-/** Build search queries ONLY from the user's category + location — no SaaS defaults */
+/** Category-aware query expansions (search terms only — not hardcoded results) */
+function categorySearchHints(category: string, location: string | null): string[] {
+  const c = category.toLowerCase();
+  const loc = location || "";
+  const out: string[] = [];
+
+  if (/restaurant|cafe|café|food|dining|bakery/i.test(c)) {
+    out.push(`${category} ${loc} zomato`.trim());
+    out.push(`best ${category} in ${loc}`.trim());
+    out.push(`${loc} ${category} directory`.trim());
+  } else if (/gym|fitness|yoga/i.test(c)) {
+    out.push(`${category} ${loc}`.trim());
+    out.push(`best gyms fitness centers ${loc}`.trim());
+  } else if (/real estate|realtor|property|broker/i.test(c)) {
+    out.push(`${category} ${loc}`.trim());
+    out.push(`real estate agencies ${loc}`.trim());
+  } else if (/agency|agencies|marketing|dental|dentist/i.test(c)) {
+    out.push(`${category} ${loc}`.trim());
+    out.push(`${category} near ${loc}`.trim());
+  } else if (/skincare|ecommerce|e-commerce|brand/i.test(c)) {
+    out.push(`${category} online store`.trim());
+    out.push(`${category} brands list`.trim());
+  } else if (/saas|software/i.test(c)) {
+    out.push(`${category} ${loc} companies`.trim());
+    out.push(`list of ${category} ${loc}`.trim());
+  }
+
+  return out.filter(Boolean);
+}
+
 export function parseMissionRequirements(goal: string): MissionRequirements {
   const rawGoal = goal.trim();
   const category = extractCategory(rawGoal);
@@ -85,19 +99,20 @@ export function parseMissionRequirements(goal: string): MissionRequirements {
   const quantity = extractQuantity(rawGoal);
   const qualification = extractQualification(rawGoal);
 
-  const queries: string[] = [];
+  const queries: string[] = [rawGoal];
 
-  // Primary: exact category + location
   if (location) {
     queries.push(`${category} ${location}`);
     queries.push(`best ${category} in ${location}`);
-    queries.push(`${category} ${location} list`);
+    queries.push(`${category} in ${location} list`);
     queries.push(`${category} near ${location}`);
   } else {
     queries.push(category);
-    queries.push(`${category} companies`);
     queries.push(`list of ${category}`);
+    queries.push(`${category} companies`);
   }
+
+  queries.push(...categorySearchHints(category, location));
 
   if (qualification) {
     queries.push(
@@ -107,15 +122,17 @@ export function parseMissionRequirements(goal: string): MissionRequirements {
     );
   }
 
-  // Always include the raw goal as a query
-  queries.unshift(rawGoal);
-
   const mustMatchTerms = category
     .toLowerCase()
     .split(/\s+/)
     .filter((w) => w.length > 2 && !/^(the|and|for|with|that)$/.test(w));
 
-  // Only exclude SaaS/software when user did NOT ask for it
+  // Singular/plural variants
+  for (const t of [...mustMatchTerms]) {
+    if (t.endsWith("s") && t.length > 4) mustMatchTerms.push(t.slice(0, -1));
+    else if (!t.endsWith("s")) mustMatchTerms.push(t + "s");
+  }
+
   const askedSoftware =
     /saas|software|app|platform|startup tech|ai tool/i.test(rawGoal);
   const excludeTerms = askedSoftware
@@ -128,8 +145,8 @@ export function parseMissionRequirements(goal: string): MissionRequirements {
     location,
     quantity,
     qualification,
-    searchQueries: [...new Set(queries)].slice(0, 6),
-    mustMatchTerms,
+    searchQueries: [...new Set(queries.filter(Boolean))].slice(0, 8),
+    mustMatchTerms: [...new Set(mustMatchTerms)],
     excludeTerms,
   };
 }

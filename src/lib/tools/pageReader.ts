@@ -1,8 +1,7 @@
 import { PageExtract, ToolResult } from "./types";
 
 /**
- * Fetch a public page and extract readable text.
- * Only returns content actually retrieved.
+ * Fetch a public page and extract readable text + meta description.
  */
 export async function readWebPage(url: string): Promise<ToolResult> {
   const target = (url || "").trim();
@@ -14,7 +13,7 @@ export async function readWebPage(url: string): Promise<ToolResult> {
     const res = await fetch(target, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (compatible; NexaBot/1.0; +https://nexa-ai-beryl-one.vercel.app)",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept: "text/html,application/xhtml+xml",
       },
       signal: AbortSignal.timeout(12000),
@@ -36,16 +35,45 @@ export async function readWebPage(url: string): Promise<ToolResult> {
       ? stripTags(titleMatch[1]).trim().slice(0, 200)
       : target;
 
+    const metaDesc =
+      html.match(
+        /<meta[^>]+name=["']description["'][^>]+content=["']([\s\S]*?)["']/i
+      ) ||
+      html.match(
+        /<meta[^>]+content=["']([\s\S]*?)["'][^>]+name=["']description["']/i
+      );
+    const ogDesc =
+      html.match(
+        /<meta[^>]+property=["']og:description["'][^>]+content=["']([\s\S]*?)["']/i
+      ) ||
+      html.match(
+        /<meta[^>]+content=["']([\s\S]*?)["'][^>]+property=["']og:description["']/i
+      );
+
     let text = html
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+      .replace(/<nav[\s\S]*?<\/nav>/gi, " ")
+      .replace(/<footer[\s\S]*?<\/footer>/gi, " ")
       .replace(/<[^>]+>/g, " ")
       .replace(/&nbsp;/g, " ")
-      .replace(/&/g, "&")
+      .replace(/&amp;/g, "&")
       .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 8000);
+      .trim();
+
+    const metaBits = [
+      metaDesc?.[1] ? stripTags(metaDesc[1]) : "",
+      ogDesc?.[1] ? stripTags(ogDesc[1]) : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    if (metaBits) {
+      text = (metaBits + " " + text).slice(0, 8000);
+    } else {
+      text = text.slice(0, 8000);
+    }
 
     const extract: PageExtract = { url: target, title, text };
 

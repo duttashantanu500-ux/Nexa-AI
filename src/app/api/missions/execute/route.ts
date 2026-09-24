@@ -11,16 +11,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Goal required" }, { status: 400 });
     }
 
-    const plan =
-      body.plan && Array.isArray(body.plan.steps)
-        ? body.plan
-        : buildPlan(goal, body.businessContext || null);
+    // Always rebuild plan from goal so requirements stay mission-specific
+    const plan = buildPlan(goal, body.businessContext || null);
 
     const result = await executeResearchMission({
       goal,
       business: body.businessContext || null,
       plan,
-      maxPages: Math.min(Number(body.maxPages) || 6, 8),
+      maxPages: Math.min(Number(body.maxPages) || 8, 10),
     });
 
     return NextResponse.json(result);
@@ -29,7 +27,7 @@ export async function POST(req: NextRequest) {
       {
         ok: false,
         status: "failed",
-        error: err?.message || "Execution failed",
+        error: "Something went wrong. Please try again.",
         activity: [],
         progress: 0,
         steps: [],

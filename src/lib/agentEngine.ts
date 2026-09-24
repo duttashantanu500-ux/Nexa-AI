@@ -84,20 +84,38 @@ export function buildPlan(
 
 function isNoiseHit(h: SearchHit, req: MissionRequirements): boolean {
   const t = `${h.title} ${h.snippet}`.toLowerCase();
-  // Entertainment false positives
-  if (/television series|tv series|soap opera|film director|actress|actor/i.test(t))
+  if (/television series|tv series|soap opera|film director|actress|actor|\(film\)|biography of/i.test(t))
     return true;
   if (/kyunki saas|saas bahu|bahu thi/i.test(t)) return true;
+  if (/shopping mall|road \(|relief of /i.test(t) && /restaurant|gym|cafe/i.test(req.category))
+    return true;
 
-  // Exclude forced software noise when not asked
   for (const ex of req.excludeTerms) {
     if (t.includes(ex) && !req.rawGoal.toLowerCase().includes(ex)) {
-      // Only noise if NO category term matches
       const hasCategory = req.mustMatchTerms.some((m) => t.includes(m));
       if (!hasCategory) return true;
     }
   }
   return false;
+}
+
+/** Prefer real business sites over encyclopedic/list pages */
+function rankHits(hits: SearchHit[], req: MissionRequirements): SearchHit[] {
+  const score = (h: SearchHit) => {
+    let s = 0;
+    const t = `${h.title} ${h.snippet} ${h.url}`.toLowerCase();
+    for (const term of req.mustMatchTerms) {
+      if (t.includes(term)) s += 3;
+    }
+    if (req.location && t.includes(req.location.toLowerCase())) s += 4;
+    if (/wikipedia\.org/i.test(h.url)) s -= 3;
+    if (/zomato|tripadvisor|yelp|yelp\.|justdial|sulekha|magicbricks|99acres/i.test(h.url))
+      s += 2;
+    if (/\.(com|in|co|io|net)\b/i.test(h.url) && !/wikipedia/i.test(h.url)) s += 1;
+    if (/list of|directory/i.test(t)) s += 1;
+    return s;
+  };
+  return [...hits].sort((a, b) => score(b) - score(a));
 }
 
 function relevanceScore(row: ProspectRow, req: MissionRequirements): number {
@@ -107,27 +125,25 @@ function relevanceScore(row: ProspectRow, req: MissionRequirements): number {
   for (const term of req.mustMatchTerms) {
     if (blob.includes(term)) score += 2;
   }
-
   if (req.location) {
-    const loc = req.location.toLowerCase();
-    if (blob.includes(loc)) score += 3;
+    if (blob.includes(req.location.toLowerCase())) score += 3;
   }
-
   if (req.qualification) {
-    const words = req.qualification.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+    const words = req.qualification
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 3);
     for (const w of words.slice(0, 4)) {
       if (blob.includes(w)) score += 1;
     }
   }
-
-  // Penalize pure software results when category is not software
+  if (/wikipedia\.org/i.test(row.website)) score -= 2;
   if (
     !/saas|software|app|platform/i.test(req.category) &&
     /saas|software as a service|cloud crm|b2b software/i.test(blob)
   ) {
-    score -= 4;
+    score -= 5;
   }
-
   if (row.evidence.length < 30) score -= 1;
   return score;
 }
@@ -172,12 +188,14 @@ export async function executeResearchMission(params: {
     mark(0, "done");
 
     mark(1, "running");
-    activity.push(`Web search for ${req.category}${req.location ? ` in ${req.location}` : ""}`);
+    activity.push(
+      `Web search for ${req.category}${req.location ? ` in ${req.location}` : ""}`
+    );
 
     let hits: SearchHit[] = [];
     for (const q of req.searchQueries) {
       activity.push(`Searching: "${q.slice(0, 100)}"`);
-      const search = await webSearch(q, 10);
+      const search = await webSearch(q, 12);
       if (!search.ok) {
         activity.push("Search unavailable for one query");
         continue;
@@ -188,9 +206,10 @@ export async function executeResearchMission(params: {
       activity.push(`${batch.length} usable hits`);
       hits = dedupeHits([...hits, ...batch]);
       (search.sources || []).forEach((s) => sources.push(s));
-      if (hits.length >= 15) break;
+      if (hits.length >= 20) break;
     }
 
+    hits = rankHits(hits, req);
     activity.push(`${hits.length} unique results collected`);
     mark(1, hits.length > 0 ? "done" : "failed");
 
@@ -221,13 +240,18 @@ export async function executeResearchMission(params: {
     }
 
     mark(2, "running");
-    activity.push(`Reading up to ${Math.min(maxPages, hits.length)} pages`);
+    // Prefer non-wiki pages first when reading
+    const ordered = [
+      ...hits.filter((h) => !/wikipedia\.org/i.test(h.url)),
+      ...hits.filter((h) => /wikipedia\.org/i.test(h.url)),
+    ];
+    activity.push(`Reading up to ${Math.min(maxPages, ordered.length)} pages`);
     let pagesRead = 0;
 
-    for (const hit of hits.slice(0, maxPages)) {
+    for (const hit of ordered.slice(0, maxPages)) {
       const page = await readWebPage(hit.url);
       if (!page.ok) {
-        if (hit.snippet && hit.snippet.length > 20) {
+        if (hit.snippet && hit.snippet.length > 20 && !isNoiseHit(hit, req)) {
           rows.push({
             company: cleanTitle(hit.title),
             website: hit.url,
@@ -246,6 +270,8 @@ export async function executeResearchMission(params: {
 
       const company = cleanTitle(extract.title || hit.title);
       const snippet = cleanText(extract.text).slice(0, 280) || hit.snippet;
+
+      if (isNoiseHit({ title: company, url: extract.url, snippet }, req)) continue;
 
       rows.push({
         company,
@@ -285,7 +311,6 @@ export async function executeResearchMission(params: {
       qualification: r.qualification || qualify(r, req),
     }));
 
-    // Hard reject: software-only noise when not requested
     const filtered = tagged.filter((r) => {
       if (/saas|software|app|platform/i.test(req.category)) return true;
       const blob = `${r.company} ${r.evidence}`.toLowerCase();
