@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 
-/**
- * Starts Google OAuth. Only redirects if credentials exist.
- * Otherwise returns clear configuration required payload.
- */
+function resolveAppUrl(req: NextRequest) {
+  if (process.env.NEXT_PUBLIC_APP_URL)
+    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL)
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return req.nextUrl.origin;
+}
+
 export async function GET(req: NextRequest) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : req.nextUrl.origin;
-
+  const appUrl = resolveAppUrl(req);
   const provider = req.nextUrl.searchParams.get("provider") || "gmail";
 
   if (!clientId || !clientSecret) {
@@ -34,17 +34,9 @@ export async function GET(req: NextRequest) {
 
   const scopes =
     provider === "gdrive"
-      ? [
-          "openid",
-          "email",
-          "https://www.googleapis.com/auth/drive.readonly",
-        ]
+      ? ["openid", "email", "https://www.googleapis.com/auth/drive.readonly"]
       : provider === "gcal"
-        ? [
-            "openid",
-            "email",
-            "https://www.googleapis.com/auth/calendar.readonly",
-          ]
+        ? ["openid", "email", "https://www.googleapis.com/auth/calendar.readonly"]
         : [
             "openid",
             "email",
