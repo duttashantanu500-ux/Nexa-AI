@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nexa — AI Business Growth Partner",
+  title: "Nexa — AI Business Operator",
   description:
-    "Nexa is your focused AI partner for founders, business owners and agencies. Marketing, Sales, Strategy, Content & Brand, and Personal Growth.",
+    "Give Nexa a business goal. It plans the work, executes what it can, and delivers the result.",
 };
 
 export default function RootLayout({
