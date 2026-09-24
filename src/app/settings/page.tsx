@@ -11,12 +11,22 @@ import {
 import { AppState } from "@/types";
 import Link from "next/link";
 
+function isValidUrl(s: string) {
+  try {
+    const u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export default function SettingsPage() {
   const router = useRouter();
   const [state, setState] = useState<AppState | null>(null);
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [website, setWebsite] = useState("");
   const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
 
   useEffect(() => {
     const s = loadAppState();
@@ -26,7 +36,9 @@ export default function SettingsPage() {
     }
     setState(s);
     setTheme(s.theme || "system");
-    setWebsite(s.businessContext?.website || "");
+    const w = s.businessContext?.website || "";
+    // Don't show incomplete "https://" as a saved value
+    setWebsite(w === "https://" || w === "http://" ? "" : w);
   }, [router]);
 
   const applyTheme = (t: "light" | "dark" | "system") => {
@@ -40,6 +52,23 @@ export default function SettingsPage() {
     } else root.classList.remove("dark");
   };
 
+  const saveWebsite = () => {
+    setMsg("");
+    setErr("");
+    const v = website.trim();
+    if (!v) {
+      updateBusinessContext({ website: "" });
+      setMsg("Website cleared");
+      return;
+    }
+    if (!isValidUrl(v)) {
+      setErr("Enter a full URL starting with https://");
+      return;
+    }
+    updateBusinessContext({ website: v });
+    setMsg("Website saved");
+  };
+
   if (!state?.user) {
     return (
       <div className="min-h-screen flex items-center justify-center text-sm text-muted">
@@ -50,7 +79,7 @@ export default function SettingsPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-lg px-4 py-8 space-y-8">
+      <div className="mx-auto max-w-lg px-4 py-8 space-y-8 animate-fade-in">
         <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
 
         <section className="space-y-3">
@@ -62,7 +91,7 @@ export default function SettingsPage() {
             </div>
             <div className="px-4 py-3 flex justify-between text-sm">
               <span className="text-muted">Email</span>
-              <span>{state.user.email}</span>
+              <span className="truncate ml-4">{state.user.email}</span>
             </div>
           </div>
         </section>
@@ -71,7 +100,7 @@ export default function SettingsPage() {
           <h2 className="text-sm font-medium text-muted uppercase tracking-wider">Business</h2>
           <Link
             href="/brain"
-            className="block rounded-xl border border-border bg-card px-4 py-3 text-sm hover:bg-sidebar"
+            className="block rounded-xl border border-border bg-card px-4 py-3 text-sm hover:border-indigo-200"
           >
             Open Business Brain
           </Link>
@@ -81,23 +110,21 @@ export default function SettingsPage() {
               value={website}
               onChange={(e) => setWebsite(e.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none"
-              placeholder="https://"
+              placeholder="Add your business website"
             />
             <button
-              onClick={() => {
-                updateBusinessContext({ website: website.trim() });
-                setMsg("Website saved");
-              }}
-              className="rounded-lg border border-border px-3 py-1.5 text-xs"
+              onClick={saveWebsite}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-800"
             >
               Save website
             </button>
-            {msg && <p className="text-xs text-muted">{msg}</p>}
+            {msg && <p className="text-xs text-emerald-600">{msg}</p>}
+            {err && <p className="text-xs text-red-600">{err}</p>}
           </div>
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-medium text-muted uppercase tracking-wider">Preferences</h2>
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wider">Theme</h2>
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="flex gap-2">
               {(["light", "dark", "system"] as const).map((t) => (
@@ -105,7 +132,9 @@ export default function SettingsPage() {
                   key={t}
                   onClick={() => applyTheme(t)}
                   className={`flex-1 rounded-lg py-2 text-sm capitalize ${
-                    theme === t ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "bg-sidebar"
+                    theme === t
+                      ? "bg-indigo-600 text-white"
+                      : "bg-slate-50 dark:bg-slate-800"
                   }`}
                 >
                   {t}
@@ -116,16 +145,14 @@ export default function SettingsPage() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-medium text-muted uppercase tracking-wider">Security</h2>
+          <h2 className="text-sm font-medium text-muted uppercase tracking-wider">Session</h2>
           <button
             onClick={() => router.push("/login")}
-            className="w-full rounded-xl border border-border bg-card px-4 py-3 text-sm text-left hover:bg-sidebar"
+            className="w-full rounded-xl border border-border bg-card px-4 py-3 text-sm text-left hover:bg-slate-50 dark:hover:bg-slate-800"
           >
             Log out
           </button>
         </section>
-
-        <p className="text-xs text-muted text-center">Nexa — AI Business Operator</p>
       </div>
     </AppShell>
   );

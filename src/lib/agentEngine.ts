@@ -2,6 +2,7 @@ import { BusinessContext } from "@/types";
 import { webSearch } from "./tools/webSearch";
 import { readWebPage } from "./tools/pageReader";
 import { ProspectRow, SearchHit } from "./tools/types";
+import { parseMissionRequirements, MissionRequirements } from "./missionParse";
 
 export interface EnginePlanStep {
   id: string;
@@ -15,6 +16,7 @@ export interface EnginePlan {
   objective: string;
   steps: EnginePlanStep[];
   researchQuery?: string;
+  requirements?: MissionRequirements;
 }
 
 export interface EngineDeliverable {
@@ -43,117 +45,100 @@ function id() {
   return `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function normalizeGoal(goal: string) {
-  return goal
-    .replace(/\bSaaS\b/gi, "software as a service")
-    .replace(/\bB2B\b/gi, "business to business")
-    .trim();
-}
-
 export function buildPlan(
   goal: string,
-  business?: BusinessContext | null
+  _business?: BusinessContext | null
 ): EnginePlan {
   const g = goal.trim();
-  const isResearch =
-    /find|research|prospect|customer|lead|competitor|market|brand|compan/i.test(
-      g
-    );
-
-  const industry = business?.industry || "";
-  const target =
-    business?.targetCustomer ||
-    business?.targetCustomers ||
-    business?.targetClients ||
-    "";
-  const location = business?.location || "";
-
-  const researchQuery = normalizeGoal(
-    [g, industry, target, location].filter(Boolean).join(" ")
-  ).slice(0, 180);
-
-  if (isResearch) {
-    return {
-      title: g.length > 48 ? g.slice(0, 45) + "…" : g,
-      objective: g,
-      researchQuery,
-      steps: [
-        { id: id(), title: "Use business context", status: "pending" },
-        { id: id(), title: "Web search for candidates", status: "pending", tool: "web_search" },
-        { id: id(), title: "Read top candidate pages", status: "pending", tool: "web_page_reader" },
-        { id: id(), title: "Qualify against mission goal", status: "pending", tool: "structured_data" },
-        { id: id(), title: "Produce deliverable", status: "pending" },
-      ],
-    };
-  }
+  const req = parseMissionRequirements(g);
 
   return {
-    title: g.length > 48 ? g.slice(0, 45) + "…" : g,
+    title: g.length > 56 ? g.slice(0, 53) + "…" : g,
     objective: g,
-    researchQuery,
+    researchQuery: req.searchQueries[0],
+    requirements: req,
     steps: [
-      { id: id(), title: "Clarify objective from business context", status: "pending" },
-      { id: id(), title: "Search for supporting information", status: "pending", tool: "web_search" },
-      { id: id(), title: "Read key sources", status: "pending", tool: "web_page_reader" },
-      { id: id(), title: "Write structured deliverable", status: "pending" },
+      { id: id(), title: "Parse mission requirements", status: "pending" },
+      {
+        id: id(),
+        title: `Search for ${req.category}${req.location ? ` in ${req.location}` : ""}`,
+        status: "pending",
+        tool: "web_search",
+      },
+      {
+        id: id(),
+        title: "Read candidate pages",
+        status: "pending",
+        tool: "web_page_reader",
+      },
+      {
+        id: id(),
+        title: "Filter results against your request",
+        status: "pending",
+        tool: "structured_data",
+      },
+      { id: id(), title: "Produce deliverable", status: "pending" },
     ],
   };
 }
 
-function buildSearchQueries(goal: string, business?: BusinessContext | null): string[] {
-  const industry = business?.industry || "";
-  const location = business?.location || "India";
-  const base = normalizeGoal(goal.replace(/[«»"']/g, ""));
-
-  const queries = [
-    base,
-    `${base} ${location} companies`,
-    `software as a service companies ${location}`,
-    `Indian software as a service companies list`,
-    "Freshworks Zoho Postman Chargebee BrowserStack Unicommerce",
-    industry ? `${industry} companies ${location}` : "",
-  ].filter((q) => q && q.length > 3);
-
-  return [...new Set(queries)].slice(0, 5);
-}
-
-function isNoiseHit(h: SearchHit): boolean {
+function isNoiseHit(h: SearchHit, req: MissionRequirements): boolean {
   const t = `${h.title} ${h.snippet}`.toLowerCase();
-  if (/kyunki saas|saas bahu|bahu thi|television series|tv series|film which was released/i.test(t))
+  // Entertainment false positives
+  if (/television series|tv series|soap opera|film director|actress|actor/i.test(t))
     return true;
-  if (/actress|actor|film director|soap opera/i.test(t)) return true;
+  if (/kyunki saas|saas bahu|bahu thi/i.test(t)) return true;
+
+  // Exclude forced software noise when not asked
+  for (const ex of req.excludeTerms) {
+    if (t.includes(ex) && !req.rawGoal.toLowerCase().includes(ex)) {
+      // Only noise if NO category term matches
+      const hasCategory = req.mustMatchTerms.some((m) => t.includes(m));
+      if (!hasCategory) return true;
+    }
+  }
   return false;
 }
 
-function looksLikeCompany(h: SearchHit): boolean {
-  const t = `${h.title} ${h.snippet}`.toLowerCase();
-  if (isNoiseHit(h)) return false;
-  if (/inc\.?|ltd|limited|company|software|platform|startup|headquarter/i.test(t)) return true;
-  if (/wikipedia\.org\/wiki\//i.test(h.url) && /\(company\)/i.test(h.title)) return true;
-  return !/wikipedia\.org\/wiki\//i.test(h.url);
+function relevanceScore(row: ProspectRow, req: MissionRequirements): number {
+  const blob = `${row.company} ${row.evidence} ${row.reason} ${row.website}`.toLowerCase();
+  let score = 0;
+
+  for (const term of req.mustMatchTerms) {
+    if (blob.includes(term)) score += 2;
+  }
+
+  if (req.location) {
+    const loc = req.location.toLowerCase();
+    if (blob.includes(loc)) score += 3;
+  }
+
+  if (req.qualification) {
+    const words = req.qualification.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+    for (const w of words.slice(0, 4)) {
+      if (blob.includes(w)) score += 1;
+    }
+  }
+
+  // Penalize pure software results when category is not software
+  if (
+    !/saas|software|app|platform/i.test(req.category) &&
+    /saas|software as a service|cloud crm|b2b software/i.test(blob)
+  ) {
+    score -= 4;
+  }
+
+  if (row.evidence.length < 30) score -= 1;
+  return score;
 }
 
-/** Heuristic relevance to goal — conservative, never invents. */
-function qualifyAgainstGoal(
+function qualify(
   row: ProspectRow,
-  goal: string
+  req: MissionRequirements
 ): "qualified" | "discovered" | "unverified" {
-  const g = goal.toLowerCase();
-  const blob = `${row.company} ${row.evidence} ${row.reason}`.toLowerCase();
-
-  const wantsIndia = /india|indian/.test(g);
-  const wantsSaas = /saas|software as a service|software/.test(g);
-  const wantsCompany = /compan|startup|business|customer|lead|prospect/.test(g);
-
-  let score = 0;
-  if (wantsIndia && /india|indian|bangalore|bengaluru|mumbai|delhi|hyderabad|chennai|pune|gurugram|gurgaon/.test(blob))
-    score += 2;
-  if (wantsSaas && /software|saas|platform|cloud|subscription|b2b/.test(blob)) score += 2;
-  if (wantsCompany && /company|inc|ltd|limited|startup|headquarter/.test(blob)) score += 1;
-  if (/wikipedia\.org/i.test(row.website) && !/\(company\)/i.test(row.company)) score -= 1;
-  if (row.evidence.length < 40) return "unverified";
-  if (score >= 3) return "qualified";
-  if (score >= 1) return "discovered";
+  const score = relevanceScore(row, req);
+  if (score >= 4) return "qualified";
+  if (score >= 2) return "discovered";
   return "unverified";
 }
 
@@ -169,42 +154,44 @@ export async function executeResearchMission(params: {
   const sources: { title?: string; url: string }[] = [];
   const rows: ProspectRow[] = [];
 
+  const req =
+    params.plan.requirements || parseMissionRequirements(params.goal);
+
   const mark = (index: number, status: EnginePlanStep["status"]) => {
     if (steps[index]) steps[index] = { ...steps[index], status };
   };
 
   try {
     mark(0, "running");
-    activity.push("Loaded business context");
+    activity.push(
+      `Requirements: category="${req.category}"` +
+        (req.location ? `, location="${req.location}"` : "") +
+        (req.quantity ? `, quantity=${req.quantity}` : "") +
+        (req.qualification ? `, qualification="${req.qualification}"` : "")
+    );
     mark(0, "done");
 
     mark(1, "running");
-    const queries = buildSearchQueries(params.goal, params.business);
-    activity.push(`Web search started (${queries.length} queries)`);
+    activity.push(`Web search for ${req.category}${req.location ? ` in ${req.location}` : ""}`);
 
     let hits: SearchHit[] = [];
-    for (const q of queries) {
-      activity.push(`Searching: "${q.slice(0, 90)}"`);
+    for (const q of req.searchQueries) {
+      activity.push(`Searching: "${q.slice(0, 100)}"`);
       const search = await webSearch(q, 10);
       if (!search.ok) {
-        activity.push(`Search issue: search unavailable for this query`);
+        activity.push("Search unavailable for one query");
         continue;
       }
       const batch = (((search.data as any)?.hits || []) as SearchHit[]).filter(
-        (h) => !isNoiseHit(h)
+        (h) => !isNoiseHit(h, req)
       );
       activity.push(`${batch.length} usable hits`);
       hits = dedupeHits([...hits, ...batch]);
       (search.sources || []).forEach((s) => sources.push(s));
-      if (hits.filter(looksLikeCompany).length >= 10) break;
+      if (hits.length >= 15) break;
     }
 
-    hits = dedupeHits([
-      ...hits.filter(looksLikeCompany),
-      ...hits.filter((h) => !looksLikeCompany(h)),
-    ]);
-
-    activity.push(`${hits.length} unique search results collected`);
+    activity.push(`${hits.length} unique results collected`);
     mark(1, hits.length > 0 ? "done" : "failed");
 
     if (hits.length === 0) {
@@ -220,11 +207,12 @@ export async function executeResearchMission(params: {
         deliverable: {
           type: "report",
           title: "Research results",
-          content:
-            "No public web results were found for this query. Try different keywords or try again later.",
+          content: `No public web results were found for "${req.category}"${
+            req.location ? ` in ${req.location}` : ""
+          }. Try different keywords.`,
           rows: [],
-          discovered: [],
           qualified: [],
+          discovered: [],
           unverified: [],
           sources: [],
           createdAt: new Date().toISOString(),
@@ -239,12 +227,11 @@ export async function executeResearchMission(params: {
     for (const hit of hits.slice(0, maxPages)) {
       const page = await readWebPage(hit.url);
       if (!page.ok) {
-        activity.push(`Could not read a page`);
-        if (hit.snippet && hit.snippet.length > 20 && !isNoiseHit(hit)) {
+        if (hit.snippet && hit.snippet.length > 20) {
           rows.push({
             company: cleanTitle(hit.title),
             website: hit.url,
-            reason: "Found in search; page body could not be verified",
+            reason: "Found in search; page could not be fully verified",
             evidence: hit.snippet.slice(0, 220),
             source: hit.url,
             qualification: "unverified",
@@ -258,34 +245,18 @@ export async function executeResearchMission(params: {
       sources.push({ title: extract.title, url: extract.url });
 
       const company = cleanTitle(extract.title || hit.title);
-      const snippet = cleanWikiText(extract.text).slice(0, 280) || hit.snippet;
-
-      if (isNoiseHit({ title: company, url: extract.url, snippet })) continue;
+      const snippet = cleanText(extract.text).slice(0, 280) || hit.snippet;
 
       rows.push({
         company,
         website: extract.url,
-        reason: "Public page found and read",
+        reason: `Matched search for ${req.category}`,
         evidence: snippet,
         source: extract.url,
       });
-
-      if (/wikipedia\.org/i.test(extract.url)) {
-        const external = extractExternalUrls(extract.text, extract.url);
-        for (const ext of external.slice(0, 2)) {
-          sources.push({ title: company + " site", url: ext });
-          rows.push({
-            company,
-            website: ext,
-            reason: "External link found on reference page",
-            evidence: snippet.slice(0, 120),
-            source: extract.url,
-          });
-        }
-      }
     }
 
-    activity.push(`${pagesRead} websites analyzed`);
+    activity.push(`${pagesRead} pages analyzed`);
     mark(2, pagesRead > 0 || rows.length > 0 ? "done" : "failed");
 
     if (rows.length === 0) {
@@ -296,7 +267,7 @@ export async function executeResearchMission(params: {
         progress: 50,
         status: "failed",
         steps,
-        error: "No usable pages after filtering",
+        error: "No usable pages after reading",
       };
     }
 
@@ -311,15 +282,29 @@ export async function executeResearchMission(params: {
 
     const tagged = unique.map((r) => ({
       ...r,
-      qualification: r.qualification || qualifyAgainstGoal(r, params.goal),
+      qualification: r.qualification || qualify(r, req),
     }));
 
-    const qualified = tagged.filter((r) => r.qualification === "qualified");
-    const discovered = tagged.filter((r) => r.qualification === "discovered");
-    const unverified = tagged.filter((r) => r.qualification === "unverified");
+    // Hard reject: software-only noise when not requested
+    const filtered = tagged.filter((r) => {
+      if (/saas|software|app|platform/i.test(req.category)) return true;
+      const blob = `${r.company} ${r.evidence}`.toLowerCase();
+      const isSoftwareOnly =
+        /saas|software as a service|cloud crm/i.test(blob) &&
+        !req.mustMatchTerms.some((t) => blob.includes(t));
+      return !isSoftwareOnly;
+    });
+
+    const qualified = filtered.filter((r) => r.qualification === "qualified");
+    const discovered = filtered.filter((r) => r.qualification === "discovered");
+    const unverified = filtered.filter((r) => r.qualification === "unverified");
+
+    const limit = req.quantity || 50;
+    const qSlice = qualified.slice(0, limit);
+    const dSlice = discovered.slice(0, Math.max(0, limit - qSlice.length));
 
     activity.push(
-      `Qualified ${qualified.length} · Discovered ${discovered.length} · Unverified ${unverified.length}`
+      `Qualified ${qSlice.length} · Discovered ${discovered.length} · Unverified ${unverified.length}`
     );
     mark(3, "done");
 
@@ -339,12 +324,18 @@ export async function executeResearchMission(params: {
     };
 
     const content =
-      `Research for: ${params.goal}\n\n` +
-      section("Qualified companies", qualified) +
+      `Research for: ${params.goal}\n` +
+      `Category: ${req.category}` +
+      (req.location ? ` · Location: ${req.location}` : "") +
+      `\n\n` +
+      section("Qualified", qSlice) +
       "\n" +
-      section("Discovered websites", discovered) +
+      section("Discovered", dSlice) +
       "\n" +
-      section("Unable to verify", unverified);
+      section("Unable to verify", unverified.slice(0, 10)) +
+      (filtered.length < (req.quantity || 0)
+        ? `\nNote: Found ${filtered.length} relevant items; fewer than the requested ${req.quantity}.\n`
+        : "");
 
     activity.push("Final report created");
     mark(4, "done");
@@ -359,15 +350,15 @@ export async function executeResearchMission(params: {
         type: "lead_list",
         title: `Results: ${params.goal.slice(0, 60)}`,
         content,
-        rows: tagged,
-        qualified,
-        discovered,
+        rows: filtered,
+        qualified: qSlice,
+        discovered: dSlice,
         unverified,
         sources: dedupeSources(sources),
         createdAt: new Date().toISOString(),
       },
     };
-  } catch (err: any) {
+  } catch {
     activity.push("Engine error");
     return {
       ok: false,
@@ -388,7 +379,7 @@ function cleanTitle(t: string) {
     .slice(0, 80);
 }
 
-function cleanWikiText(text: string) {
+function cleanText(text: string) {
   return text
     .replace(/Jump to content[\s\S]*?Main menu/gi, " ")
     .replace(/Main menu[\s\S]*?Navigation/gi, " ")
@@ -412,25 +403,4 @@ function dedupeSources(list: { title?: string; url: string }[]) {
     seen.add(s.url);
     return true;
   });
-}
-
-function extractExternalUrls(text: string, pageUrl: string): string[] {
-  const found = text.match(/https?:\/\/[\w.-]+\.[a-z]{2,}[\w./?&=%+-]*/gi) || [];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const u of found) {
-    try {
-      const url = new URL(u);
-      if (/wikipedia\.|wikimedia\.|google\.|facebook\.|twitter\.|linkedin\.|youtube\./i.test(url.hostname))
-        continue;
-      if (url.hostname === new URL(pageUrl).hostname) continue;
-      const clean = url.origin;
-      if (seen.has(clean)) continue;
-      seen.add(clean);
-      out.push(clean);
-    } catch {
-      /* */
-    }
-  }
-  return out.slice(0, 5);
 }
