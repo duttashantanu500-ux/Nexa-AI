@@ -49,12 +49,14 @@ export type MissionStatus =
   | "waiting_approval"
   | "completed"
   | "failed"
-  | "paused";
+  | "paused"
+  | "cancelled";
 
 export interface MissionStep {
   id: string;
   title: string;
-  status: "pending" | "running" | "done" | "failed";
+  status: "pending" | "running" | "done" | "failed" | "skipped";
+  tool?: string;
 }
 
 export interface MissionActivity {
@@ -62,6 +64,26 @@ export interface MissionActivity {
   text: string;
   at: string;
   type?: "info" | "success" | "warning";
+}
+
+export interface MissionSource {
+  title?: string;
+  url: string;
+}
+
+export interface MissionDeliverable {
+  type: string;
+  title: string;
+  content: string;
+  rows?: {
+    company: string;
+    website: string;
+    reason: string;
+    evidence: string;
+    source: string;
+  }[];
+  sources: MissionSource[];
+  createdAt: string;
 }
 
 export interface Mission {
@@ -74,6 +96,10 @@ export interface Mission {
   plan: MissionStep[];
   activity: MissionActivity[];
   result?: string;
+  deliverable?: MissionDeliverable;
+  tools?: string[];
+  researchQuery?: string;
+  error?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -102,6 +128,8 @@ export interface Connection {
   provider: string;
   status: ConnectionStatus;
   description?: string;
+  mcpUrl?: string;
+  mcpTools?: string[];
 }
 
 export interface ActivityEvent {
@@ -120,6 +148,7 @@ export interface ApprovalRequest {
   summary: string;
   status: "pending" | "approved" | "rejected";
   missionId?: string;
+  actionId?: string;
   createdAt: string;
 }
 
@@ -204,29 +233,38 @@ export const DEFAULT_CONNECTIONS: Connection[] = [
 export const AGENT_TEMPLATES: Omit<Agent, "id" | "userId" | "createdAt">[] = [
   {
     name: "Lead Researcher",
-    purpose: "Finds and qualifies potential customers.",
+    purpose: "Finds and qualifies potential customers using web research.",
     status: "idle",
-    tools: ["Web Research", "Browser"],
+    tools: ["web_search", "web_page_reader"],
     schedule: "On demand",
-    recentActivity: "Template — not running yet",
+    recentActivity: "Uses real web search when run via Missions",
     isTemplate: true,
   },
   {
     name: "Competitor Monitor",
-    purpose: "Monitors competitors and reports meaningful changes.",
+    purpose: "Researches competitor pages and public changes.",
     status: "idle",
-    tools: ["Web Research", "Browser"],
-    schedule: "Weekly",
-    recentActivity: "Template — not running yet",
+    tools: ["web_search", "web_page_reader"],
+    schedule: "On demand",
+    recentActivity: "Uses real web search when run via Missions",
+    isTemplate: true,
+  },
+  {
+    name: "Market Researcher",
+    purpose: "Researches markets and opportunities from public sources.",
+    status: "idle",
+    tools: ["web_search", "web_page_reader"],
+    schedule: "On demand",
+    recentActivity: "Uses real web search when run via Missions",
     isTemplate: true,
   },
   {
     name: "Content Researcher",
-    purpose: "Finds trends and content opportunities.",
+    purpose: "Finds content opportunities from public web sources.",
     status: "idle",
-    tools: ["Web Research"],
-    schedule: "Weekly",
-    recentActivity: "Template — not running yet",
+    tools: ["web_search", "web_page_reader"],
+    schedule: "On demand",
+    recentActivity: "Uses real web search when run via Missions",
     isTemplate: true,
   },
 ];
