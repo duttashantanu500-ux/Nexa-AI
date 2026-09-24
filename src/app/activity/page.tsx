@@ -9,6 +9,7 @@ import { ActivityEvent } from "@/types";
 export default function ActivityPage() {
   const router = useRouter();
   const [events, setEvents] = useState<ActivityEvent[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -17,6 +18,7 @@ export default function ActivityPage() {
       return;
     }
     setEvents(s.activity || []);
+    setLoaded(true);
   }, [router]);
 
   return (
@@ -24,31 +26,28 @@ export default function ActivityPage() {
       <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Activity</h1>
-          <p className="text-sm text-muted">What Nexa has done recently</p>
+          <p className="text-sm text-muted mt-1">
+            Real events only — mission created, completed, failed, agent created.
+          </p>
         </div>
 
-        {events.length === 0 ? (
+        {!loaded ? (
+          <div className="text-sm text-muted">Loading…</div>
+        ) : events.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted">
-            No activity yet. Create a mission to get started.
+            No activity yet.
           </div>
         ) : (
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+          <div className="space-y-2">
             {events.map((e) => (
-              <div key={e.id} className="flex gap-4 px-4 py-3 text-sm">
-                <div className="text-xs text-muted whitespace-nowrap pt-0.5">
-                  {new Date(e.at).toLocaleString([], {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </div>
-                <div>
-                  <div>{e.text}</div>
-                  {e.category && (
-                    <div className="text-[11px] text-muted capitalize mt-0.5">{e.category}</div>
-                  )}
-                </div>
+              <div
+                key={e.id}
+                className="rounded-xl border border-border bg-card px-4 py-3 flex gap-3 text-sm"
+              >
+                <span className="text-xs text-muted whitespace-nowrap shrink-0">
+                  {new Date(e.at).toLocaleString()}
+                </span>
+                <span>{e.text}</span>
               </div>
             ))}
           </div>

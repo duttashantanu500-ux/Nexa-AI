@@ -33,6 +33,12 @@ export default function HomePage() {
     setUser(s.user);
     setMissions(s.missions || []);
     ensureDefaultAgents(s.user.id);
+
+    const prefill = sessionStorage.getItem("nexa_prefill_goal");
+    if (prefill) {
+      setGoal(prefill);
+      sessionStorage.removeItem("nexa_prefill_goal");
+    }
   }, [router]);
 
   const handleCreate = async () => {
@@ -88,15 +94,18 @@ export default function HomePage() {
           <p className="mt-1 text-sm text-muted">What do you want Nexa to get done?</p>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card p-3 shadow-sm">
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
           <textarea
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
-            placeholder="Find 20 potential customers for my SaaS…"
+            placeholder="Research 20 potential customers for my SaaS…"
             rows={3}
             className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleCreate();
+            }}
           />
-          <div className="mt-2 flex justify-end gap-2 items-center">
+          <div className="mt-3 flex justify-end gap-2 items-center">
             {error && <span className="text-xs text-red-600">{error}</span>}
             <button
               onClick={handleCreate}

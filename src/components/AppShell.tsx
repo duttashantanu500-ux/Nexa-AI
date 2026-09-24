@@ -11,26 +11,23 @@ import {
   Brain,
   Activity,
   Settings,
-  ShieldCheck,
-  Bell,
-  Radar,
   Menu,
   X,
 } from "lucide-react";
 import { useState } from "react";
 
+/** Figma nav — only primary product areas */
 const NAV = [
   { href: "/home", label: "Home", icon: Home },
   { href: "/missions", label: "Missions", icon: Crosshair },
   { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/monitors", label: "Monitors", icon: Radar },
   { href: "/connections", label: "Connections", icon: Plug },
   { href: "/brain", label: "Business Brain", icon: Brain },
   { href: "/activity", label: "Activity", icon: Activity },
-  { href: "/approvals", label: "Approvals", icon: ShieldCheck },
-  { href: "/notifications", label: "Notifications", icon: Bell },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
+
+const MOBILE_NAV = NAV.slice(0, 4).concat([{ href: "/settings", label: "More", icon: Settings }]);
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -65,8 +62,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 border-r border-border bg-sidebar md:flex md:flex-col">
-        <div className="flex h-14 items-center px-4 border-b border-sidebar-border">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[220px] border-r border-border bg-sidebar md:flex md:flex-col">
+        <div className="flex h-14 items-center px-5 border-b border-sidebar-border">
           <button
             onClick={() => router.push("/home")}
             className="text-sm font-semibold tracking-tight"
@@ -74,14 +71,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Nexa
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto">{NavItems}</div>
-        <div className="p-3 border-t border-sidebar-border text-[11px] text-muted">
+        <div className="flex-1 overflow-y-auto pt-1">{NavItems}</div>
+        <div className="p-4 border-t border-sidebar-border text-[11px] text-muted">
           AI Business Operator
         </div>
       </aside>
 
       <div className="md:hidden sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border bg-background px-3">
-        <button onClick={() => setOpen(true)} className="p-1.5">
+        <button onClick={() => setOpen(true)} className="p-1.5" aria-label="Open menu">
           <Menu className="h-5 w-5" />
         </button>
         <span className="text-sm font-semibold">Nexa</span>
@@ -93,7 +90,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="w-64 max-w-[80vw] bg-sidebar border-r border-border flex flex-col">
             <div className="flex h-12 items-center justify-between px-3 border-b border-sidebar-border">
               <span className="text-sm font-semibold">Nexa</span>
-              <button onClick={() => setOpen(false)} className="p-1">
+              <button onClick={() => setOpen(false)} className="p-1" aria-label="Close">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -105,28 +102,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border bg-background/95 backdrop-blur">
         <div className="grid grid-cols-5 gap-0.5 px-1 py-1">
-          {NAV.slice(0, 5).map((item) => {
+          {MOBILE_NAV.map((item) => {
             const active =
-              pathname === item.href || pathname.startsWith(item.href + "/");
+              item.label === "More"
+                ? ["/settings", "/brain", "/activity"].some(
+                    (p) => pathname === p || pathname.startsWith(p + "/")
+                  )
+                : pathname === item.href || pathname.startsWith(item.href + "/");
             const Icon = item.icon;
             return (
               <Link
-                key={item.href}
+                key={item.href + item.label}
                 href={item.href}
                 className={cn(
                   "flex flex-col items-center gap-0.5 rounded-md py-1.5 text-[10px]",
-                  active ? "text-foreground" : "text-muted"
+                  active ? "text-foreground font-medium" : "text-muted"
                 )}
               >
                 <Icon className="h-4 w-4" />
-                {item.label.split(" ")[0]}
+                {item.label}
               </Link>
             );
           })}
         </div>
       </nav>
 
-      <main className="md:pl-56 pb-20 md:pb-0 min-h-screen">{children}</main>
+      <main className="md:pl-[220px] pb-20 md:pb-0 min-h-screen">{children}</main>
     </div>
   );
 }

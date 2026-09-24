@@ -3,12 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import {
-  loadOperatorState,
-  toggleConnection,
-  pushActivity,
-  addMcpConnection,
-} from "@/lib/operatorStore";
+import { loadOperatorState, addMcpConnection } from "@/lib/operatorStore";
 import { Connection, DEFAULT_CONNECTIONS } from "@/types";
 
 export default function ConnectionsPage() {
@@ -24,23 +19,16 @@ export default function ConnectionsPage() {
       router.replace("/signup");
       return;
     }
-    setConnections(s.connections?.length ? s.connections : DEFAULT_CONNECTIONS);
+    // Always start from catalog; never invent "connected" OAuth states
+    const stored = s.connections?.length ? s.connections : DEFAULT_CONNECTIONS;
+    setConnections(
+      stored.map((c) =>
+        c.provider === "mcp"
+          ? c
+          : { ...c, status: "not_connected" as const }
+      )
+    );
   }, [router]);
-
-  const onToggle = (id: string) => {
-    const next = toggleConnection(id);
-    setConnections(next);
-    const c = next.find((x) => x.id === id);
-    const user = loadOperatorState().user;
-    if (user && c) {
-      pushActivity(
-        user.id,
-        `${c.name} marked ${c.status === "connected" ? "connected" : "not connected"} (local only — OAuth not live)`,
-        "connection",
-        c.id
-      );
-    }
-  };
 
   const addMcp = () => {
     if (!mcpUrl.trim()) return;
@@ -49,14 +37,6 @@ export default function ConnectionsPage() {
     setMcpName("");
     setMcpUrl("");
     setShowMcp(false);
-    const user = loadOperatorState().user;
-    if (user) {
-      pushActivity(
-        user.id,
-        "Custom MCP endpoint saved (tool discovery runtime not live yet)",
-        "connection"
-      );
-    }
   };
 
   return (
@@ -64,50 +44,59 @@ export default function ConnectionsPage() {
       <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Connections</h1>
-          <p className="text-sm text-muted">
-            Built-in research tools work without connections. OAuth providers and MCP tool
-            execution are not live yet — entries are saved for Part 3.
+          <p className="text-sm text-muted mt-1">
+            Only real connections show as connected. OAuth providers are not live yet.
           </p>
         </div>
 
-        <div className="rounded-xl border border-border bg-card p-4 text-sm space-y-1">
+        <div className="rounded-xl border border-border bg-card p-4 text-sm">
           <div className="font-medium">Available now (no connection needed)</div>
-          <div className="text-muted">web_search · web_page_reader · structured_data</div>
+          <div className="text-muted mt-1">
+            web_search · web_page_reader · structured_data
+          </div>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          {connections.map((c) => (
-            <div
-              key={c.id}
-              className="rounded-xl border border-border bg-card p-4 flex flex-col gap-3"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="text-sm font-medium">{c.name}</div>
-                  <div className="text-xs text-muted">{c.description}</div>
-                  {c.mcpUrl && (
-                    <div className="text-[11px] text-muted mt-1 break-all">{c.mcpUrl}</div>
-                  )}
-                </div>
-                <span
-                  className={`text-[11px] rounded-full px-2 py-0.5 ${
-                    c.status === "connected"
-                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                      : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-                  }`}
-                >
-                  {c.status === "connected" ? "Connected" : "Not connected"}
-                </span>
-              </div>
-              <button
-                onClick={() => onToggle(c.id)}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs self-start hover:bg-sidebar"
+          {connections
+            .filter((c) => c.provider !== "mcp")
+            .map((c) => (
+              <div
+                key={c.id}
+                className="rounded-xl border border-border bg-card p-4 flex flex-col gap-2"
               >
-                {c.status === "connected" ? "Disconnect (local)" : "Mark connected (local)"}
-              </button>
-            </div>
-          ))}
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-medium">{c.name}</div>
+                    <div className="text-xs text-muted">{c.description}</div>
+                  </div>
+                  <span className="text-[11px] rounded-full px-2 py-0.5 bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                    Not connected
+                  </span>
+                </div>
+                <p className="text-xs text-muted">Setup required — OAuth not implemented yet.</p>
+              </div>
+            ))}
         </div>
+
+        {connections.some((c) => c.provider === "mcp") && (
+          <div className="space-y-2">
+            <h2 className="text-sm font-medium">Custom MCP endpoints</h2>
+            {connections
+              .filter((c) => c.provider === "mcp")
+              .map((c) => (
+                <div
+                  key={c.id}
+                  className="rounded-xl border border-border bg-card p-4 text-sm"
+                >
+                  <div className="font-medium">{c.name}</div>
+                  <div className="text-xs text-muted break-all mt-1">{c.mcpUrl}</div>
+                  <p className="text-xs text-muted mt-2">
+                    Metadata saved. Tool discovery and execution are not live yet.
+                  </p>
+                </div>
+              ))}
+          </div>
+        )}
 
         <div className="rounded-xl border border-dashed border-border p-4 space-y-3">
           {!showMcp ? (
@@ -133,8 +122,7 @@ export default function ConnectionsPage() {
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none"
               />
               <p className="text-xs text-muted">
-                Saves endpoint metadata only. Live MCP tool discovery and execution ships in Part
-                3. Do not paste secrets here.
+                Saves endpoint metadata only. Do not paste secrets here.
               </p>
               <div className="flex gap-2">
                 <button
