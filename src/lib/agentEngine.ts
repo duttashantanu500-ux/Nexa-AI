@@ -40,6 +40,14 @@ function id() {
   return `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function normalizeGoal(goal: string) {
+  // Avoid Wikipedia matching Hindi TV "Saas" instead of SaaS software
+  return goal
+    .replace(/\bSaaS\b/gi, "software as a service")
+    .replace(/\bB2B\b/gi, "business to business")
+    .trim();
+}
+
 export function buildPlan(
   goal: string,
   business?: BusinessContext | null
@@ -58,10 +66,9 @@ export function buildPlan(
     "";
   const location = business?.location || "";
 
-  const researchQuery = [g, industry, target, location]
-    .filter(Boolean)
-    .join(" ")
-    .slice(0, 180);
+  const researchQuery = normalizeGoal(
+    [g, industry, target, location].filter(Boolean).join(" ")
+  ).slice(0, 180);
 
   if (isResearch) {
     return {
@@ -118,25 +125,37 @@ export function buildPlan(
 
 function buildSearchQueries(goal: string, business?: BusinessContext | null): string[] {
   const industry = business?.industry || "";
-  const target =
-    business?.targetCustomer ||
-    business?.targetCustomers ||
-    business?.targetClients ||
-    "";
-  const location = business?.location || "";
-  const base = goal.replace(/[«»"']/g, "").trim();
+  const location = business?.location || "India";
+  const base = normalizeGoal(goal.replace(/[«»"']/g, ""));
 
   const queries = [
     base,
-    [base, industry].filter(Boolean).join(" "),
-    [base, "companies", location || "India"].filter(Boolean).join(" "),
-    [target, industry, "company"].filter(Boolean).join(" "),
-    // Known public directory-style queries (still searched, not hard-coded results)
-    base.match(/saas/i) ? "list of Indian SaaS companies Wikipedia" : "",
-    base.match(/saas/i) ? "Freshworks Zoho Chargebee Indian software company" : "",
+    `${base} ${location} companies`,
+    `software as a service companies ${location}`,
+    `Indian software as a service companies list`,
+    "Freshworks Zoho Postman Chargebee BrowserStack Unicommerce", // known real names to seed wiki search — results still fetched live
+    industry ? `${industry} companies ${location}` : "",
   ].filter((q) => q && q.length > 3);
 
-  return [...new Set(queries)].slice(0, 4);
+  return [...new Set(queries)].slice(0, 5);
+}
+
+function isNoiseHit(h: SearchHit): boolean {
+  const t = `${h.title} ${h.snippet}`.toLowerCase();
+  // Filter Hindi soap / entertainment false positives from "SaaS"
+  if (/kyunki saas|saas bahu|bahu thi|television series|tv series|film which was released/i.test(t))
+    return true;
+  if (/actress|actor|film director|soap opera/i.test(t)) return true;
+  return false;
+}
+
+function looksLikeCompany(h: SearchHit): boolean {
+  const t = `${h.title} ${h.snippet}`.toLowerCase();
+  if (isNoiseHit(h)) return false;
+  if (/inc\.?|ltd|limited|company|software|platform|saas|startup|headquarter/i.test(t))
+    return true;
+  if (/wikipedia\.org\/wiki\//i.test(h.url) && /\(company\)/i.test(h.title)) return true;
+  return !/wikipedia\.org\/wiki\//i.test(h.url); // non-wiki URLs kept
 }
 
 export async function executeResearchMission(params: {
@@ -166,18 +185,27 @@ export async function executeResearchMission(params: {
 
     let hits: SearchHit[] = [];
     for (const q of queries) {
-      activity.push(`Searching: "${q.slice(0, 80)}"`);
+      activity.push(`Searching: "${q.slice(0, 90)}"`);
       const search = await webSearch(q, 10);
       if (!search.ok) {
         activity.push(`Search issue: ${search.error}`);
         continue;
       }
-      const batch = ((search.data as any)?.hits || []) as SearchHit[];
-      activity.push(`${batch.length} hits for query`);
+      const batch = (((search.data as any)?.hits || []) as SearchHit[]).filter(
+        (h) => !isNoiseHit(h)
+      );
+      activity.push(`${batch.length} usable hits`);
       hits = dedupeHits([...hits, ...batch]);
       (search.sources || []).forEach((s) => sources.push(s));
-      if (hits.length >= 12) break;
+      if (hits.filter(looksLikeCompany).length >= 10) break;
     }
+
+    // Prefer company-like hits
+    const ranked = [
+      ...hits.filter(looksLikeCompany),
+      ...hits.filter((h) => !looksLikeCompany(h)),
+    ];
+    hits = dedupeHits(ranked);
 
     activity.push(`${hits.length} unique search results collected`);
     mark(1, hits.length > 0 ? "done" : "failed");
@@ -196,7 +224,7 @@ export async function executeResearchMission(params: {
           type: "report",
           title: "Research results",
           content:
-            "No public web results were found. Configure GEMINI_API_KEY (for Google Search grounding) or BRAVE_API_KEY / TAVILY_API_KEY / SERPER_API_KEY on Vercel for stronger search. Wikipedia fallback also ran but returned nothing for this query.",
+            "No public web results were found. Add GEMINI_API_KEY (Google Search grounding) or BRAVE_API_KEY / TAVILY_API_KEY / SERPER_API_KEY on Vercel for stronger commercial search.",
           rows: [],
           sources: [],
           createdAt: new Date().toISOString(),
@@ -212,10 +240,9 @@ export async function executeResearchMission(params: {
       const page = await readWebPage(hit.url);
       if (!page.ok) {
         activity.push(`Could not read ${hit.url}: ${page.error}`);
-        // Still keep search snippet as weak evidence
-        if (hit.snippet && hit.snippet.length > 20) {
+        if (hit.snippet && hit.snippet.length > 20 && !isNoiseHit(hit)) {
           rows.push({
-            company: hit.title.split(/[-|–—|]/)[0].trim().slice(0, 80),
+            company: cleanTitle(hit.title),
             website: hit.url,
             reason: "Appeared in search results (page body could not be fetched)",
             evidence: hit.snippet.slice(0, 220),
@@ -229,10 +256,10 @@ export async function executeResearchMission(params: {
       const extract = page.data as { url: string; title: string; text: string };
       sources.push({ title: extract.title, url: extract.url });
 
-      const company =
-        extract.title.split(/[-|–—|]/)[0].trim().slice(0, 80) || hit.title;
-      const snippet =
-        extract.text.slice(0, 220) || hit.snippet || "No extractable text";
+      const company = cleanTitle(extract.title || hit.title);
+      const snippet = cleanWikiText(extract.text).slice(0, 280) || hit.snippet;
+
+      if (isNoiseHit({ title: company, url: extract.url, snippet })) continue;
 
       rows.push({
         company,
@@ -242,15 +269,14 @@ export async function executeResearchMission(params: {
         source: extract.url,
       });
 
-      // From Wikipedia pages, pull external official-site links when present
       if (/wikipedia\.org/i.test(extract.url)) {
         const external = extractExternalUrls(extract.text, extract.url);
         for (const ext of external.slice(0, 2)) {
-          sources.push({ title: company + " (external)", url: ext });
+          sources.push({ title: company + " site", url: ext });
           rows.push({
             company,
             website: ext,
-            reason: "External link found on Wikipedia page",
+            reason: "External link found on reference page",
             evidence: snippet.slice(0, 120),
             source: extract.url,
           });
@@ -269,7 +295,7 @@ export async function executeResearchMission(params: {
         progress: 50,
         status: "failed",
         steps,
-        error: "No pages could be read and no snippets available",
+        error: "No usable pages after filtering",
       };
     }
 
@@ -325,6 +351,22 @@ export async function executeResearchMission(params: {
   }
 }
 
+function cleanTitle(t: string) {
+  return t
+    .replace(/ - Wikipedia$/i, "")
+    .split(/[-|–—|]/)[0]
+    .trim()
+    .slice(0, 80);
+}
+
+function cleanWikiText(text: string) {
+  return text
+    .replace(/Jump to content[\s\S]*?Main menu/gi, " ")
+    .replace(/Main menu[\s\S]*?Navigation/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function dedupeHits(hits: SearchHit[]): SearchHit[] {
   const seen = new Set<string>();
   return hits.filter((h) => {
@@ -343,7 +385,6 @@ function dedupeSources(list: { title?: string; url: string }[]) {
   });
 }
 
-/** Pull http(s) URLs from page text that look like official sites (not social/wiki). */
 function extractExternalUrls(text: string, pageUrl: string): string[] {
   const found = text.match(/https?:\/\/[\w.-]+\.[a-z]{2,}[\w./?&=%+-]*/gi) || [];
   const out: string[] = [];
