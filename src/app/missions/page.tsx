@@ -14,6 +14,7 @@ export default function MissionsPage() {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [goal, setGoal] = useState("");
   const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -25,12 +26,27 @@ export default function MissionsPage() {
     setMissions(s.missions || []);
   }, [router]);
 
-  const create = () => {
-    if (!user || !goal.trim()) return;
-    const m = createMission(user.id, goal.trim());
-    setGoal("");
-    setOpen(false);
-    router.push(`/missions/${m.id}`);
+  const create = async () => {
+    if (!user || !goal.trim() || creating) return;
+    setCreating(true);
+    try {
+      const businessContext = loadOperatorState().businessContext;
+      const res = await fetch("/api/missions/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goal: goal.trim(), businessContext }),
+      });
+      const data = await res.json();
+      const plan = data.plan;
+      const m = createMission(user.id, goal.trim(), plan
+        ? { title: plan.title, steps: plan.steps, researchQuery: plan.researchQuery }
+        : undefined);
+      setGoal("");
+      setOpen(false);
+      router.push(`/missions/${m.id}`);
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (
@@ -56,7 +72,7 @@ export default function MissionsPage() {
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
               rows={3}
-              placeholder="Find 30 potential customers and prepare personalized outreach."
+              placeholder="Find 30 potential customers and prepare a structured list."
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
             />
             <div className="flex gap-2 justify-end">
@@ -65,10 +81,10 @@ export default function MissionsPage() {
               </button>
               <button
                 onClick={create}
-                disabled={!goal.trim()}
+                disabled={!goal.trim() || creating}
                 className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
               >
-                Start Mission
+                {creating ? "Planning…" : "Create Mission"}
               </button>
             </div>
           </div>
