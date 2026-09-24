@@ -12,6 +12,9 @@ import {
   loadOperatorState,
   pushActivity,
 } from "@/lib/operatorStore";
+import { pushNotification } from "@/lib/notifications";
+import { estimateMissionBudget } from "@/lib/missionStateMachine";
+import { computeNextRun, ScheduleCadence } from "@/lib/schedules";
 import { Mission, MissionStep } from "@/types";
 import { ArrowLeft } from "lucide-react";
 
@@ -22,6 +25,7 @@ export default function MissionDetailPage() {
   const [mission, setMission] = useState<Mission | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  const [cadence, setCadence] = useState<ScheduleCadence>("once");
 
   const reload = () => {
     const m = getMission(id);
@@ -49,6 +53,8 @@ export default function MissionDetailPage() {
     );
   }
 
+  const budget = estimateMissionBudget(mission.goal);
+
   const removeStep = (stepId: string) => {
     if (mission.status !== "ready" && mission.status !== "planning") return;
     const plan = mission.plan.filter((s) => s.id !== stepId);
@@ -63,6 +69,10 @@ export default function MissionDetailPage() {
 
     updateMission(mission.id, { status: "running", progress: 15 });
     appendMissionActivity(mission.id, "Execution started");
+    appendMissionActivity(
+      mission.id,
+      `Budget estimate: ~${budget.estimatedToolCalls} tool calls, ${budget.note}`
+    );
     reload();
 
     const businessContext = loadOperatorState().businessContext;
@@ -86,7 +96,6 @@ export default function MissionDetailPage() {
 
       const data = await res.json();
 
-      // Append real activity lines only
       for (const line of data.activity || []) {
         appendMissionActivity(mission.id, line);
       }
@@ -117,6 +126,13 @@ export default function MissionDetailPage() {
             "mission",
             mission.id
           );
+          pushNotification(
+            user.id,
+            "mission_completed",
+            "Mission completed",
+            mission.title,
+            mission.id
+          );
         }
       } else {
         updateMission(mission.id, {
@@ -126,6 +142,15 @@ export default function MissionDetailPage() {
           error: data.error || "Execution failed",
         });
         setError(data.error || "Execution failed");
+        if (user) {
+          pushNotification(
+            user.id,
+            "mission_failed",
+            "Mission failed",
+            data.error || mission.title,
+            mission.id
+          );
+        }
       }
     } catch (e: any) {
       updateMission(mission.id, {
@@ -146,8 +171,20 @@ export default function MissionDetailPage() {
     reload();
   };
 
+  const saveSchedule = () => {
+    const nextRunAt = computeNextRun(cadence);
+    // Stored on mission via result note until full schedule schema is server-side
+    appendMissionActivity(
+      mission.id,
+      `Schedule set: ${cadence} (next local reminder ${new Date(nextRunAt).toLocaleString()}). Background runs require server schedule queue.`
+    );
+    reload();
+  };
+
   const canStart =
-    (mission.status === "ready" || mission.status === "planning" || mission.status === "failed") &&
+    (mission.status === "ready" ||
+      mission.status === "planning" ||
+      mission.status === "failed") &&
     mission.plan.length > 0 &&
     !running;
 
@@ -165,6 +202,10 @@ export default function MissionDetailPage() {
             </div>
             <p className="text-sm text-muted mt-1">{mission.goal}</p>
           </div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-card px-4 py-3 text-xs text-muted">
+          Estimated usage: ~{budget.estimatedToolCalls} tool calls · {budget.note}
         </div>
 
         <section className="space-y-2">
@@ -215,7 +256,9 @@ export default function MissionDetailPage() {
               Nexa is working…
             </span>
           )}
-          {(mission.status === "ready" || mission.status === "running" || mission.status === "paused") &&
+          {(mission.status === "ready" ||
+            mission.status === "running" ||
+            mission.status === "paused") &&
             !running && (
               <button onClick={cancel} className="rounded-lg border border-border px-3 py-2 text-sm">
                 Cancel
@@ -226,12 +269,41 @@ export default function MissionDetailPage() {
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <section className="space-y-2">
+          <h2 className="text-sm font-medium">Schedule (preview)</h2>
+          <div className="rounded-xl border border-border bg-card p-4 flex flex-wrap gap-2 items-center">
+            <select
+              value={cadence}
+              onChange={(e) => setCadence(e.target.value as ScheduleCadence)}
+              className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            >
+              <option value="once">Once</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+            <button
+              onClick={saveSchedule}
+              className="rounded-lg border border-border px-3 py-2 text-sm"
+            >
+              Save schedule note
+            </button>
+            <p className="text-xs text-muted w-full">
+              True offline background runs need a server job queue (Part 3 infrastructure). Cron
+              endpoint is installed; schedules process when the server queue is connected.
+            </p>
+          </div>
+        </section>
+
+        <section className="space-y-2">
           <h2 className="text-sm font-medium">Activity</h2>
           <div className="rounded-xl border border-border bg-card p-4 space-y-3 max-h-72 overflow-y-auto">
             {mission.activity.map((a) => (
               <div key={a.id} className="flex gap-3 text-sm">
                 <span className="text-xs text-muted whitespace-nowrap">
-                  {new Date(a.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {new Date(a.at).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
                 </span>
                 <span>{a.text}</span>
               </div>
@@ -264,14 +336,21 @@ export default function MissionDetailPage() {
                   ))}
                 </div>
               )}
-              <pre className="text-xs whitespace-pre-wrap text-muted">{mission.deliverable.content}</pre>
+              <pre className="text-xs whitespace-pre-wrap text-muted">
+                {mission.deliverable.content}
+              </pre>
               {mission.deliverable.sources?.length > 0 && (
                 <div>
                   <div className="text-xs font-medium mb-1">Sources</div>
                   <ul className="space-y-1">
                     {mission.deliverable.sources.map((s, i) => (
                       <li key={i} className="text-xs">
-                        <a href={s.url} target="_blank" rel="noreferrer" className="text-sky-600 break-all">
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sky-600 break-all"
+                        >
                           {s.title || s.url}
                         </a>
                       </li>
