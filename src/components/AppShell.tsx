@@ -12,6 +12,8 @@ import {
   Activity,
   Settings,
   ShieldCheck,
+  Bell,
+  Radar,
   Menu,
   X,
 } from "lucide-react";
@@ -21,10 +23,12 @@ const NAV = [
   { href: "/home", label: "Home", icon: Home },
   { href: "/missions", label: "Missions", icon: Crosshair },
   { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/monitors", label: "Monitors", icon: Radar },
   { href: "/connections", label: "Connections", icon: Plug },
   { href: "/brain", label: "Business Brain", icon: Brain },
   { href: "/activity", label: "Activity", icon: Activity },
   { href: "/approvals", label: "Approvals", icon: ShieldCheck },
+  { href: "/notifications", label: "Notifications", icon: Bell },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -61,7 +65,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 border-r border-border bg-sidebar md:flex md:flex-col">
         <div className="flex h-14 items-center px-4 border-b border-sidebar-border">
           <button
@@ -77,7 +80,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* Mobile top bar */}
       <div className="md:hidden sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border bg-background px-3">
         <button onClick={() => setOpen(true)} className="p-1.5">
           <Menu className="h-5 w-5" />
@@ -101,7 +103,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border bg-background/95 backdrop-blur">
         <div className="grid grid-cols-5 gap-0.5 px-1 py-1">
           {NAV.slice(0, 5).map((item) => {
