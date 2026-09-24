@@ -24,7 +24,9 @@ export default function MissionDetailPage() {
   const id = params.id as string;
   const [mission, setMission] = useState<Mission | null>(null);
   const [running, setRunning] = useState(false);
+  const [queueing, setQueueing] = useState(false);
   const [error, setError] = useState("");
+  const [bgMsg, setBgMsg] = useState("");
   const [cadence, setCadence] = useState<ScheduleCadence>("once");
 
   const reload = () => {
@@ -44,6 +46,40 @@ export default function MissionDetailPage() {
     }
     reload();
   }, [id, router]);
+
+  // Poll server status when mission is running/queued for background
+  useEffect(() => {
+    if (!id) return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/missions/status?id=${id}`);
+        const data = await res.json();
+        if (!alive || !data.ok || !data.found) return;
+        const sm = data.mission;
+        updateMission(id, {
+          status: sm.status,
+          progress: sm.progress,
+          plan: sm.plan || undefined,
+          activity: sm.activity || undefined,
+          deliverable: sm.deliverable || undefined,
+          result: sm.result || undefined,
+          error: sm.error || undefined,
+        });
+        if (alive) reload();
+        if (sm.status === "completed" || sm.status === "failed") {
+          setRunning(false);
+        }
+      } catch {
+        /* offline poll ok */
+      }
+    };
+    const t = setInterval(tick, 8000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [id]);
 
   if (!mission) {
     return (
@@ -68,11 +104,7 @@ export default function MissionDetailPage() {
     setError("");
 
     updateMission(mission.id, { status: "running", progress: 15 });
-    appendMissionActivity(mission.id, "Execution started");
-    appendMissionActivity(
-      mission.id,
-      `Budget estimate: ~${budget.estimatedToolCalls} tool calls, ${budget.note}`
-    );
+    appendMissionActivity(mission.id, "Execution started (this tab)");
     reload();
 
     const businessContext = loadOperatorState().businessContext;
@@ -95,11 +127,9 @@ export default function MissionDetailPage() {
       });
 
       const data = await res.json();
-
       for (const line of data.activity || []) {
         appendMissionActivity(mission.id, line);
       }
-
       const steps = (data.steps || mission.plan) as MissionStep[];
 
       if (data.ok && data.status === "completed") {
@@ -120,19 +150,8 @@ export default function MissionDetailPage() {
             : undefined,
         });
         if (user) {
-          pushActivity(
-            user.id,
-            `Mission completed: ${mission.title}`,
-            "mission",
-            mission.id
-          );
-          pushNotification(
-            user.id,
-            "mission_completed",
-            "Mission completed",
-            mission.title,
-            mission.id
-          );
+          pushActivity(user.id, `Mission completed: ${mission.title}`, "mission", mission.id);
+          pushNotification(user.id, "mission_completed", "Mission completed", mission.title, mission.id);
         }
       } else {
         updateMission(mission.id, {
@@ -143,20 +162,11 @@ export default function MissionDetailPage() {
         });
         setError(data.error || "Execution failed");
         if (user) {
-          pushNotification(
-            user.id,
-            "mission_failed",
-            "Mission failed",
-            data.error || mission.title,
-            mission.id
-          );
+          pushNotification(user.id, "mission_failed", "Mission failed", data.error || mission.title, mission.id);
         }
       }
     } catch (e: any) {
-      updateMission(mission.id, {
-        status: "failed",
-        error: e?.message || "Network error",
-      });
+      updateMission(mission.id, { status: "failed", error: e?.message || "Network error" });
       appendMissionActivity(mission.id, `Failed: ${e?.message || "Network error"}`, "warning");
       setError(e?.message || "Network error");
     } finally {
@@ -165,19 +175,61 @@ export default function MissionDetailPage() {
     }
   };
 
+  const runInBackground = async () => {
+    const user = loadOperatorState().user;
+    if (!user || queueing) return;
+    setQueueing(true);
+    setBgMsg("");
+    setError("");
+
+    try {
+      const res = await fetch("/api/missions/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: mission.id,
+          userId: user.id,
+          title: mission.title,
+          goal: mission.goal,
+          plan: mission.plan,
+          researchQuery: mission.researchQuery || mission.goal,
+          scheduleCadence: cadence !== "once" ? cadence : undefined,
+          runNow: true,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setError(
+          data.error ||
+            "Background queue not ready. Add SUPABASE_SERVICE_ROLE_KEY and run missions_schema.sql"
+        );
+        return;
+      }
+      updateMission(mission.id, { status: "running", progress: 10 });
+      appendMissionActivity(
+        mission.id,
+        "Queued for 24/7 background worker — safe to close this tab"
+      );
+      setBgMsg(
+        data.message ||
+          "Queued. Worker runs every ~5 minutes via Vercel Cron even if you close the browser."
+      );
+      setRunning(true);
+      reload();
+
+      // Kick worker immediately
+      fetch("/api/cron/schedules", { method: "POST" }).catch(() => {});
+    } catch (e: any) {
+      setError(e?.message || "Could not queue");
+    } finally {
+      setQueueing(false);
+    }
+  };
+
   const cancel = () => {
     updateMission(mission.id, { status: "cancelled", progress: 100 });
     appendMissionActivity(mission.id, "Mission cancelled by user");
-    reload();
-  };
-
-  const saveSchedule = () => {
-    const nextRunAt = computeNextRun(cadence);
-    // Stored on mission via result note until full schedule schema is server-side
-    appendMissionActivity(
-      mission.id,
-      `Schedule set: ${cadence} (next local reminder ${new Date(nextRunAt).toLocaleString()}). Background runs require server schedule queue.`
-    );
+    setRunning(false);
     reload();
   };
 
@@ -186,7 +238,8 @@ export default function MissionDetailPage() {
       mission.status === "planning" ||
       mission.status === "failed") &&
     mission.plan.length > 0 &&
-    !running;
+    !running &&
+    !queueing;
 
   return (
     <AppShell>
@@ -204,22 +257,15 @@ export default function MissionDetailPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-border bg-card px-4 py-3 text-xs text-muted">
-          Estimated usage: ~{budget.estimatedToolCalls} tool calls · {budget.note}
+        <div className="rounded-xl border border-border bg-card px-4 py-3 text-xs text-muted space-y-1">
+          <div>Estimated usage: ~{budget.estimatedToolCalls} tool calls · {budget.note}</div>
+          <div>
+            <strong className="text-foreground">24/7:</strong> use "Run in background" so work continues after you close the tab (requires Supabase service role + schema).
+          </div>
         </div>
 
         <section className="space-y-2">
-          <h2 className="text-sm font-medium">Goal</h2>
-          <div className="rounded-xl border border-border bg-card p-4 text-sm">{mission.goal}</div>
-        </section>
-
-        <section className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium">Plan</h2>
-            {(mission.status === "ready" || mission.status === "planning") && (
-              <span className="text-xs text-muted">Remove steps before starting</span>
-            )}
-          </div>
+          <h2 className="text-sm font-medium">Plan</h2>
           <ol className="rounded-xl border border-border bg-card divide-y divide-border">
             {mission.plan.map((step, i) => (
               <li key={step.id} className="flex items-center gap-3 px-4 py-3 text-sm">
@@ -236,40 +282,44 @@ export default function MissionDetailPage() {
                 )}
               </li>
             ))}
-            {mission.plan.length === 0 && (
-              <li className="px-4 py-3 text-sm text-muted">No plan yet</li>
-            )}
           </ol>
         </section>
 
         <div className="flex flex-wrap gap-2">
           {canStart && (
-            <button
-              onClick={startMission}
-              className="rounded-lg bg-zinc-900 px-3 py-2 text-sm text-white dark:bg-zinc-100 dark:text-zinc-900"
-            >
-              {mission.status === "failed" ? "Retry Mission" : "Start Mission"}
-            </button>
+            <>
+              <button
+                onClick={startMission}
+                className="rounded-lg border border-border px-3 py-2 text-sm"
+              >
+                Run in this tab
+              </button>
+              <button
+                onClick={runInBackground}
+                className="rounded-lg bg-zinc-900 px-3 py-2 text-sm text-white dark:bg-zinc-100 dark:text-zinc-900"
+              >
+                {queueing ? "Queueing…" : "Run in background (24/7)"}
+              </button>
+            </>
           )}
           {running && (
             <span className="text-sm text-muted animate-pulse px-2 py-2">
-              Nexa is working…
+              Working… (safe to leave if background queued)
             </span>
           )}
-          {(mission.status === "ready" ||
-            mission.status === "running" ||
-            mission.status === "paused") &&
-            !running && (
+          {(mission.status === "ready" || mission.status === "running" || mission.status === "paused") &&
+            !queueing && (
               <button onClick={cancel} className="rounded-lg border border-border px-3 py-2 text-sm">
                 Cancel
               </button>
             )}
         </div>
 
+        {bgMsg && <p className="text-sm text-emerald-700 dark:text-emerald-400">{bgMsg}</p>}
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <section className="space-y-2">
-          <h2 className="text-sm font-medium">Schedule (preview)</h2>
+          <h2 className="text-sm font-medium">Repeat schedule</h2>
           <div className="rounded-xl border border-border bg-card p-4 flex flex-wrap gap-2 items-center">
             <select
               value={cadence}
@@ -281,15 +331,8 @@ export default function MissionDetailPage() {
               <option value="weekly">Weekly</option>
               <option value="monthly">Monthly</option>
             </select>
-            <button
-              onClick={saveSchedule}
-              className="rounded-lg border border-border px-3 py-2 text-sm"
-            >
-              Save schedule note
-            </button>
             <p className="text-xs text-muted w-full">
-              True offline background runs need a server job queue (Part 3 infrastructure). Cron
-              endpoint is installed; schedules process when the server queue is connected.
+              Choose cadence before "Run in background" to re-queue on a schedule via Cron.
             </p>
           </div>
         </section>
@@ -300,10 +343,7 @@ export default function MissionDetailPage() {
             {mission.activity.map((a) => (
               <div key={a.id} className="flex gap-3 text-sm">
                 <span className="text-xs text-muted whitespace-nowrap">
-                  {new Date(a.at).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {new Date(a.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </span>
                 <span>{a.text}</span>
               </div>
@@ -316,55 +356,33 @@ export default function MissionDetailPage() {
           {mission.deliverable ? (
             <div className="rounded-xl border border-border bg-card p-4 space-y-4">
               <div className="text-sm font-medium">{mission.deliverable.title}</div>
-              {mission.deliverable.rows && mission.deliverable.rows.length > 0 && (
-                <div className="space-y-3">
-                  {mission.deliverable.rows.map((r, i) => (
-                    <div key={i} className="text-sm border-b border-border pb-3 last:border-0">
-                      <div className="font-medium">
-                        {i + 1}. {r.company}
-                      </div>
-                      <a
-                        href={r.website}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-sky-600 break-all"
-                      >
-                        {r.website}
-                      </a>
-                      <p className="text-xs text-muted mt-1">{r.evidence}</p>
-                    </div>
-                  ))}
+              {mission.deliverable.rows?.map((r, i) => (
+                <div key={i} className="text-sm border-b border-border pb-3">
+                  <div className="font-medium">
+                    {i + 1}. {r.company}
+                  </div>
+                  <a href={r.website} target="_blank" rel="noreferrer" className="text-xs text-sky-600 break-all">
+                    {r.website}
+                  </a>
+                  <p className="text-xs text-muted mt-1">{r.evidence}</p>
                 </div>
-              )}
-              <pre className="text-xs whitespace-pre-wrap text-muted">
-                {mission.deliverable.content}
-              </pre>
+              ))}
               {mission.deliverable.sources?.length > 0 && (
                 <div>
                   <div className="text-xs font-medium mb-1">Sources</div>
-                  <ul className="space-y-1">
-                    {mission.deliverable.sources.map((s, i) => (
-                      <li key={i} className="text-xs">
-                        <a
-                          href={s.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-sky-600 break-all"
-                        >
-                          {s.title || s.url}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
+                  {mission.deliverable.sources.map((s, i) => (
+                    <div key={i} className="text-xs">
+                      <a href={s.url} target="_blank" rel="noreferrer" className="text-sky-600 break-all">
+                        {s.title || s.url}
+                      </a>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
           ) : (
             <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted">
-              {mission.result ||
-                (mission.status === "completed"
-                  ? "Completed with no structured deliverable."
-                  : "Start the mission to run real web research.")}
+              {mission.result || "No result yet."}
             </div>
           )}
         </section>
