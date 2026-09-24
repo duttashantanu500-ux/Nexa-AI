@@ -1,8 +1,8 @@
 import { SearchHit, ToolResult } from "./types";
 
 /**
- * Multi-provider web search. Returns real hits only — never invents URLs.
- * Order: Brave → Tavily → Serper → Gemini Google Search grounding → Wikipedia → DuckDuckGo
+ * Multi-provider web search. Real hits only.
+ * Order: Gemini grounding (if key) → Brave → Tavily → Serper → Wikipedia → DuckDuckGo
  */
 export async function webSearch(query: string, limit = 10): Promise<ToolResult> {
   const q = (query || "").trim();
@@ -10,31 +10,31 @@ export async function webSearch(query: string, limit = 10): Promise<ToolResult> 
     return { ok: false, tool: "web_search", error: "Empty query" };
   }
 
-  const providers: Array<() => Promise<SearchHit[]>> = [
-    () => searchBrave(q, limit),
-    () => searchTavily(q, limit),
-    () => searchSerper(q, limit),
-    () => searchGeminiGrounded(q, limit),
-    () => searchWikipedia(q, limit),
-    () => searchDuckDuckGo(q, limit),
+  const providers: Array<{ name: string; run: () => Promise<SearchHit[]> }> = [
+    { name: "gemini", run: () => searchGeminiGrounded(q, limit) },
+    { name: "brave", run: () => searchBrave(q, limit) },
+    { name: "tavily", run: () => searchTavily(q, limit) },
+    { name: "serper", run: () => searchSerper(q, limit) },
+    { name: "wikipedia", run: () => searchWikipedia(q, limit) },
+    { name: "duckduckgo", run: () => searchDuckDuckGo(q, limit) },
   ];
 
   const errors: string[] = [];
 
-  for (const run of providers) {
+  for (const p of providers) {
     try {
-      const hits = await run();
+      const hits = await p.run();
       if (hits.length > 0) {
         const deduped = dedupe(hits).slice(0, limit);
         return {
           ok: true,
           tool: "web_search",
-          data: { query: q, hits: deduped },
+          data: { query: q, hits: deduped, provider: p.name },
           sources: deduped.map((h) => ({ title: h.title, url: h.url })),
         };
       }
     } catch (err: any) {
-      errors.push(err?.message || "provider error");
+      errors.push(`${p.name}: ${err?.message || "error"}`);
     }
   }
 
@@ -45,18 +45,21 @@ export async function webSearch(query: string, limit = 10): Promise<ToolResult> 
     sources: [],
     error:
       errors.length > 0
-        ? `All search providers returned empty. Last errors: ${errors.slice(-2).join("; ")}`
+        ? `All search providers returned empty. ${errors.slice(-3).join("; ")}`
         : "No search results",
   };
 }
 
-function env(name: string) {
-  const v = process.env[name];
-  return v && v.trim() ? v.trim() : null;
+function env(...names: string[]) {
+  for (const name of names) {
+    const v = process.env[name];
+    if (v && v.trim()) return v.trim();
+  }
+  return null;
 }
 
 async function searchBrave(q: string, limit: number): Promise<SearchHit[]> {
-  const key = env("BRAVE_API_KEY") || env("BRAVE_SEARCH_API_KEY");
+  const key = env("BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY");
   if (!key) return [];
   const url =
     "https://api.search.brave.com/res/v1/web/search?q=" +
@@ -68,12 +71,13 @@ async function searchBrave(q: string, limit: number): Promise<SearchHit[]> {
   });
   if (!res.ok) throw new Error(`Brave ${res.status}`);
   const data = await res.json();
-  const results = data.web?.results || [];
-  return results.map((r: any) => ({
-    title: String(r.title || ""),
-    url: String(r.url || ""),
-    snippet: String(r.description || ""),
-  })).filter((h: SearchHit) => h.url.startsWith("http"));
+  return (data.web?.results || [])
+    .map((r: any) => ({
+      title: String(r.title || ""),
+      url: String(r.url || ""),
+      snippet: String(r.description || ""),
+    }))
+    .filter((h: SearchHit) => h.url.startsWith("http"));
 }
 
 async function searchTavily(q: string, limit: number): Promise<SearchHit[]> {
@@ -92,11 +96,13 @@ async function searchTavily(q: string, limit: number): Promise<SearchHit[]> {
   });
   if (!res.ok) throw new Error(`Tavily ${res.status}`);
   const data = await res.json();
-  return (data.results || []).map((r: any) => ({
-    title: String(r.title || ""),
-    url: String(r.url || ""),
-    snippet: String(r.content || "").slice(0, 300),
-  })).filter((h: SearchHit) => h.url.startsWith("http"));
+  return (data.results || [])
+    .map((r: any) => ({
+      title: String(r.title || ""),
+      url: String(r.url || ""),
+      snippet: String(r.content || "").slice(0, 300),
+    }))
+    .filter((h: SearchHit) => h.url.startsWith("http"));
 }
 
 async function searchSerper(q: string, limit: number): Promise<SearchHit[]> {
@@ -113,93 +119,153 @@ async function searchSerper(q: string, limit: number): Promise<SearchHit[]> {
   });
   if (!res.ok) throw new Error(`Serper ${res.status}`);
   const data = await res.json();
-  return (data.organic || []).map((r: any) => ({
-    title: String(r.title || ""),
-    url: String(r.link || ""),
-    snippet: String(r.snippet || ""),
-  })).filter((h: SearchHit) => h.url.startsWith("http"));
+  return (data.organic || [])
+    .map((r: any) => ({
+      title: String(r.title || ""),
+      url: String(r.link || ""),
+      snippet: String(r.snippet || ""),
+    }))
+    .filter((h: SearchHit) => h.url.startsWith("http"));
 }
 
-/** Gemini with Google Search grounding — real web results when key is set */
+/**
+ * Gemini + Google Search grounding.
+ * Tries multiple model + tool shapes used by the Generative Language API.
+ */
 async function searchGeminiGrounded(q: string, limit: number): Promise<SearchHit[]> {
-  const key =
-    env("GEMINI_API_KEY") ||
-    env("GOOGLE_API_KEY") ||
-    env("GOOGLE_GENERATIVE_AI_API_KEY");
+  const key = env(
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENERATIVE_AI_API_KEY"
+  );
   if (!key) return [];
 
-  const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
+  const models = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+  ];
+
+  // Different tool payload shapes Google has used
+  const toolVariants: any[] = [
+    [{ google_search: {} }],
+    [{ googleSearch: {} }],
+    [{ google_search_retrieval: {} }],
+  ];
 
   for (const model of models) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": key,
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text:
-                    `Search the public web for: ${q}\n\n` +
-                    `Return ONLY a JSON array of up to ${limit} real results. ` +
-                    `Each item: {"title":"...","url":"https://...","snippet":"..."}. ` +
-                    `Only include URLs you actually found via search. No markdown, no commentary.`,
-                },
-              ],
-            },
-          ],
-          tools: [{ google_search: {} }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
-        }),
-        signal: AbortSignal.timeout(20000),
-      });
-
-      if (!res.ok) continue;
-      const data = await res.json();
-
-      // Prefer grounding metadata URLs (definitely real)
-      const grounded: SearchHit[] = [];
-      const chunks =
-        data.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-      for (const ch of chunks) {
-        const w = ch.web;
-        if (w?.uri) {
-          grounded.push({
-            title: String(w.title || w.uri),
-            url: String(w.uri),
-            snippet: "",
-          });
-        }
+    for (const tools of toolVariants) {
+      try {
+        const hits = await callGeminiSearch(key, model, q, limit, tools);
+        if (hits.length > 0) return hits.slice(0, limit);
+      } catch {
+        continue;
       }
-
-      // Also parse JSON array from model text if present
-      const text =
-        data.candidates?.[0]?.content?.parts
-          ?.map((p: any) => p.text || "")
-          .join("") || "";
-      const fromText = parseJsonHits(text);
-
-      const combined = dedupe([...grounded, ...fromText]);
-      if (combined.length > 0) return combined.slice(0, limit);
-    } catch {
-      continue;
     }
   }
+
+  // Last try: no tools, ask for JSON with real URLs only (still may be weak)
+  // Skip — we never invent. Return empty so next provider runs.
   return [];
 }
 
+async function callGeminiSearch(
+  key: string,
+  model: string,
+  q: string,
+  limit: number,
+  tools: any
+): Promise<SearchHit[]> {
+  const endpoint =
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=` +
+    encodeURIComponent(key);
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text:
+                `Use Google Search to find real public web results for this query:\n"${q}"\n\n` +
+                `Return a JSON array of up to ${limit} results. ` +
+                `Each object must be: {"title":"...","url":"https://...","snippet":"..."}. ` +
+                `Only include URLs from actual search results. No markdown fences, no commentary.`,
+            },
+          ],
+        },
+      ],
+      tools,
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 2048,
+      },
+    }),
+    signal: AbortSignal.timeout(25000),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`${model} ${res.status} ${errText.slice(0, 120)}`);
+  }
+
+  const data = await res.json();
+  const hits: SearchHit[] = [];
+
+  // Grounding chunks (authoritative)
+  const meta = data.candidates?.[0]?.groundingMetadata || {};
+  const chunks = meta.groundingChunks || [];
+  for (const ch of chunks) {
+    const w = ch.web || ch.retrievedContext;
+    if (w?.uri || w?.url) {
+      hits.push({
+        title: String(w.title || w.uri || w.url),
+        url: String(w.uri || w.url),
+        snippet: "",
+      });
+    }
+  }
+
+  // groundingSupports → sometimes only has indices; also check webSearchQueries pages
+  const attributions = meta.groundingSupports || [];
+  for (const s of attributions) {
+    // no direct URL usually
+  }
+
+  // Parse model text JSON
+  const text =
+    data.candidates?.[0]?.content?.parts
+      ?.map((p: any) => p.text || "")
+      .join("") || "";
+  hits.push(...parseJsonHits(text));
+
+  // Extract bare URLs from text as last resort from grounded answer
+  if (hits.length === 0 && text) {
+    const urls = text.match(/https?:\/\/[^\s\]"']+/g) || [];
+    for (const u of urls.slice(0, limit)) {
+      hits.push({ title: u, url: u.replace(/[),\.]+$/, ""), snippet: "" });
+    }
+  }
+
+  return dedupe(hits.filter((h) => /^https?:\/\//i.test(h.url)));
+}
+
 function parseJsonHits(text: string): SearchHit[] {
-  const start = text.indexOf("[");
-  const end = text.lastIndexOf("]");
+  // Strip markdown fences if present
+  const cleaned = text
+    .replace(/```json\s*/gi, "")
+    .replace(/```\s*/g, "")
+    .trim();
+  const start = cleaned.indexOf("[");
+  const end = cleaned.lastIndexOf("]");
   if (start < 0 || end <= start) return [];
   try {
-    const arr = JSON.parse(text.slice(start, end + 1));
+    const arr = JSON.parse(cleaned.slice(start, end + 1));
     if (!Array.isArray(arr)) return [];
     return arr
       .map((r: any) => ({
@@ -213,18 +279,18 @@ function parseJsonHits(text: string): SearchHit[] {
   }
 }
 
-/** Always-on free fallback via Wikipedia OpenSearch + search API */
 async function searchWikipedia(q: string, limit: number): Promise<SearchHit[]> {
   const hits: SearchHit[] = [];
 
-  // OpenSearch
   try {
     const openUrl =
       "https://en.wikipedia.org/w/api.php?action=opensearch&search=" +
       encodeURIComponent(q) +
       `&limit=${Math.min(limit, 10)}&namespace=0&format=json&origin=*`;
     const res = await fetch(openUrl, {
-      headers: { "User-Agent": "NexaBot/1.0 (research; +https://nexa-ai-beryl-one.vercel.app)" },
+      headers: {
+        "User-Agent": "NexaBot/1.0 (research; +https://nexa-ai-beryl-one.vercel.app)",
+      },
       signal: AbortSignal.timeout(10000),
     });
     if (res.ok) {
@@ -246,25 +312,27 @@ async function searchWikipedia(q: string, limit: number): Promise<SearchHit[]> {
     /* */
   }
 
-  // Full-text search for more business-relevant pages
   try {
     const searchUrl =
       "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=" +
       encodeURIComponent(q) +
       `&srlimit=${Math.min(limit, 10)}&format=json&origin=*`;
     const res = await fetch(searchUrl, {
-      headers: { "User-Agent": "NexaBot/1.0 (research; +https://nexa-ai-beryl-one.vercel.app)" },
+      headers: {
+        "User-Agent": "NexaBot/1.0 (research; +https://nexa-ai-beryl-one.vercel.app)",
+      },
       signal: AbortSignal.timeout(10000),
     });
     if (res.ok) {
       const data = await res.json();
-      const pages = data.query?.search || [];
-      for (const p of pages) {
+      for (const p of data.query?.search || []) {
         const title = String(p.title || "");
         if (!title) continue;
         hits.push({
           title,
-          url: "https://en.wikipedia.org/wiki/" + encodeURIComponent(title.replace(/ /g, "_")),
+          url:
+            "https://en.wikipedia.org/wiki/" +
+            encodeURIComponent(title.replace(/ /g, "_")),
           snippet: stripTags(String(p.snippet || "")),
         });
       }
