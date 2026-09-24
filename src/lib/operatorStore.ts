@@ -2,6 +2,8 @@ import {
   AppState,
   Mission,
   MissionStatus,
+  MissionStep,
+  MissionDeliverable,
   Agent,
   ActivityEvent,
   ApprovalRequest,
@@ -39,26 +41,21 @@ function titleFromGoal(goal: string): string {
   return cleaned.slice(0, 45).trim() + "…";
 }
 
-function defaultPlan(goal: string) {
-  return [
-    { id: createId(), title: "Understand the goal and constraints", status: "done" as const },
-    { id: createId(), title: "Break work into steps", status: "done" as const },
-    { id: createId(), title: "Gather information", status: "running" as const },
-    { id: createId(), title: "Produce draft deliverable", status: "pending" as const },
-    { id: createId(), title: "Prepare result for review", status: "pending" as const },
-  ];
-}
-
-export function createMission(userId: string, goal: string): Mission {
+/** Create mission in planning state — plan filled by API */
+export function createMission(
+  userId: string,
+  goal: string,
+  plan?: { title?: string; steps?: MissionStep[]; researchQuery?: string }
+): Mission {
   const now = new Date().toISOString();
   const mission: Mission = {
     id: createId(),
     userId,
-    title: titleFromGoal(goal),
+    title: plan?.title || titleFromGoal(goal),
     goal: goal.trim(),
-    status: "planning",
-    progress: 15,
-    plan: defaultPlan(goal),
+    status: plan?.steps?.length ? "ready" : "planning",
+    progress: plan?.steps?.length ? 5 : 0,
+    plan: plan?.steps || [],
     activity: [
       {
         id: createId(),
@@ -66,26 +63,21 @@ export function createMission(userId: string, goal: string): Mission {
         at: now,
         type: "success",
       },
-      {
-        id: createId(),
-        text: "Plan generated (demo)",
-        at: now,
-        type: "info",
-      },
-      {
-        id: createId(),
-        text: "Research phase started (demo — execution comes in Part 2)",
-        at: now,
-        type: "info",
-      },
     ],
-    result: undefined,
+    tools: ["web_search", "web_page_reader"],
+    researchQuery: plan?.researchQuery,
     createdAt: now,
     updatedAt: now,
   };
 
-  // Simulate advancing to running after create
-  mission.status = "running";
+  if (plan?.steps?.length) {
+    mission.activity.push({
+      id: createId(),
+      text: "Plan generated — review and start when ready",
+      at: now,
+      type: "info",
+    });
+  }
 
   const state = loadOperatorState();
   const missions = [mission, ...(state.missions || [])];
@@ -121,17 +113,44 @@ export function updateMission(id: string, patch: Partial<Mission>): Mission | nu
   return updated;
 }
 
+export function appendMissionActivity(id: string, text: string, type?: Mission["activity"][0]["type"]) {
+  const m = getMission(id);
+  if (!m) return null;
+  const activity = [
+    ...m.activity,
+    { id: createId(), text, at: new Date().toISOString(), type },
+  ];
+  return updateMission(id, { activity });
+}
+
 export function setMissionStatus(id: string, status: MissionStatus): Mission | null {
-  const progressMap: Record<MissionStatus, number> = {
-    planning: 10,
-    ready: 20,
-    running: 45,
+  const progressMap: Partial<Record<MissionStatus, number>> = {
+    planning: 5,
+    ready: 10,
+    running: 40,
     waiting_approval: 70,
     completed: 100,
     failed: 100,
     paused: 40,
+    cancelled: 100,
   };
-  return updateMission(id, { status, progress: progressMap[status] });
+  return updateMission(id, {
+    status,
+    progress: progressMap[status] ?? undefined,
+  });
+}
+
+export function saveMissionDeliverable(
+  id: string,
+  deliverable: MissionDeliverable,
+  resultText: string
+) {
+  return updateMission(id, {
+    deliverable,
+    result: resultText,
+    status: "completed",
+    progress: 100,
+  });
 }
 
 export function ensureDefaultAgents(userId: string): Agent[] {
@@ -190,6 +209,22 @@ export function toggleConnection(id: string): Connection[] {
   return connections;
 }
 
+export function addMcpConnection(name: string, mcpUrl: string): Connection[] {
+  const state = loadOperatorState();
+  const conn: Connection = {
+    id: createId(),
+    name: name.trim() || "Custom MCP",
+    provider: "mcp",
+    status: "not_connected",
+    description: "User-provided MCP endpoint (runtime not live yet)",
+    mcpUrl: mcpUrl.trim(),
+    mcpTools: [],
+  };
+  const connections = [conn, ...(state.connections || DEFAULT_CONNECTIONS)];
+  saveOperatorState({ connections });
+  return connections;
+}
+
 export function pushActivity(
   userId: string,
   text: string,
@@ -212,7 +247,8 @@ export function createApproval(
   userId: string,
   title: string,
   summary: string,
-  missionId?: string
+  missionId?: string,
+  actionId?: string
 ): ApprovalRequest {
   const req: ApprovalRequest = {
     id: createId(),
@@ -221,6 +257,7 @@ export function createApproval(
     summary,
     status: "pending",
     missionId,
+    actionId,
     createdAt: new Date().toISOString(),
   };
   const state = loadOperatorState();
