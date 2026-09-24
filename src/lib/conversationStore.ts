@@ -1,6 +1,5 @@
 /**
- * Nexa conversationStore
- * Clean client-side persistence. Ready to swap for a backend later.
+ * Nexa conversationStore + shared app state persistence
  */
 
 import {
@@ -10,6 +9,7 @@ import {
   Message,
   MemoryItem,
   WorkspaceId,
+  DEFAULT_CONNECTIONS,
 } from "@/types";
 import { generateConversationTitle as titleFromMessage } from "./prompts";
 
@@ -24,6 +24,11 @@ const defaultState: AppState = {
   currentWorkspace: "strategy",
   currentConversationId: null,
   theme: "system",
+  missions: [],
+  agents: [],
+  connections: DEFAULT_CONNECTIONS,
+  activity: [],
+  approvals: [],
 };
 
 function safeParse<T>(raw: string | null, fallback: T): T {
@@ -77,7 +82,6 @@ export function getConversationsByWorkspace(workspace: WorkspaceId): Conversatio
   return (state.conversations || [])
     .filter((c) => c.workspace === workspace)
     .filter((c) => {
-      // Hide empty untitled chats from lists (still keep if currently open)
       if (c.messageCount > 0) return true;
       if (c.title && !/^new conversation$/i.test(c.title)) return true;
       return false;
