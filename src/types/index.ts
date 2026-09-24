@@ -11,6 +11,7 @@ export interface UserProfile {
   id: string;
   email: string;
   name: string;
+  age?: number;
   userType: UserType;
   createdAt: string;
   onboardingCompleted: boolean;
@@ -71,17 +72,23 @@ export interface MissionSource {
   url: string;
 }
 
+export interface ProspectRow {
+  company: string;
+  website: string;
+  reason: string;
+  evidence: string;
+  source: string;
+  qualification?: "qualified" | "discovered" | "unverified";
+}
+
 export interface MissionDeliverable {
   type: string;
   title: string;
   content: string;
-  rows?: {
-    company: string;
-    website: string;
-    reason: string;
-    evidence: string;
-    source: string;
-  }[];
+  rows?: ProspectRow[];
+  discovered?: ProspectRow[];
+  qualified?: ProspectRow[];
+  unverified?: ProspectRow[];
   sources: MissionSource[];
   createdAt: string;
 }
@@ -120,7 +127,13 @@ export interface Agent {
   createdAt: string;
 }
 
-export type ConnectionStatus = "connected" | "not_connected";
+export type ConnectionStatus =
+  | "connected"
+  | "not_connected"
+  | "available"
+  | "connecting"
+  | "failed"
+  | "disconnected";
 
 export interface Connection {
   id: string;
@@ -206,19 +219,6 @@ export interface AppState {
   approvals: ApprovalRequest[];
 }
 
-export const WORKSPACES: {
-  id: WorkspaceId;
-  name: string;
-  emoji: string;
-  description: string;
-}[] = [
-  { id: "marketing", name: "Marketing", emoji: "📣", description: "Acquisition and campaigns" },
-  { id: "sales", name: "Sales", emoji: "💰", description: "Outreach and closing" },
-  { id: "strategy", name: "Strategy", emoji: "🧠", description: "Decisions and growth" },
-  { id: "content_brand", name: "Content & Brand", emoji: "✍️", description: "Copy and brand" },
-  { id: "personal_growth", name: "Personal Growth", emoji: "👤", description: "Founder productivity" },
-];
-
 export const DEFAULT_CONNECTIONS: Connection[] = [
   { id: "gmail", name: "Gmail", provider: "google", status: "not_connected", description: "Email and outreach" },
   { id: "gdrive", name: "Google Drive", provider: "google", status: "not_connected", description: "Docs and files" },
@@ -237,7 +237,7 @@ export const AGENT_TEMPLATES: Omit<Agent, "id" | "userId" | "createdAt">[] = [
     status: "idle",
     tools: ["web_search", "web_page_reader"],
     schedule: "On demand",
-    recentActivity: "Uses real web search when run via Missions",
+    recentActivity: "Ready — run via Missions",
     isTemplate: true,
   },
   {
@@ -246,7 +246,7 @@ export const AGENT_TEMPLATES: Omit<Agent, "id" | "userId" | "createdAt">[] = [
     status: "idle",
     tools: ["web_search", "web_page_reader"],
     schedule: "On demand",
-    recentActivity: "Uses real web search when run via Missions",
+    recentActivity: "Ready — run via Missions",
     isTemplate: true,
   },
   {
@@ -255,7 +255,7 @@ export const AGENT_TEMPLATES: Omit<Agent, "id" | "userId" | "createdAt">[] = [
     status: "idle",
     tools: ["web_search", "web_page_reader"],
     schedule: "On demand",
-    recentActivity: "Uses real web search when run via Missions",
+    recentActivity: "Ready — run via Missions",
     isTemplate: true,
   },
   {
@@ -264,7 +264,7 @@ export const AGENT_TEMPLATES: Omit<Agent, "id" | "userId" | "createdAt">[] = [
     status: "idle",
     tools: ["web_search", "web_page_reader"],
     schedule: "On demand",
-    recentActivity: "Uses real web search when run via Missions",
+    recentActivity: "Ready — run via Missions",
     isTemplate: true,
   },
 ];

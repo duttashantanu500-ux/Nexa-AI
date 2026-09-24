@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-/** Figma nav — only primary product areas */
 const NAV = [
   { href: "/home", label: "Home", icon: Home },
   { href: "/missions", label: "Missions", icon: Crosshair },
@@ -26,8 +25,6 @@ const NAV = [
   { href: "/activity", label: "Activity", icon: Activity },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
-
-const MOBILE_NAV = NAV.slice(0, 4).concat([{ href: "/settings", label: "More", icon: Settings }]);
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -48,8 +45,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             className={cn(
               "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition",
               active
-                ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900"
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             )}
           >
             <Icon className="h-4 w-4 shrink-0" />
@@ -62,8 +59,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[220px] border-r border-border bg-sidebar md:flex md:flex-col">
-        <div className="flex h-14 items-center px-5 border-b border-sidebar-border">
+      {/* Desktop sidebar only — no duplicate bottom nav */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[220px] border-r border-sidebar-border bg-sidebar md:flex md:flex-col">
+        <div className="flex h-14 items-center gap-2 px-5 border-b border-sidebar-border">
+          <div className="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-xs font-bold">
+            N
+          </div>
           <button
             onClick={() => router.push("/home")}
             className="text-sm font-semibold tracking-tight"
@@ -77,8 +78,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      <div className="md:hidden sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border bg-background px-3">
-        <button onClick={() => setOpen(true)} className="p-1.5" aria-label="Open menu">
+      {/* Mobile top bar + drawer (single nav pattern) */}
+      <div className="md:hidden sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border bg-background/95 backdrop-blur px-3">
+        <button onClick={() => setOpen(true)} className="p-1.5 rounded-md hover:bg-slate-100" aria-label="Open menu">
           <Menu className="h-5 w-5" />
         </button>
         <span className="text-sm font-semibold">Nexa</span>
@@ -86,8 +88,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {open && (
-        <div className="md:hidden fixed inset-0 z-40 flex">
-          <div className="w-64 max-w-[80vw] bg-sidebar border-r border-border flex flex-col">
+        <div className="md:hidden fixed inset-0 z-40 flex animate-fade-in">
+          <div className="w-64 max-w-[80vw] bg-sidebar border-r border-border flex flex-col shadow-xl">
             <div className="flex h-12 items-center justify-between px-3 border-b border-sidebar-border">
               <span className="text-sm font-semibold">Nexa</span>
               <button onClick={() => setOpen(false)} className="p-1" aria-label="Close">
@@ -100,34 +102,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border bg-background/95 backdrop-blur">
-        <div className="grid grid-cols-5 gap-0.5 px-1 py-1">
-          {MOBILE_NAV.map((item) => {
-            const active =
-              item.label === "More"
-                ? ["/settings", "/brain", "/activity"].some(
-                    (p) => pathname === p || pathname.startsWith(p + "/")
-                  )
-                : pathname === item.href || pathname.startsWith(item.href + "/");
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href + item.label}
-                href={item.href}
-                className={cn(
-                  "flex flex-col items-center gap-0.5 rounded-md py-1.5 text-[10px]",
-                  active ? "text-foreground font-medium" : "text-muted"
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-      </nav>
-
-      <main className="md:pl-[220px] pb-20 md:pb-0 min-h-screen">{children}</main>
+      <main className="md:pl-[220px] min-h-screen">{children}</main>
     </div>
   );
 }
