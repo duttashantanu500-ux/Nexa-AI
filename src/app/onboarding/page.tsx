@@ -28,7 +28,7 @@ export default function OnboardingPage() {
       return;
     }
     if (state.user.onboardingCompleted) {
-      router.replace("/chat");
+      router.replace("/home");
       return;
     }
     setUser(state.user);
@@ -126,7 +126,7 @@ export default function OnboardingPage() {
     }
 
     setLoading(false);
-    router.push("/chat");
+    router.push("/home");
   };
 
   if (!user) {
@@ -145,7 +145,7 @@ export default function OnboardingPage() {
           <p className="text-muted text-sm">
             {step === "type"
               ? "What are you building?"
-              : "A few details so Nexa can help you grow."}
+              : "A few details so Nexa can operate for your business."}
           </p>
         </div>
 
@@ -164,18 +164,12 @@ export default function OnboardingPage() {
                 </div>
               </button>
             ))}
-            <p className="text-xs text-muted text-center pt-4">
-              Nexa is built for founders, business owners and agencies.
-            </p>
           </div>
         )}
 
         {step === "details" && userType && (
           <div className="space-y-5">
-            <button
-              onClick={() => setStep("type")}
-              className="text-sm text-muted hover:text-foreground"
-            >
+            <button onClick={() => setStep("type")} className="text-sm text-muted hover:text-foreground">
               ← Back
             </button>
 
@@ -223,11 +217,7 @@ export default function OnboardingPage() {
               disabled={loading || analyzing || !form.businessName}
               className="w-full rounded-lg bg-accent text-background py-3 text-sm font-medium hover:opacity-90 transition disabled:opacity-50 mt-4"
             >
-              {analyzing
-                ? "Reviewing website…"
-                : loading
-                  ? "Setting up Nexa…"
-                  : "Enter Nexa"}
+              {analyzing ? "Reviewing website…" : loading ? "Setting up Nexa…" : "Enter Nexa"}
             </button>
           </div>
         )}
