@@ -7,11 +7,12 @@ import { AppShell } from "@/components/AppShell";
 import { MissionBadge } from "@/components/StatusBadge";
 import {
   getMission,
-  setMissionStatus,
-  createApproval,
+  updateMission,
+  appendMissionActivity,
   loadOperatorState,
+  pushActivity,
 } from "@/lib/operatorStore";
-import { Mission } from "@/types";
+import { Mission, MissionStep } from "@/types";
 import { ArrowLeft } from "lucide-react";
 
 export default function MissionDetailPage() {
@@ -19,6 +20,17 @@ export default function MissionDetailPage() {
   const router = useRouter();
   const id = params.id as string;
   const [mission, setMission] = useState<Mission | null>(null);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState("");
+
+  const reload = () => {
+    const m = getMission(id);
+    if (!m) {
+      router.replace("/missions");
+      return;
+    }
+    setMission(m);
+  };
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -26,12 +38,7 @@ export default function MissionDetailPage() {
       router.replace("/signup");
       return;
     }
-    const m = getMission(id);
-    if (!m) {
-      router.replace("/missions");
-      return;
-    }
-    setMission(m);
+    reload();
   }, [id, router]);
 
   if (!mission) {
@@ -42,30 +49,107 @@ export default function MissionDetailPage() {
     );
   }
 
-  const markWaiting = () => {
-    const user = loadOperatorState().user;
-    if (!user) return;
-    const updated = setMissionStatus(mission.id, "waiting_approval");
-    createApproval(
-      user.id,
-      "Review mission output",
-      `Nexa prepared a draft result for: ${mission.title}`,
-      mission.id
-    );
+  const removeStep = (stepId: string) => {
+    if (mission.status !== "ready" && mission.status !== "planning") return;
+    const plan = mission.plan.filter((s) => s.id !== stepId);
+    const updated = updateMission(mission.id, { plan });
     if (updated) setMission(updated);
   };
 
-  const markComplete = () => {
-    const updated = setMissionStatus(mission.id, "completed");
-    if (updated)
-      setMission({
-        ...updated,
-        result:
-          updated.result ||
-          "Demo result: Mission marked complete. Full autonomous execution ships in Part 2.",
-        progress: 100,
+  const startMission = async () => {
+    if (running) return;
+    setRunning(true);
+    setError("");
+
+    updateMission(mission.id, { status: "running", progress: 15 });
+    appendMissionActivity(mission.id, "Execution started");
+    reload();
+
+    const businessContext = loadOperatorState().businessContext;
+    const user = loadOperatorState().user;
+
+    try {
+      const res = await fetch("/api/missions/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal: mission.goal,
+          businessContext,
+          plan: {
+            title: mission.title,
+            objective: mission.goal,
+            steps: mission.plan,
+            researchQuery: mission.researchQuery || mission.goal,
+          },
+        }),
       });
+
+      const data = await res.json();
+
+      // Append real activity lines only
+      for (const line of data.activity || []) {
+        appendMissionActivity(mission.id, line);
+      }
+
+      const steps = (data.steps || mission.plan) as MissionStep[];
+
+      if (data.ok && data.status === "completed") {
+        updateMission(mission.id, {
+          status: "completed",
+          progress: 100,
+          plan: steps,
+          result: data.deliverable?.content,
+          deliverable: data.deliverable
+            ? {
+                type: data.deliverable.type,
+                title: data.deliverable.title,
+                content: data.deliverable.content,
+                rows: data.deliverable.rows,
+                sources: data.deliverable.sources || [],
+                createdAt: data.deliverable.createdAt,
+              }
+            : undefined,
+        });
+        if (user) {
+          pushActivity(
+            user.id,
+            `Mission completed: ${mission.title}`,
+            "mission",
+            mission.id
+          );
+        }
+      } else {
+        updateMission(mission.id, {
+          status: "failed",
+          progress: data.progress ?? 50,
+          plan: steps,
+          error: data.error || "Execution failed",
+        });
+        setError(data.error || "Execution failed");
+      }
+    } catch (e: any) {
+      updateMission(mission.id, {
+        status: "failed",
+        error: e?.message || "Network error",
+      });
+      appendMissionActivity(mission.id, `Failed: ${e?.message || "Network error"}`, "warning");
+      setError(e?.message || "Network error");
+    } finally {
+      setRunning(false);
+      reload();
+    }
   };
+
+  const cancel = () => {
+    updateMission(mission.id, { status: "cancelled", progress: 100 });
+    appendMissionActivity(mission.id, "Mission cancelled by user");
+    reload();
+  };
+
+  const canStart =
+    (mission.status === "ready" || mission.status === "planning" || mission.status === "failed") &&
+    mission.plan.length > 0 &&
+    !running;
 
   return (
     <AppShell>
@@ -77,7 +161,7 @@ export default function MissionDetailPage() {
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold tracking-tight">{mission.title}</h1>
-              <MissionBadge status={mission.status} />
+              <MissionBadge status={running ? "running" : mission.status} />
             </div>
             <p className="text-sm text-muted mt-1">{mission.goal}</p>
           </div>
@@ -89,21 +173,61 @@ export default function MissionDetailPage() {
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-sm font-medium">Plan</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium">Plan</h2>
+            {(mission.status === "ready" || mission.status === "planning") && (
+              <span className="text-xs text-muted">Remove steps before starting</span>
+            )}
+          </div>
           <ol className="rounded-xl border border-border bg-card divide-y divide-border">
             {mission.plan.map((step, i) => (
               <li key={step.id} className="flex items-center gap-3 px-4 py-3 text-sm">
                 <span className="text-muted w-5">{i + 1}</span>
                 <span className="flex-1">{step.title}</span>
                 <span className="text-xs text-muted capitalize">{step.status}</span>
+                {(mission.status === "ready" || mission.status === "planning") && (
+                  <button
+                    onClick={() => removeStep(step.id)}
+                    className="text-xs text-muted hover:text-foreground"
+                  >
+                    Remove
+                  </button>
+                )}
               </li>
             ))}
+            {mission.plan.length === 0 && (
+              <li className="px-4 py-3 text-sm text-muted">No plan yet</li>
+            )}
           </ol>
         </section>
 
+        <div className="flex flex-wrap gap-2">
+          {canStart && (
+            <button
+              onClick={startMission}
+              className="rounded-lg bg-zinc-900 px-3 py-2 text-sm text-white dark:bg-zinc-100 dark:text-zinc-900"
+            >
+              {mission.status === "failed" ? "Retry Mission" : "Start Mission"}
+            </button>
+          )}
+          {running && (
+            <span className="text-sm text-muted animate-pulse px-2 py-2">
+              Nexa is working…
+            </span>
+          )}
+          {(mission.status === "ready" || mission.status === "running" || mission.status === "paused") &&
+            !running && (
+              <button onClick={cancel} className="rounded-lg border border-border px-3 py-2 text-sm">
+                Cancel
+              </button>
+            )}
+        </div>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
         <section className="space-y-2">
           <h2 className="text-sm font-medium">Activity</h2>
-          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+          <div className="rounded-xl border border-border bg-card p-4 space-y-3 max-h-72 overflow-y-auto">
             {mission.activity.map((a) => (
               <div key={a.id} className="flex gap-3 text-sm">
                 <span className="text-xs text-muted whitespace-nowrap">
@@ -117,30 +241,54 @@ export default function MissionDetailPage() {
 
         <section className="space-y-2">
           <h2 className="text-sm font-medium">Result</h2>
-          <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted">
-            {mission.result ||
-              "No deliverable yet. Part 1 uses demo mission states. Real tool execution comes next."}
-          </div>
+          {mission.deliverable ? (
+            <div className="rounded-xl border border-border bg-card p-4 space-y-4">
+              <div className="text-sm font-medium">{mission.deliverable.title}</div>
+              {mission.deliverable.rows && mission.deliverable.rows.length > 0 && (
+                <div className="space-y-3">
+                  {mission.deliverable.rows.map((r, i) => (
+                    <div key={i} className="text-sm border-b border-border pb-3 last:border-0">
+                      <div className="font-medium">
+                        {i + 1}. {r.company}
+                      </div>
+                      <a
+                        href={r.website}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-sky-600 break-all"
+                      >
+                        {r.website}
+                      </a>
+                      <p className="text-xs text-muted mt-1">{r.evidence}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <pre className="text-xs whitespace-pre-wrap text-muted">{mission.deliverable.content}</pre>
+              {mission.deliverable.sources?.length > 0 && (
+                <div>
+                  <div className="text-xs font-medium mb-1">Sources</div>
+                  <ul className="space-y-1">
+                    {mission.deliverable.sources.map((s, i) => (
+                      <li key={i} className="text-xs">
+                        <a href={s.url} target="_blank" rel="noreferrer" className="text-sky-600 break-all">
+                          {s.title || s.url}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted">
+              {mission.result ||
+                (mission.status === "completed"
+                  ? "Completed with no structured deliverable."
+                  : "Start the mission to run real web research.")}
+            </div>
+          )}
         </section>
-
-        <div className="flex flex-wrap gap-2">
-          {mission.status === "running" && (
-            <button
-              onClick={markWaiting}
-              className="rounded-lg border border-border px-3 py-2 text-sm"
-            >
-              Request approval (demo)
-            </button>
-          )}
-          {mission.status !== "completed" && (
-            <button
-              onClick={markComplete}
-              className="rounded-lg bg-zinc-900 px-3 py-2 text-sm text-white dark:bg-zinc-100 dark:text-zinc-900"
-            >
-              Mark completed (demo)
-            </button>
-          )}
-        </div>
       </div>
     </AppShell>
   );
