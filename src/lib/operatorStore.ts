@@ -1,316 +1,266 @@
 import {
-  AppState,
-  Mission,
-  MissionStatus,
-  MissionStep,
-  MissionDeliverable,
   Agent,
-  ActivityEvent,
-  ApprovalRequest,
+  AgentRun,
+  AgentSchedule,
+  AppState,
+  BusinessContext,
   Connection,
   DEFAULT_CONNECTIONS,
-  AGENT_TEMPLATES,
-  BusinessContext,
   UserProfile,
+  computeNextRun,
+  defaultPermissions,
+  defaultSchedule,
 } from "@/types";
-import { loadAppState, saveAppState, createId } from "./conversationStore";
 
-function ensureOperatorDefaults(state: AppState): AppState {
+const KEY = "nexa_operator_v3";
+
+function uid(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function emptyState(): AppState {
   return {
-    ...state,
-    missions: state.missions || [],
-    agents: state.agents || [],
-    connections: state.connections?.length ? state.connections : DEFAULT_CONNECTIONS,
-    activity: state.activity || [],
-    approvals: state.approvals || [],
+    user: null,
+    businessContext: null,
+    theme: "system",
+    agents: [],
+    agentRuns: [],
+    connections: structuredClone(DEFAULT_CONNECTIONS),
   };
 }
 
 export function loadOperatorState(): AppState {
-  return ensureOperatorDefaults(loadAppState());
-}
-
-export function saveOperatorState(partial: Partial<AppState>): AppState {
-  const current = loadOperatorState();
-  return saveAppState({ ...current, ...partial });
-}
-
-function titleFromGoal(goal: string): string {
-  const cleaned = goal.trim().replace(/\s+/g, " ");
-  if (cleaned.length <= 48) return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-  return cleaned.slice(0, 45).trim() + "…";
-}
-
-export function createMission(
-  userId: string,
-  goal: string,
-  plan?: { title?: string; steps?: MissionStep[]; researchQuery?: string }
-): Mission {
-  const now = new Date().toISOString();
-  const mission: Mission = {
-    id: createId(),
-    userId,
-    title: plan?.title || titleFromGoal(goal),
-    goal: goal.trim(),
-    status: plan?.steps?.length ? "ready" : "planning",
-    progress: plan?.steps?.length ? 5 : 0,
-    plan: plan?.steps || [],
-    activity: [
-      { id: createId(), text: "Mission created", at: now, type: "success" },
-    ],
-    tools: ["web_search", "web_page_reader"],
-    researchQuery: plan?.researchQuery,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  if (plan?.steps?.length) {
-    mission.activity.push({
-      id: createId(),
-      text: "Plan generated — review and start when ready",
-      at: now,
-      type: "info",
-    });
+  if (typeof window === "undefined") return emptyState();
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) {
+      // migrate from older keys
+      const old = localStorage.getItem("nexa_operator_v1");
+      if (old) {
+        const parsed = JSON.parse(old);
+        return migrateLegacy(parsed);
+      }
+      return emptyState();
+    }
+    const parsed = JSON.parse(raw) as AppState;
+    return normalize(parsed);
+  } catch {
+    return emptyState();
   }
+}
 
-  const state = loadOperatorState();
-  const missions = [mission, ...(state.missions || [])];
-  const activity: ActivityEvent = {
-    id: createId(),
-    userId,
-    text: `Mission created: ${mission.title}`,
-    at: now,
-    category: "mission",
-    refId: mission.id,
+function migrateLegacy(parsed: any): AppState {
+  const base = emptyState();
+  base.user = parsed.user || null;
+  base.businessContext = parsed.businessContext || null;
+  base.theme = parsed.theme || "system";
+  base.agents = (parsed.agents || []).map(normalizeAgent);
+  base.agentRuns = parsed.agentRuns || [];
+  base.connections = mergeConnections(parsed.connections);
+  saveOperatorState(base);
+  return base;
+}
+
+function normalize(s: AppState): AppState {
+  return {
+    user: s.user || null,
+    businessContext: s.businessContext || null,
+    theme: s.theme || "system",
+    agents: (s.agents || []).map(normalizeAgent),
+    agentRuns: s.agentRuns || [],
+    connections: mergeConnections(s.connections),
   };
-  saveOperatorState({
-    missions,
-    activity: [activity, ...(state.activity || [])],
-  });
-  return mission;
 }
 
-export function getMission(id: string): Mission | null {
-  return loadOperatorState().missions.find((m) => m.id === id) || null;
-}
-
-export function updateMission(id: string, patch: Partial<Mission>): Mission | null {
-  const state = loadOperatorState();
-  let updated: Mission | null = null;
-  const missions = state.missions.map((m) => {
-    if (m.id !== id) return m;
-    updated = { ...m, ...patch, updatedAt: new Date().toISOString() };
-    return updated;
-  });
-  if (!updated) return null;
-  saveOperatorState({ missions });
-  return updated;
-}
-
-export function appendMissionActivity(
-  id: string,
-  text: string,
-  type?: Mission["activity"][0]["type"]
-) {
-  const m = getMission(id);
-  if (!m) return null;
-  const activity = [
-    ...m.activity,
-    { id: createId(), text, at: new Date().toISOString(), type },
-  ];
-  return updateMission(id, { activity });
-}
-
-export function setMissionStatus(id: string, status: MissionStatus): Mission | null {
-  const progressMap: Partial<Record<MissionStatus, number>> = {
-    planning: 5,
-    ready: 10,
-    running: 40,
-    waiting_approval: 70,
-    completed: 100,
-    failed: 100,
-    paused: 40,
-    cancelled: 100,
+function normalizeAgent(a: any): Agent {
+  const schedule: AgentSchedule = a.schedule?.frequency
+    ? { ...defaultSchedule(), ...a.schedule }
+    : defaultSchedule();
+  if (schedule.enabled && schedule.frequency !== "once" && !schedule.nextRunAt) {
+    schedule.nextRunAt = computeNextRun(schedule);
+  }
+  return {
+    id: a.id,
+    userId: a.userId,
+    name: a.name || "Agent",
+    description: a.description || a.purpose || "",
+    purpose: a.purpose || a.description || "",
+    instructions: a.instructions || "",
+    expectedOutput: a.expectedOutput || "",
+    constraints: a.constraints || "",
+    templateType: a.templateType,
+    status: a.status === "paused" || a.status === "error" ? a.status : "active",
+    tools: Array.isArray(a.tools) ? a.tools : ["web_search", "web_page_reader"],
+    permissions: a.permissions || defaultPermissions(),
+    schedule,
+    lastRunAt: a.lastRunAt || null,
+    lastRunStatus: a.lastRunStatus || null,
+    createdAt: a.createdAt || new Date().toISOString(),
+    updatedAt: a.updatedAt || a.createdAt || new Date().toISOString(),
   };
-  return updateMission(id, {
-    status,
-    progress: progressMap[status] ?? undefined,
+}
+
+function mergeConnections(existing?: Connection[]): Connection[] {
+  const defaults = structuredClone(DEFAULT_CONNECTIONS);
+  if (!existing?.length) return defaults;
+  return defaults.map((d) => {
+    const found = existing.find((c) => c.id === d.id);
+    if (!found) return d;
+    // Never trust client "connected" for OAuth services without verification
+    if (d.provider !== "builtin" && d.status === "not_supported") {
+      return { ...d, mcpUrl: found.mcpUrl, mcpTools: found.mcpTools };
+    }
+    if (d.id === "mcp" && found.status === "connected" && found.mcpUrl) {
+      return { ...found, name: d.name, description: d.description };
+    }
+    if (d.provider === "builtin") return { ...d, status: "connected" };
+    return { ...d, ...found, status: found.status || d.status };
   });
 }
 
-export function saveMissionDeliverable(
-  id: string,
-  deliverable: MissionDeliverable,
-  resultText: string
-) {
-  return updateMission(id, {
-    deliverable,
-    result: resultText,
-    status: "completed",
-    progress: 100,
-  });
+export function saveOperatorState(state: AppState) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(KEY, JSON.stringify(state));
 }
 
-export function ensureDefaultAgents(userId: string): Agent[] {
-  const state = loadOperatorState();
-  if (state.agents?.length) return state.agents;
-  const agents: Agent[] = AGENT_TEMPLATES.map((t) => ({
-    ...t,
-    id: createId(),
-    userId,
-    createdAt: new Date().toISOString(),
-  }));
-  saveOperatorState({ agents });
-  return agents;
+export function setUser(user: UserProfile | null) {
+  const s = loadOperatorState();
+  s.user = user;
+  saveOperatorState(s);
+  return s;
 }
 
-export function createAgent(params: {
-  userId: string;
-  name: string;
-  purpose: string;
-  instructions?: string;
-  tools: string[];
-}): Agent {
+export function setBusinessContext(ctx: BusinessContext | null) {
+  const s = loadOperatorState();
+  s.businessContext = ctx;
+  saveOperatorState(s);
+  return s;
+}
+
+export function setTheme(theme: AppState["theme"]) {
+  const s = loadOperatorState();
+  s.theme = theme;
+  saveOperatorState(s);
+  return s;
+}
+
+export function createAgent(
+  input: Omit<
+    Agent,
+    | "id"
+    | "createdAt"
+    | "updatedAt"
+    | "status"
+    | "lastRunAt"
+    | "lastRunStatus"
+  > & { status?: Agent["status"] }
+): Agent {
+  const s = loadOperatorState();
+  const schedule = {
+    ...defaultSchedule(),
+    ...input.schedule,
+  };
+  schedule.nextRunAt = computeNextRun(schedule);
+
   const agent: Agent = {
-    id: createId(),
-    userId: params.userId,
-    name: params.name.trim(),
-    purpose: params.purpose.trim(),
-    instructions: params.instructions,
-    status: "idle",
-    tools: params.tools,
-    schedule: "On demand",
-    recentActivity: "Just created",
-    isTemplate: false,
+    id: uid("agent"),
+    userId: input.userId,
+    name: input.name.trim(),
+    description: input.description || input.purpose || "",
+    purpose: input.purpose || input.description || "",
+    instructions: input.instructions || "",
+    expectedOutput: input.expectedOutput || "",
+    constraints: input.constraints || "",
+    templateType: input.templateType,
+    status: input.status || "active",
+    tools: input.tools?.length ? input.tools : ["web_search", "web_page_reader"],
+    permissions: input.permissions || defaultPermissions(),
+    schedule,
+    lastRunAt: null,
+    lastRunStatus: null,
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
-  const state = loadOperatorState();
-  saveOperatorState({ agents: [agent, ...(state.agents || [])] });
-  pushActivity(params.userId, `Agent created: ${agent.name}`, "agent", agent.id);
+  s.agents = [agent, ...s.agents];
+  saveOperatorState(s);
   return agent;
 }
 
 export function updateAgent(id: string, patch: Partial<Agent>): Agent | null {
-  const state = loadOperatorState();
-  let found: Agent | null = null;
-  const agents = (state.agents || []).map((a) => {
-    if (a.id !== id) return a;
-    found = { ...a, ...patch };
-    return found;
-  });
-  if (!found) return null;
-  saveOperatorState({ agents });
-  return found;
-}
-
-export function deleteAgent(id: string): boolean {
-  const state = loadOperatorState();
-  const before = state.agents?.length || 0;
-  const agents = (state.agents || []).filter((a) => a.id !== id);
-  if (agents.length === before) return false;
-  saveOperatorState({ agents });
-  if (state.user) pushActivity(state.user.id, "Agent deleted", "agent", id);
-  return true;
-}
-
-export function addMcpConnection(name: string, mcpUrl: string): Connection[] {
-  const state = loadOperatorState();
-  const conn: Connection = {
-    id: createId(),
-    name: name.trim() || "Custom MCP",
-    provider: "mcp",
-    status: "not_connected",
-    description: "Custom MCP endpoint",
-    mcpUrl: mcpUrl.trim(),
-    mcpTools: [],
-  };
-  const connections = [conn, ...(state.connections || DEFAULT_CONNECTIONS)];
-  saveOperatorState({ connections });
-  return connections;
-}
-
-export function pushActivity(
-  userId: string,
-  text: string,
-  category: ActivityEvent["category"] = "system",
-  refId?: string
-) {
-  const state = loadOperatorState();
-  const event: ActivityEvent = {
-    id: createId(),
-    userId,
-    text,
-    at: new Date().toISOString(),
-    category,
-    refId,
-  };
-  saveOperatorState({ activity: [event, ...(state.activity || [])] });
-}
-
-export function createApproval(
-  userId: string,
-  title: string,
-  summary: string,
-  missionId?: string,
-  actionId?: string
-): ApprovalRequest {
-  const req: ApprovalRequest = {
-    id: createId(),
-    userId,
-    title,
-    summary,
-    status: "pending",
-    missionId,
-    actionId,
-    createdAt: new Date().toISOString(),
-  };
-  const state = loadOperatorState();
-  saveOperatorState({ approvals: [req, ...(state.approvals || [])] });
-  pushActivity(userId, `Approval requested: ${title}`, "approval", req.id);
-  return req;
-}
-
-export function resolveApproval(
-  id: string,
-  status: "approved" | "rejected"
-): ApprovalRequest | null {
-  const state = loadOperatorState();
-  let found: ApprovalRequest | null = null;
-  const approvals = state.approvals.map((a) => {
-    if (a.id !== id) return a;
-    found = { ...a, status };
-    return found;
-  });
-  if (!found) return null;
-  saveOperatorState({ approvals });
-  return found;
-}
-
-export function updateBusinessProfile(patch: Partial<BusinessContext>): BusinessContext {
-  const state = loadOperatorState();
-  const next = { ...(state.businessContext || {}), ...patch };
-  saveOperatorState({ businessContext: next });
+  const s = loadOperatorState();
+  const idx = s.agents.findIndex((a) => a.id === id);
+  if (idx < 0) return null;
+  const next = { ...s.agents[idx], ...patch, id, updatedAt: new Date().toISOString() };
+  if (patch.schedule) {
+    next.schedule = { ...s.agents[idx].schedule, ...patch.schedule };
+    next.schedule.nextRunAt = computeNextRun(next.schedule);
+  }
+  s.agents[idx] = next;
+  saveOperatorState(s);
   return next;
 }
 
-export function requireUser(): UserProfile | null {
-  return loadOperatorState().user;
+export function deleteAgent(id: string) {
+  const s = loadOperatorState();
+  s.agents = s.agents.filter((a) => a.id !== id);
+  s.agentRuns = s.agentRuns.filter((r) => r.agentId !== id);
+  saveOperatorState(s);
 }
 
-/** Map internal errors to user-facing copy */
-export function friendlyError(raw?: string): string {
-  if (!raw) return "Something went wrong. Please try again.";
-  const s = raw.toLowerCase();
-  if (s.includes("supabase") || s.includes("service_role") || s.includes("env"))
-    return "This feature is temporarily unavailable. Please try again later.";
-  if (s.includes("api key") || s.includes("unauthorized") || s.includes("401"))
-    return "A connected service could not be reached. Please try again later.";
-  if (s.includes("timeout"))
-    return "The request timed out. Please try again.";
-  if (s.includes("network"))
-    return "Network error. Check your connection and try again.";
-  // Strip env var names from user view
-  if (/[A-Z]{3,}_[A-Z0-9_]+/.test(raw))
-    return "This feature is temporarily unavailable. Please try again later.";
-  return raw.length > 160 ? raw.slice(0, 157) + "…" : raw;
+export function getAgent(id: string): Agent | null {
+  return loadOperatorState().agents.find((a) => a.id === id) || null;
+}
+
+export function listAgentRuns(agentId: string): AgentRun[] {
+  return loadOperatorState()
+    .agentRuns.filter((r) => r.agentId === agentId)
+    .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
+}
+
+export function addAgentRun(run: AgentRun) {
+  const s = loadOperatorState();
+  s.agentRuns = [run, ...s.agentRuns].slice(0, 200);
+  const agent = s.agents.find((a) => a.id === run.agentId);
+  if (agent) {
+    agent.lastRunAt = run.startedAt;
+    agent.lastRunStatus = run.status;
+    agent.updatedAt = new Date().toISOString();
+  }
+  saveOperatorState(s);
+  return run;
+}
+
+export function updateAgentRun(id: string, patch: Partial<AgentRun>) {
+  const s = loadOperatorState();
+  const idx = s.agentRuns.findIndex((r) => r.id === id);
+  if (idx < 0) return null;
+  s.agentRuns[idx] = { ...s.agentRuns[idx], ...patch };
+  const run = s.agentRuns[idx];
+  const agent = s.agents.find((a) => a.id === run.agentId);
+  if (agent) {
+    agent.lastRunAt = run.startedAt;
+    agent.lastRunStatus = run.status;
+    agent.updatedAt = new Date().toISOString();
+  }
+  saveOperatorState(s);
+  return run;
+}
+
+export function createRunId() {
+  return uid("run");
+}
+
+export function updateConnection(id: string, patch: Partial<Connection>) {
+  const s = loadOperatorState();
+  s.connections = s.connections.map((c) =>
+    c.id === id ? { ...c, ...patch } : c
+  );
+  saveOperatorState(s);
+  return s;
+}
+
+export function clearSession() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(KEY);
+  localStorage.removeItem("nexa_operator_v1");
 }
