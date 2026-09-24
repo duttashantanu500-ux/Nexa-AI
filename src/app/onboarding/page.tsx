@@ -1,136 +1,91 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { loadAppState, saveAppState } from "@/lib/conversationStore";
-import { persistOnboardingCloud } from "@/lib/auth";
-import { saveOperatorState } from "@/lib/operatorStore";
-import { UserProfile } from "@/types";
+import { loadOperatorState, setUser } from "@/lib/operatorStore";
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const [user, setUser] = useState<UserProfile | null>(null);
   const [name, setName] = useState("");
   const [age, setAge] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const state = loadAppState();
-    if (!state.user) {
+    const s = loadOperatorState();
+    if (!s.user) {
       router.replace("/signup");
       return;
     }
-    if (state.user.onboardingCompleted) {
+    if (s.user.onboardingCompleted) {
       router.replace("/home");
       return;
     }
-    setUser(state.user);
-    setName(state.user.name || "");
+    if (s.user.name) setName(s.user.name);
   }, [router]);
 
-  const handleFinish = async () => {
-    if (!user) return;
-    const trimmed = name.trim();
-    const ageNum = parseInt(age, 10);
-    if (!trimmed) {
+  const submit = () => {
+    setError("");
+    const n = name.trim();
+    const a = parseInt(age, 10);
+    if (!n) {
       setError("Please enter your name.");
       return;
     }
-    if (!age || Number.isNaN(ageNum) || ageNum < 13 || ageNum > 120) {
+    if (!age || Number.isNaN(a) || a < 13 || a > 120) {
       setError("Please enter a valid age (13+).");
       return;
     }
-
-    setLoading(true);
-    setError("");
-
-    const updatedUser: UserProfile = {
-      ...user,
-      name: trimmed,
-      age: ageNum,
-      userType: user.userType || "founder",
-      onboardingCompleted: true,
-    };
-
-    saveAppState({
-      user: updatedUser,
-      businessContext: { name: trimmed },
-      memories: [],
-      currentWorkspace: "strategy",
-      currentConversationId: null,
-      conversations: [],
-    });
-    saveOperatorState({ user: updatedUser, businessContext: { name: trimmed } });
-
-    try {
-      await persistOnboardingCloud({
-        user: updatedUser,
-        businessContext: { name: trimmed },
-        memories: [],
-      });
-    } catch (err) {
-      console.error("[Nexa] onboarding sync", err);
+    const s = loadOperatorState();
+    if (!s.user) {
+      router.replace("/signup");
+      return;
     }
-
-    setLoading(false);
-    router.push("/home");
+    setUser({
+      ...s.user,
+      name: n,
+      age: a,
+      onboardingCompleted: true,
+    });
+    router.replace("/home");
   };
 
-  if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-muted text-sm animate-pulse-soft">Loading…</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-background px-4 py-16">
-      <div className="max-w-md mx-auto space-y-8 animate-fade-in">
-        <div className="text-center space-y-2">
-          <div className="mx-auto h-10 w-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold">
-            N
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Welcome to Nexa</h1>
-          <p className="text-muted text-sm">Your AI Business Operator. Just two quick details.</p>
+    <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
+      <div className="w-full max-w-md space-y-6 rounded-2xl border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-900">
+        <div>
+          <div className="text-lg font-semibold text-indigo-600">Nexa</div>
+          <h1 className="mt-2 text-xl font-semibold">Welcome</h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            A few details so we can personalize your workspace.
+          </p>
         </div>
-
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-5">
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Your name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="First name"
-              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/40"
-              autoFocus
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Age</label>
-            <input
-              type="number"
-              min={13}
-              max={120}
-              value={age}
-              onChange={(e) => setAge(e.target.value)}
-              placeholder="18"
-              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/40"
-            />
-          </div>
-
-          {error && <p className="text-sm text-red-600">{error}</p>}
-
-          <button
-            onClick={handleFinish}
-            disabled={loading}
-            className="w-full rounded-lg bg-indigo-600 text-white py-3 text-sm font-medium hover:bg-indigo-500 transition disabled:opacity-50"
-          >
-            {loading ? "Setting up…" : "Continue to Home"}
-          </button>
-        </div>
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium">Your name</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            placeholder="Hnjaj"
+          />
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium">Age</span>
+          <input
+            type="number"
+            value={age}
+            onChange={(e) => setAge(e.target.value)}
+            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            placeholder="25"
+          />
+        </label>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <button
+          type="button"
+          onClick={submit}
+          className="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white"
+        >
+          Continue to Nexa
+        </button>
       </div>
     </div>
   );

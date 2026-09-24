@@ -1,29 +1,17 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { loadOperatorState, addMcpConnection } from "@/lib/operatorStore";
+import { loadOperatorState, updateConnection } from "@/lib/operatorStore";
+import { Connection } from "@/types";
 
-interface ProviderStatus {
-  provider: string;
-  name: string;
-  configured: boolean;
-  oauthSupported: boolean;
-}
-
-function ConnectionsInner() {
+export default function ConnectionsPage() {
   const router = useRouter();
-  const search = useSearchParams();
-  const [providers, setProviders] = useState<ProviderStatus[]>([]);
-  const [msg, setMsg] = useState("");
-  const [mcpName, setMcpName] = useState("");
+  const [connections, setConnections] = useState<Connection[]>([]);
   const [mcpUrl, setMcpUrl] = useState("");
-  const [mcpTools, setMcpTools] = useState<any[] | null>(null);
-  const [mcpError, setMcpError] = useState("");
-  const [mcpLoading, setMcpLoading] = useState(false);
-  const [showMcp, setShowMcp] = useState(false);
-  const [connected, setConnected] = useState<string[]>([]);
+  const [mcpBusy, setMcpBusy] = useState(false);
+  const [mcpMsg, setMcpMsg] = useState("");
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -31,189 +19,160 @@ function ConnectionsInner() {
       router.replace("/signup");
       return;
     }
+    setConnections(s.connections);
+  }, [router]);
 
-    const oauth = search.get("oauth");
-    const provider = search.get("provider");
-    if (oauth === "success" && provider) {
-      setMsg(`${provider} connected successfully.`);
-      try {
-        const prev = JSON.parse(localStorage.getItem("nexa_oauth_connected") || "[]");
-        const next = [...new Set([...(Array.isArray(prev) ? prev : []), provider])];
-        localStorage.setItem("nexa_oauth_connected", JSON.stringify(next));
-        setConnected(next);
-      } catch {
-        /* */
-      }
-    } else if (oauth === "error") {
-      setMsg("Connection failed. Please try again later.");
-    }
+  const refresh = () => setConnections(loadOperatorState().connections);
 
-    try {
-      const prev = JSON.parse(localStorage.getItem("nexa_oauth_connected") || "[]");
-      if (Array.isArray(prev)) setConnected(prev);
-    } catch {
-      /* */
-    }
-
-    fetch("/api/connections/status")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.providers) setProviders(d.providers);
-      })
-      .catch(() => {});
-  }, [router, search]);
-
-  const connectGoogle = (provider: string) => {
-    window.location.href = `/api/oauth/google/start?provider=${provider}`;
-  };
-
-  const discoverMcp = async () => {
+  const connectMcp = async () => {
     if (!mcpUrl.trim()) return;
-    setMcpLoading(true);
-    setMcpError("");
-    setMcpTools(null);
+    setMcpBusy(true);
+    setMcpMsg("");
     try {
       const res = await fetch("/api/mcp/discover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ endpoint: mcpUrl.trim() }),
+        body: JSON.stringify({ url: mcpUrl.trim() }),
       });
       const data = await res.json();
       if (!data.ok) {
-        setMcpError(data.error || "Could not reach this server.");
-        return;
+        setMcpMsg(data.error || "Could not connect");
+        updateConnection("mcp", {
+          status: "available",
+          mcpUrl: mcpUrl.trim(),
+          mcpTools: [],
+        });
+      } else {
+        updateConnection("mcp", {
+          status: "connected",
+          mcpUrl: mcpUrl.trim(),
+          mcpTools: data.tools || [],
+          tools: data.tools || [],
+        });
+        setMcpMsg(`Connected · ${(data.tools || []).length} tools found`);
       }
-      setMcpTools(data.tools || []);
-      addMcpConnection(mcpName || "Custom MCP", mcpUrl.trim());
+      refresh();
     } catch {
-      setMcpError("Could not reach this server.");
+      setMcpMsg("Network error");
     } finally {
-      setMcpLoading(false);
+      setMcpBusy(false);
     }
+  };
+
+  const disconnectMcp = () => {
+    updateConnection("mcp", {
+      status: "available",
+      mcpUrl: undefined,
+      mcpTools: [],
+      tools: [],
+    });
+    setMcpUrl("");
+    setMcpMsg("");
+    refresh();
   };
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-3xl px-4 py-8 space-y-6 animate-fade-in">
+      <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Connections</h1>
-          <p className="text-sm text-muted mt-1">
-            Connect tools Nexa can use. Status reflects real authorization only.
+          <h1 className="text-xl font-semibold">Connections</h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            Connect services your agents can use. Only verified connections show
+            as connected.
           </p>
         </div>
 
-        {msg && (
-          <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm">{msg}</div>
-        )}
-
-        <div className="rounded-xl border border-border bg-card p-4 text-sm">
-          <div className="font-medium">Always available</div>
-          <div className="text-muted mt-1">Web search · Page reader</div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          {providers.map((p) => {
-            const isOn = connected.includes(p.provider);
-            return (
-              <div
-                key={p.provider}
-                className="rounded-xl border border-border bg-card p-4 flex flex-col gap-2"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="text-sm font-medium">{p.name}</div>
-                  <span
-                    className={`text-[11px] rounded-full px-2 py-0.5 ${
-                      isOn
-                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
-                    }`}
-                  >
-                    {isOn ? "Connected" : "Not connected"}
-                  </span>
-                </div>
-                {!p.configured && (
-                  <p className="text-xs text-muted">
-                    This integration is not available yet for your workspace.
-                  </p>
-                )}
-                {p.oauthSupported && p.configured && !isOn && (
-                  <button
-                    onClick={() => connectGoogle(p.provider)}
-                    className="mt-1 self-start rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-800"
-                  >
-                    Connect
-                  </button>
-                )}
-                {p.oauthSupported && !p.configured && (
-                  <p className="text-xs text-muted">Setup required by administrator.</p>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="rounded-xl border border-dashed border-border p-4 space-y-3">
-          {!showMcp ? (
-            <button
-              onClick={() => setShowMcp(true)}
-              className="text-sm font-medium text-indigo-600 hover:underline"
+        <div className="space-y-3">
+          {connections.map((c) => (
+            <div
+              key={c.id}
+              className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
             >
-              + Add custom MCP server
-            </button>
-          ) : (
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Custom MCP server</div>
-              <input
-                value={mcpName}
-                onChange={(e) => setMcpName(e.target.value)}
-                placeholder="Name"
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none"
-              />
-              <input
-                value={mcpUrl}
-                onChange={(e) => setMcpUrl(e.target.value)}
-                placeholder="https://…"
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none"
-              />
-              {mcpError && <p className="text-xs text-red-600">{mcpError}</p>}
-              {mcpTools && (
-                <div className="text-xs space-y-1">
-                  <div className="font-medium">Discovered {mcpTools.length} tool(s)</div>
-                  {mcpTools.map((t) => (
-                    <div key={t.name} className="text-muted">
-                      {t.name}
-                      {t.description ? ` — ${t.description}` : ""}
-                    </div>
-                  ))}
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-medium">{c.name}</div>
+                  <p className="mt-0.5 text-sm text-zinc-500">{c.description}</p>
+                </div>
+                <Status status={c.status} />
+              </div>
+
+              {c.id === "web" && (
+                <p className="mt-2 text-xs text-zinc-400">
+                  Built-in · web search and page reading are available to agents
+                </p>
+              )}
+
+              {c.id === "mcp" && (
+                <div className="mt-3 space-y-2">
+                  {c.status === "connected" ? (
+                    <>
+                      <p className="text-xs text-zinc-500">
+                        {(c.mcpTools || c.tools || []).length} tools discovered
+                      </p>
+                      <button
+                        type="button"
+                        onClick={disconnectMcp}
+                        className="text-xs text-red-600"
+                      >
+                        Disconnect
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        value={mcpUrl}
+                        onChange={(e) => setMcpUrl(e.target.value)}
+                        placeholder="https://your-mcp-server.example/sse"
+                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                      <button
+                        type="button"
+                        disabled={mcpBusy || !mcpUrl.trim()}
+                        onClick={connectMcp}
+                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white disabled:opacity-40"
+                      >
+                        {mcpBusy ? "Connecting…" : "Connect MCP"}
+                      </button>
+                      {mcpMsg && (
+                        <p className="text-xs text-zinc-500">{mcpMsg}</p>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
-              <div className="flex gap-2">
-                <button
-                  onClick={discoverMcp}
-                  disabled={!mcpUrl.trim() || mcpLoading}
-                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white disabled:opacity-40"
-                >
-                  {mcpLoading ? "Connecting…" : "Connect & discover"}
-                </button>
-                <button
-                  onClick={() => setShowMcp(false)}
-                  className="rounded-lg border border-border px-3 py-1.5 text-xs"
-                >
-                  Cancel
-                </button>
-              </div>
+
+              {c.status === "not_supported" && (
+                <p className="mt-2 text-xs text-zinc-400">
+                  This integration is not available yet.
+                </p>
+              )}
             </div>
-          )}
+          ))}
         </div>
       </div>
     </AppShell>
   );
 }
 
-export default function ConnectionsPage() {
+function Status({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    connected: "bg-emerald-50 text-emerald-700",
+    available: "bg-sky-50 text-sky-700",
+    not_connected: "bg-zinc-100 text-zinc-600",
+    setup_required: "bg-amber-50 text-amber-700",
+    not_supported: "bg-zinc-100 text-zinc-500",
+  };
+  const label =
+    status === "not_supported"
+      ? "Not available"
+      : status === "not_connected"
+        ? "Not connected"
+        : status.replace("_", " ");
   return (
-    <Suspense fallback={<div className="p-8 text-sm text-muted">Loading…</div>}>
-      <ConnectionsInner />
-    </Suspense>
+    <span
+      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium capitalize ${map[status] || map.not_connected}`}
+    >
+      {label}
+    </span>
   );
 }

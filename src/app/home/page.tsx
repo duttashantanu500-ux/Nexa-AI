@@ -1,200 +1,190 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AppShell } from "@/components/AppShell";
-import { MissionBadge } from "@/components/StatusBadge";
-import {
-  loadOperatorState,
-  createMission,
-  ensureDefaultAgents,
-  friendlyError,
-} from "@/lib/operatorStore";
-import { Mission, UserProfile } from "@/types";
 import Link from "next/link";
+import { AppShell } from "@/components/AppShell";
+import { loadOperatorState } from "@/lib/operatorStore";
+import { Agent, AgentRun } from "@/types";
 
-const ACTIVE = new Set(["planning", "ready", "running", "paused", "waiting_approval"]);
-const DONE = new Set(["completed", "failed", "cancelled"]);
-
-function dedupeMissions(list: Mission[]): Mission[] {
-  const byId = new Map<string, Mission>();
-  for (const m of list) {
-    const prev = byId.get(m.id);
-    if (!prev || new Date(m.updatedAt) > new Date(prev.updatedAt)) {
-      byId.set(m.id, m);
-    }
-  }
-  // Also collapse identical title+goal created within same second (double-click)
-  const out: Mission[] = [];
-  const seenKey = new Set<string>();
-  for (const m of [...byId.values()].sort(
-    (a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt)
-  )) {
-    const key = `${m.title}|${m.goal}|${m.status}`;
-    if (seenKey.has(key)) continue;
-    seenKey.add(key);
-    out.push(m);
-  }
-  return out;
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
 }
 
 export default function HomePage() {
   const router = useRouter();
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [missions, setMissions] = useState<Mission[]>([]);
-  const [goal, setGoal] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState("");
-  const lock = useRef(false);
+  const [name, setName] = useState("");
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [runs, setRuns] = useState<AgentRun[]>([]);
 
   useEffect(() => {
     const s = loadOperatorState();
-    if (!s.user) {
+    if (!s.user?.onboardingCompleted) {
       router.replace("/signup");
       return;
     }
-    if (!s.user.onboardingCompleted) {
-      router.replace("/onboarding");
-      return;
-    }
-    setUser(s.user);
-    setMissions(dedupeMissions(s.missions || []));
-    ensureDefaultAgents(s.user.id);
+    setName(s.user.name || "");
+    setAgents(s.agents.filter((a) => a.userId === s.user!.id));
+    setRuns(s.agentRuns.filter((r) => r.userId === s.user!.id).slice(0, 5));
   }, [router]);
 
-  const handleCreate = async () => {
-    if (!user || !goal.trim() || creating || lock.current) return;
-    lock.current = true;
-    setCreating(true);
-    setError("");
-
-    try {
-      const businessContext = loadOperatorState().businessContext;
-      const res = await fetch("/api/missions/plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goal: goal.trim(), businessContext }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.plan) {
-        throw new Error(data.error || "Could not create plan");
-      }
-
-      const m = createMission(user.id, goal.trim(), {
-        title: data.plan.title,
-        steps: data.plan.steps,
-        researchQuery: data.plan.researchQuery,
-      });
-      setGoal("");
-      router.push(`/missions/${m.id}`);
-    } catch (e: any) {
-      setError(friendlyError(e?.message));
-      lock.current = false;
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-sm text-muted">
-        Loading…
-      </div>
-    );
-  }
-
-  const hour = new Date().getHours();
-  const greet =
-    hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-
-  const active = missions.filter((m) => ACTIVE.has(m.status));
-  const completed = missions.filter((m) => m.status === "completed").slice(0, 5);
-  const failed = missions.filter((m) => m.status === "failed").slice(0, 3);
+  const active = agents.filter((a) => a.status === "active");
+  const upcoming = agents
+    .filter((a) => a.schedule?.enabled && a.schedule.nextRunAt)
+    .sort((a, b) =>
+      (a.schedule.nextRunAt || "") > (b.schedule.nextRunAt || "") ? 1 : -1
+    )
+    .slice(0, 5);
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-3xl px-4 py-8 space-y-8 animate-fade-in">
+      <div className="mx-auto max-w-3xl space-y-8 px-4 py-8">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            {greet}, {user.name}.
+            {greeting()}
+            {name ? `, ${name}` : ""}.
           </h1>
-          <p className="mt-1 text-sm text-muted">What do you want Nexa to get done?</p>
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+            Create agents, connect tools, set a schedule, and let Nexa run the
+            work.
+          </p>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-          <textarea
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
-            placeholder="Find 20 restaurants in Lucknow…"
-            rows={3}
-            className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleCreate();
-            }}
-          />
-          <div className="mt-3 flex justify-end gap-2 items-center">
-            {error && <span className="text-xs text-red-600">{error}</span>}
-            <button
-              onClick={handleCreate}
-              disabled={!goal.trim() || creating}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
+        <div className="flex flex-wrap gap-3">
+          <Link
+            href="/agents/new"
+            className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500"
+          >
+            Create agent
+          </Link>
+          <Link
+            href="/agents"
+            className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          >
+            View agents
+          </Link>
+        </div>
+
+        {agents.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-zinc-300 bg-white p-8 text-center dark:border-zinc-700 dark:bg-zinc-900">
+            <p className="text-sm font-medium">No agents yet</p>
+            <p className="mt-1 text-sm text-zinc-500">
+              Create your first agent to automate a task on your schedule.
+            </p>
+            <Link
+              href="/agents/new"
+              className="mt-4 inline-block rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white"
             >
-              {creating ? "Planning…" : "Create Mission"}
-            </button>
+              Create agent
+            </Link>
           </div>
-        </div>
+        ) : (
+          <>
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                  Your agents ({agents.length})
+                </h2>
+                <span className="text-xs text-zinc-500">
+                  {active.length} active
+                </span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {agents.slice(0, 4).map((a) => (
+                  <Link
+                    key={a.id}
+                    href={`/agents/${a.id}`}
+                    className="rounded-xl border border-zinc-200 bg-white p-4 transition hover:border-indigo-300 dark:border-zinc-800 dark:bg-zinc-900"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-medium">{a.name}</div>
+                      <StatusPill status={a.status} />
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs text-zinc-500">
+                      {a.purpose || a.description}
+                    </p>
+                    {a.schedule?.frequency !== "once" && a.schedule?.nextRunAt && (
+                      <p className="mt-2 text-[11px] text-zinc-400">
+                        Next: {new Date(a.schedule.nextRunAt).toLocaleString()}
+                      </p>
+                    )}
+                  </Link>
+                ))}
+              </div>
+            </section>
 
-        <MissionSection title="Active" items={active} empty="No active missions." />
-        <MissionSection title="Completed" items={completed} empty={null} />
-        <MissionSection title="Failed" items={failed} empty={null} />
+            {upcoming.length > 0 && (
+              <section className="space-y-2">
+                <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                  Upcoming runs
+                </h2>
+                <ul className="divide-y divide-zinc-100 rounded-xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
+                  {upcoming.map((a) => (
+                    <li key={a.id} className="flex justify-between px-4 py-3 text-sm">
+                      <span>{a.name}</span>
+                      <span className="text-xs text-zinc-500">
+                        {a.schedule.frequency} ·{" "}
+                        {a.schedule.nextRunAt
+                          ? new Date(a.schedule.nextRunAt).toLocaleString()
+                          : "—"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {runs.length > 0 && (
+              <section className="space-y-2">
+                <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                  Recent runs
+                </h2>
+                <ul className="divide-y divide-zinc-100 rounded-xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
+                  {runs.map((r) => {
+                    const agent = agents.find((a) => a.id === r.agentId);
+                    return (
+                      <li key={r.id} className="px-4 py-3 text-sm">
+                        <div className="flex justify-between">
+                          <Link
+                            href={`/agents/${r.agentId}`}
+                            className="font-medium hover:text-indigo-600"
+                          >
+                            {agent?.name || "Agent"}
+                          </Link>
+                          <span className="text-xs capitalize text-zinc-500">
+                            {r.status}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-zinc-500">
+                          {new Date(r.startedAt).toLocaleString()}
+                          {r.summary ? ` · ${r.summary.slice(0, 80)}` : ""}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
+          </>
+        )}
       </div>
     </AppShell>
   );
 }
 
-function MissionSection({
-  title,
-  items,
-  empty,
-}: {
-  title: string;
-  items: Mission[];
-  empty: string | null;
-}) {
-  if (items.length === 0 && !empty) return null;
+function StatusPill({ status }: { status: string }) {
+  const styles =
+    status === "active"
+      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+      : status === "paused"
+        ? "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+        : "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300";
   return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-medium">{title}</h2>
-        {title === "Active" && (
-          <Link href="/missions" className="text-xs text-indigo-600 hover:underline">
-            View all
-          </Link>
-        )}
-      </div>
-      {items.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted">
-          {empty}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {items.map((m) => (
-            <Link
-              key={m.id}
-              href={`/missions/${m.id}`}
-              className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 hover:border-indigo-200 hover:shadow-sm transition"
-            >
-              <div className="min-w-0 pr-3">
-                <div className="text-sm font-medium truncate">{m.title}</div>
-                {m.goal !== m.title && (
-                  <div className="text-xs text-muted truncate mt-0.5">{m.goal}</div>
-                )}
-              </div>
-              <MissionBadge status={m.status} />
-            </Link>
-          ))}
-        </div>
-      )}
-    </section>
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium capitalize ${styles}`}>
+      {status}
+    </span>
   );
 }
