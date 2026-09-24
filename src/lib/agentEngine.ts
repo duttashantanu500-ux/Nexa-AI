@@ -40,7 +40,6 @@ function id() {
   return `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Deterministic plan from goal + business brain (no fake tools). */
 export function buildPlan(
   goal: string,
   business?: BusinessContext | null
@@ -57,9 +56,9 @@ export function buildPlan(
     business?.targetCustomers ||
     business?.targetClients ||
     "";
-  const biz = business?.businessName || "";
+  const location = business?.location || "";
 
-  const researchQuery = [g, industry, target, biz, "official website"]
+  const researchQuery = [g, industry, target, location]
     .filter(Boolean)
     .join(" ")
     .slice(0, 180);
@@ -117,10 +116,29 @@ export function buildPlan(
   };
 }
 
-/**
- * Execute a research-style mission with real tools only.
- * Bounded: max searches, max pages, max time per call.
- */
+function buildSearchQueries(goal: string, business?: BusinessContext | null): string[] {
+  const industry = business?.industry || "";
+  const target =
+    business?.targetCustomer ||
+    business?.targetCustomers ||
+    business?.targetClients ||
+    "";
+  const location = business?.location || "";
+  const base = goal.replace(/[«»"']/g, "").trim();
+
+  const queries = [
+    base,
+    [base, industry].filter(Boolean).join(" "),
+    [base, "companies", location || "India"].filter(Boolean).join(" "),
+    [target, industry, "company"].filter(Boolean).join(" "),
+    // Known public directory-style queries (still searched, not hard-coded results)
+    base.match(/saas/i) ? "list of Indian SaaS companies Wikipedia" : "",
+    base.match(/saas/i) ? "Freshworks Zoho Chargebee Indian software company" : "",
+  ].filter((q) => q && q.length > 3);
+
+  return [...new Set(queries)].slice(0, 4);
+}
+
 export async function executeResearchMission(params: {
   goal: string;
   business?: BusinessContext | null;
@@ -129,7 +147,7 @@ export async function executeResearchMission(params: {
 }): Promise<EngineRunResult> {
   const activity: string[] = [];
   const steps = params.plan.steps.map((s) => ({ ...s }));
-  const maxPages = params.maxPages ?? 6;
+  const maxPages = params.maxPages ?? 8;
   const sources: { title?: string; url: string }[] = [];
   const rows: ProspectRow[] = [];
 
@@ -138,77 +156,81 @@ export async function executeResearchMission(params: {
   };
 
   try {
-    // Step 0 — business context
     mark(0, "running");
     activity.push("Loaded business context");
     mark(0, "done");
 
-    // Step 1 — web search
     mark(1, "running");
-    activity.push(`Web search started: "${params.plan.researchQuery}"`);
-    const search = await webSearch(params.plan.researchQuery || params.goal, 12);
-    if (!search.ok) {
-      mark(1, "failed");
-      activity.push(`Web search failed: ${search.error}`);
-      return {
-        ok: false,
-        activity,
-        progress: 25,
-        status: "failed",
-        steps,
-        error: search.error || "Search failed",
-      };
+    const queries = buildSearchQueries(params.goal, params.business);
+    activity.push(`Web search started (${queries.length} queries)`);
+
+    let hits: SearchHit[] = [];
+    for (const q of queries) {
+      activity.push(`Searching: "${q.slice(0, 80)}"`);
+      const search = await webSearch(q, 10);
+      if (!search.ok) {
+        activity.push(`Search issue: ${search.error}`);
+        continue;
+      }
+      const batch = ((search.data as any)?.hits || []) as SearchHit[];
+      activity.push(`${batch.length} hits for query`);
+      hits = dedupeHits([...hits, ...batch]);
+      (search.sources || []).forEach((s) => sources.push(s));
+      if (hits.length >= 12) break;
     }
 
-    const hits = ((search.data as any)?.hits || []) as SearchHit[];
-    activity.push(`${hits.length} search results collected`);
-    (search.sources || []).forEach((s) => sources.push(s));
-    mark(1, "done");
+    activity.push(`${hits.length} unique search results collected`);
+    mark(1, hits.length > 0 ? "done" : "failed");
 
     if (hits.length === 0) {
       mark(2, "skipped");
       mark(3, "skipped");
       mark(4, "done");
-      const deliverable: EngineDeliverable = {
-        type: "report",
-        title: "Research results",
-        content:
-          "No public web results were found for this query. Try a more specific goal or different keywords.",
-        rows: [],
-        sources: [],
-        createdAt: new Date().toISOString(),
-      };
-      activity.push("Mission completed with zero results");
       return {
         ok: true,
         activity,
         progress: 100,
         status: "completed",
         steps,
-        deliverable,
+        deliverable: {
+          type: "report",
+          title: "Research results",
+          content:
+            "No public web results were found. Configure GEMINI_API_KEY (for Google Search grounding) or BRAVE_API_KEY / TAVILY_API_KEY / SERPER_API_KEY on Vercel for stronger search. Wikipedia fallback also ran but returned nothing for this query.",
+          rows: [],
+          sources: [],
+          createdAt: new Date().toISOString(),
+        },
       };
     }
 
-    // Step 2 — read pages
     mark(2, "running");
     activity.push(`Reading up to ${Math.min(maxPages, hits.length)} pages`);
     let pagesRead = 0;
+
     for (const hit of hits.slice(0, maxPages)) {
       const page = await readWebPage(hit.url);
       if (!page.ok) {
         activity.push(`Could not read ${hit.url}: ${page.error}`);
+        // Still keep search snippet as weak evidence
+        if (hit.snippet && hit.snippet.length > 20) {
+          rows.push({
+            company: hit.title.split(/[-|–—|]/)[0].trim().slice(0, 80),
+            website: hit.url,
+            reason: "Appeared in search results (page body could not be fetched)",
+            evidence: hit.snippet.slice(0, 220),
+            source: hit.url,
+          });
+          sources.push({ title: hit.title, url: hit.url });
+        }
         continue;
       }
       pagesRead++;
-      const extract = page.data as {
-        url: string;
-        title: string;
-        text: string;
-      };
+      const extract = page.data as { url: string; title: string; text: string };
       sources.push({ title: extract.title, url: extract.url });
 
       const company =
-        extract.title.split(/[\-|–|—|\|]/)[0].trim().slice(0, 80) || hit.title;
+        extract.title.split(/[-|–—|]/)[0].trim().slice(0, 80) || hit.title;
       const snippet =
         extract.text.slice(0, 220) || hit.snippet || "No extractable text";
 
@@ -219,11 +241,27 @@ export async function executeResearchMission(params: {
         evidence: snippet,
         source: extract.url,
       });
-    }
-    activity.push(`${pagesRead} websites analyzed`);
-    mark(2, pagesRead > 0 ? "done" : "failed");
 
-    if (pagesRead === 0) {
+      // From Wikipedia pages, pull external official-site links when present
+      if (/wikipedia\.org/i.test(extract.url)) {
+        const external = extractExternalUrls(extract.text, extract.url);
+        for (const ext of external.slice(0, 2)) {
+          sources.push({ title: company + " (external)", url: ext });
+          rows.push({
+            company,
+            website: ext,
+            reason: "External link found on Wikipedia page",
+            evidence: snippet.slice(0, 120),
+            source: extract.url,
+          });
+        }
+      }
+    }
+
+    activity.push(`${pagesRead} websites analyzed`);
+    mark(2, pagesRead > 0 || rows.length > 0 ? "done" : "failed");
+
+    if (rows.length === 0) {
       mark(3, "failed");
       return {
         ok: false,
@@ -231,23 +269,21 @@ export async function executeResearchMission(params: {
         progress: 50,
         status: "failed",
         steps,
-        error: "No pages could be read",
+        error: "No pages could be read and no snippets available",
       };
     }
 
-    // Step 3 — qualify (simple non-fabricated filter)
     mark(3, "running");
     const seen = new Set<string>();
     const qualified = rows.filter((r) => {
       const key = r.website.replace(/\/$/, "").toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);
-      return r.evidence.length > 40;
+      return r.evidence.length > 15;
     });
-    activity.push(`${qualified.length} items qualified from real page evidence`);
+    activity.push(`${qualified.length} items qualified from real evidence`);
     mark(3, "done");
 
-    // Step 4 — deliverable
     mark(4, "running");
     const lines = qualified.map(
       (r, i) =>
@@ -255,17 +291,9 @@ export async function executeResearchMission(params: {
     );
     const content =
       `Research deliverable for: ${params.goal}\n\n` +
-      `Found ${qualified.length} items with real page evidence.\n\n` +
+      `Found ${qualified.length} items with real evidence.\n\n` +
       lines.join("\n");
 
-    const deliverable: EngineDeliverable = {
-      type: "lead_list",
-      title: `Results: ${params.goal.slice(0, 60)}`,
-      content,
-      rows: qualified,
-      sources: dedupeSources(sources),
-      createdAt: new Date().toISOString(),
-    };
     activity.push(`Final report created (${qualified.length} rows)`);
     mark(4, "done");
 
@@ -275,7 +303,14 @@ export async function executeResearchMission(params: {
       progress: 100,
       status: "completed",
       steps,
-      deliverable,
+      deliverable: {
+        type: "lead_list",
+        title: `Results: ${params.goal.slice(0, 60)}`,
+        content,
+        rows: qualified,
+        sources: dedupeSources(sources),
+        createdAt: new Date().toISOString(),
+      },
     };
   } catch (err: any) {
     activity.push(`Engine error: ${err?.message || "unknown"}`);
@@ -290,6 +325,15 @@ export async function executeResearchMission(params: {
   }
 }
 
+function dedupeHits(hits: SearchHit[]): SearchHit[] {
+  const seen = new Set<string>();
+  return hits.filter((h) => {
+    if (!h.url || seen.has(h.url)) return false;
+    seen.add(h.url);
+    return true;
+  });
+}
+
 function dedupeSources(list: { title?: string; url: string }[]) {
   const seen = new Set<string>();
   return list.filter((s) => {
@@ -297,4 +341,26 @@ function dedupeSources(list: { title?: string; url: string }[]) {
     seen.add(s.url);
     return true;
   });
+}
+
+/** Pull http(s) URLs from page text that look like official sites (not social/wiki). */
+function extractExternalUrls(text: string, pageUrl: string): string[] {
+  const found = text.match(/https?:\/\/[\w.-]+\.[a-z]{2,}[\w./?&=%+-]*/gi) || [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const u of found) {
+    try {
+      const url = new URL(u);
+      if (/wikipedia\.|wikimedia\.|google\.|facebook\.|twitter\.|linkedin\.|youtube\./i.test(url.hostname))
+        continue;
+      if (url.hostname === new URL(pageUrl).hostname) continue;
+      const clean = url.origin;
+      if (seen.has(clean)) continue;
+      seen.add(clean);
+      out.push(clean);
+    } catch {
+      /* */
+    }
+  }
+  return out.slice(0, 5);
 }
