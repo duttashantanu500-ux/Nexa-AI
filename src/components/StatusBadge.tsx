@@ -9,6 +9,7 @@ const missionStyles: Record<MissionStatus, string> = {
   completed: "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900",
   failed: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
   paused: "bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300",
+  cancelled: "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
 };
 
 const missionLabel: Record<MissionStatus, string> = {
@@ -19,6 +20,7 @@ const missionLabel: Record<MissionStatus, string> = {
   completed: "Completed",
   failed: "Failed",
   paused: "Paused",
+  cancelled: "Cancelled",
 };
 
 export function MissionBadge({ status }: { status: MissionStatus }) {
