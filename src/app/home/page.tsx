@@ -8,6 +8,7 @@ import {
   loadOperatorState,
   createMission,
   ensureDefaultAgents,
+  friendlyError,
 } from "@/lib/operatorStore";
 import { Mission, UserProfile } from "@/types";
 import Link from "next/link";
@@ -33,12 +34,6 @@ export default function HomePage() {
     setUser(s.user);
     setMissions(s.missions || []);
     ensureDefaultAgents(s.user.id);
-
-    const prefill = sessionStorage.getItem("nexa_prefill_goal");
-    if (prefill) {
-      setGoal(prefill);
-      sessionStorage.removeItem("nexa_prefill_goal");
-    }
   }, [router]);
 
   const handleCreate = async () => {
@@ -66,7 +61,7 @@ export default function HomePage() {
       setGoal("");
       router.push(`/missions/${m.id}`);
     } catch (e: any) {
-      setError(e?.message || "Failed to create mission");
+      setError(friendlyError(e?.message));
     } finally {
       setCreating(false);
     }
@@ -86,7 +81,7 @@ export default function HomePage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-3xl px-4 py-8 space-y-8">
+      <div className="mx-auto max-w-3xl px-4 py-8 space-y-8 animate-fade-in">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
             {greet}, {user.name}.
@@ -94,11 +89,11 @@ export default function HomePage() {
           <p className="mt-1 text-sm text-muted">What do you want Nexa to get done?</p>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-sm ring-1 ring-black/5">
           <textarea
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
-            placeholder="Research 20 potential customers for my SaaS…"
+            placeholder="Research potential customers for my product…"
             rows={3}
             className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted"
             onKeyDown={(e) => {
@@ -110,9 +105,13 @@ export default function HomePage() {
             <button
               onClick={handleCreate}
               disabled={!goal.trim() || creating}
-              className="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
             >
-              {creating ? "Planning…" : "Create Mission"}
+              {creating ? (
+                <span className="animate-pulse-soft">Planning…</span>
+              ) : (
+                "Create Mission"
+              )}
             </button>
           </div>
         </div>
@@ -120,7 +119,7 @@ export default function HomePage() {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium">Active missions</h2>
-            <Link href="/missions" className="text-xs text-muted hover:text-foreground">
+            <Link href="/missions" className="text-xs text-indigo-600 hover:underline">
               View all
             </Link>
           </div>
@@ -134,7 +133,7 @@ export default function HomePage() {
                 <Link
                   key={m.id}
                   href={`/missions/${m.id}`}
-                  className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 hover:bg-sidebar transition"
+                  className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 hover:border-indigo-200 hover:shadow-sm transition"
                 >
                   <div className="min-w-0">
                     <div className="text-sm font-medium truncate">{m.title}</div>

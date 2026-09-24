@@ -41,7 +41,6 @@ function titleFromGoal(goal: string): string {
   return cleaned.slice(0, 45).trim() + "…";
 }
 
-/** Create mission in planning state — plan filled by API */
 export function createMission(
   userId: string,
   goal: string,
@@ -57,12 +56,7 @@ export function createMission(
     progress: plan?.steps?.length ? 5 : 0,
     plan: plan?.steps || [],
     activity: [
-      {
-        id: createId(),
-        text: "Mission created",
-        at: now,
-        type: "success",
-      },
+      { id: createId(), text: "Mission created", at: now, type: "success" },
     ],
     tools: ["web_search", "web_page_reader"],
     researchQuery: plan?.researchQuery,
@@ -113,7 +107,11 @@ export function updateMission(id: string, patch: Partial<Mission>): Mission | nu
   return updated;
 }
 
-export function appendMissionActivity(id: string, text: string, type?: Mission["activity"][0]["type"]) {
+export function appendMissionActivity(
+  id: string,
+  text: string,
+  type?: Mission["activity"][0]["type"]
+) {
   const m = getMission(id);
   if (!m) return null;
   const activity = [
@@ -192,21 +190,27 @@ export function createAgent(params: {
   return agent;
 }
 
-export function toggleConnection(id: string): Connection[] {
+export function updateAgent(id: string, patch: Partial<Agent>): Agent | null {
   const state = loadOperatorState();
-  const connections = (state.connections || DEFAULT_CONNECTIONS).map((c) =>
-    c.id === id
-      ? {
-          ...c,
-          status:
-            c.status === "connected"
-              ? ("not_connected" as const)
-              : ("connected" as const),
-        }
-      : c
-  );
-  saveOperatorState({ connections });
-  return connections;
+  let found: Agent | null = null;
+  const agents = (state.agents || []).map((a) => {
+    if (a.id !== id) return a;
+    found = { ...a, ...patch };
+    return found;
+  });
+  if (!found) return null;
+  saveOperatorState({ agents });
+  return found;
+}
+
+export function deleteAgent(id: string): boolean {
+  const state = loadOperatorState();
+  const before = state.agents?.length || 0;
+  const agents = (state.agents || []).filter((a) => a.id !== id);
+  if (agents.length === before) return false;
+  saveOperatorState({ agents });
+  if (state.user) pushActivity(state.user.id, "Agent deleted", "agent", id);
+  return true;
 }
 
 export function addMcpConnection(name: string, mcpUrl: string): Connection[] {
@@ -216,7 +220,7 @@ export function addMcpConnection(name: string, mcpUrl: string): Connection[] {
     name: name.trim() || "Custom MCP",
     provider: "mcp",
     status: "not_connected",
-    description: "User-provided MCP endpoint (runtime not live yet)",
+    description: "Custom MCP endpoint",
     mcpUrl: mcpUrl.trim(),
     mcpTools: [],
   };
@@ -291,4 +295,22 @@ export function updateBusinessProfile(patch: Partial<BusinessContext>): Business
 
 export function requireUser(): UserProfile | null {
   return loadOperatorState().user;
+}
+
+/** Map internal errors to user-facing copy */
+export function friendlyError(raw?: string): string {
+  if (!raw) return "Something went wrong. Please try again.";
+  const s = raw.toLowerCase();
+  if (s.includes("supabase") || s.includes("service_role") || s.includes("env"))
+    return "This feature is temporarily unavailable. Please try again later.";
+  if (s.includes("api key") || s.includes("unauthorized") || s.includes("401"))
+    return "A connected service could not be reached. Please try again later.";
+  if (s.includes("timeout"))
+    return "The request timed out. Please try again.";
+  if (s.includes("network"))
+    return "Network error. Check your connection and try again.";
+  // Strip env var names from user view
+  if (/[A-Z]{3,}_[A-Z0-9_]+/.test(raw))
+    return "This feature is temporarily unavailable. Please try again later.";
+  return raw.length > 160 ? raw.slice(0, 157) + "…" : raw;
 }
