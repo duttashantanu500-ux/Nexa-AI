@@ -1,7 +1,6 @@
 /**
  * Deterministic workflow runner — connector actions only.
- * No web-search fallback. No fake external success.
- * External providers only succeed when the provider returns success.
+ * Lifecycle: stop / continue / retry per step; never fake provider success.
  */
 
 import { getAction } from "./actionRegistry";
@@ -18,6 +17,8 @@ export interface WorkflowContext {
   imageUrl?: string;
   vars: Record<string, string>;
   sources: { title?: string; url: string }[];
+  /** Last outputs keyed by step id for future mapping */
+  stepOutputs: Record<string, unknown>;
 }
 
 export interface WorkflowRunResult {
@@ -32,14 +33,13 @@ export interface WorkflowRunResult {
 
 export interface RuntimeConnectionConfig {
   comfyBaseUrl?: string;
-  /** Server-side only when available — never put real tokens in the browser long-term */
   slackToken?: string;
   notionToken?: string;
   githubToken?: string;
 }
 
 function emptyContext(): WorkflowContext {
-  return { list: [], notes: [], report: "", vars: {}, sources: [] };
+  return { list: [], notes: [], report: "", vars: {}, sources: [], stepOutputs: {} };
 }
 
 export async function runWorkflow(params: {
@@ -50,15 +50,21 @@ export async function runWorkflow(params: {
   const ctx = emptyContext();
   const results: WorkflowStepResult[] = [];
   const simulate = Boolean(params.simulate);
-  let failed = false;
-  let hadSuccess = false;
+  let hardFail = false;
+  let softFail = false;
   const ordered = [...params.steps].sort((a, b) => a.order - b.order);
-  const onErrorContinue = false; // Phase 3+ will honor step.onError
 
   for (const step of ordered) {
+    if (hardFail) break;
+
     const def = getAction(step.actionId);
     const started = new Date().toISOString();
-    const inputSent = { ...step.config };
+    const inputSent = { ...(step.config || {}) };
+    const onError = step.onError || "stop";
+    const maxAttempts =
+      onError === "retry"
+        ? Math.max(1, step.retryPolicy?.maxAttempts ?? 2)
+        : 1;
 
     if (!def) {
       results.push({
@@ -70,10 +76,11 @@ export async function runWorkflow(params: {
         endedAt: new Date().toISOString(),
         inputSent,
         error: "Unknown action.",
+        retryCount: 0,
         simulated: simulate,
       });
-      failed = true;
-      if (!onErrorContinue) break;
+      if (onError === "continue") softFail = true;
+      else hardFail = true;
       continue;
     }
 
@@ -88,17 +95,19 @@ export async function runWorkflow(params: {
         inputSent,
         error:
           def.availabilityNote ||
-          "Action is not implemented. Connect the service and wait until the action is marked implemented.",
-        normalizedError: { category: "validation" },
+          "Action is not implemented. Connect the service first.",
+        normalizedError: { category: "not_configured" },
+        retryCount: 0,
         simulated: simulate,
       });
-      failed = true;
-      if (!onErrorContinue) break;
+      if (onError === "continue") softFail = true;
+      else hardFail = true;
       continue;
     }
 
+    let missing = false;
     for (const f of def.fields) {
-      if (f.required && !String(step.config[f.key] ?? "").trim()) {
+      if (f.required && !String(step.config?.[f.key] ?? "").trim()) {
         results.push({
           stepId: step.id,
           actionId: step.actionId,
@@ -108,58 +117,69 @@ export async function runWorkflow(params: {
           endedAt: new Date().toISOString(),
           inputSent,
           error: `Missing required field: ${f.label}`,
+          normalizedError: { category: "validation" },
+          retryCount: 0,
           simulated: simulate,
         });
-        failed = true;
+        missing = true;
         break;
       }
     }
-    if (failed && !onErrorContinue) break;
-    if (failed) continue;
+    if (missing) {
+      if (onError === "continue") softFail = true;
+      else hardFail = true;
+      continue;
+    }
 
-    try {
-      const detail = await executeAction(
-        step.actionId,
-        step.config,
-        ctx,
-        simulate,
-        params.connections || {}
-      );
+    let lastError = "";
+    let lastData: unknown;
+    let lastNorm: WorkflowStepResult["normalizedError"];
+    let succeeded = false;
+    let attempts = 0;
 
-      if (!detail.ok) {
-        results.push({
-          stepId: step.id,
-          actionId: step.actionId,
-          name: def.name,
-          status: "failed",
-          startedAt: started,
-          endedAt: new Date().toISOString(),
-          inputSent,
-          outputReceived: detail.data,
-          error: detail.message,
-          normalizedError: detail.error,
-          simulated: simulate,
-        });
-        failed = true;
-        if (!onErrorContinue) break;
-        continue;
+    while (attempts < maxAttempts && !succeeded) {
+      attempts += 1;
+      try {
+        const detail = await executeAction(
+          step.actionId,
+          step.config || {},
+          ctx,
+          simulate,
+          params.connections || {}
+        );
+        if (detail.ok) {
+          succeeded = true;
+          const key = step.outputKey || step.id;
+          ctx.stepOutputs[key] = detail.data ?? detail.message;
+          results.push({
+            stepId: step.id,
+            actionId: step.actionId,
+            name: def.name,
+            status: "succeeded",
+            startedAt: started,
+            endedAt: new Date().toISOString(),
+            inputSent,
+            outputReceived: detail.data,
+            output: detail.message,
+            retryCount: attempts - 1,
+            simulated: simulate || detail.message.startsWith("[Simulated]"),
+          });
+        } else {
+          lastError = detail.message;
+          lastData = detail.data;
+          lastNorm = detail.error;
+          if (attempts < maxAttempts) {
+            const backoff = (step.retryPolicy?.backoffSeconds ?? 1) * attempts;
+            await sleep(Math.min(backoff, 5) * 1000);
+          }
+        }
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err.message : "Step failed";
+        lastNorm = { category: "unknown" };
       }
+    }
 
-      hadSuccess = true;
-      results.push({
-        stepId: step.id,
-        actionId: step.actionId,
-        name: def.name,
-        status: "succeeded",
-        startedAt: started,
-        endedAt: new Date().toISOString(),
-        inputSent,
-        outputReceived: detail.data,
-        output: detail.message,
-        simulated: simulate || detail.message.startsWith("[Simulated]"),
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Step failed";
+    if (!succeeded) {
       results.push({
         stepId: step.id,
         actionId: step.actionId,
@@ -168,11 +188,14 @@ export async function runWorkflow(params: {
         startedAt: started,
         endedAt: new Date().toISOString(),
         inputSent,
-        error: message,
+        outputReceived: lastData,
+        error: lastError || "Step failed",
+        normalizedError: lastNorm,
+        retryCount: attempts - 1,
         simulated: simulate,
       });
-      failed = true;
-      if (!onErrorContinue) break;
+      if (onError === "continue") softFail = true;
+      else hardFail = true;
     }
   }
 
@@ -183,19 +206,27 @@ export async function runWorkflow(params: {
       ? ctx.list.map((x, i) => `${i + 1}. ${x}`).join("\n")
       : results.map((r) => r.output || r.error || r.name).join("\n"));
 
+  const hadSuccess = results.some((r) => r.status === "succeeded");
   let status: WorkflowRunResult["status"] = "completed";
-  if (failed && hadSuccess) status = "partial";
-  else if (failed) status = "failed";
+  if (hardFail && !hadSuccess) status = "failed";
+  else if (hardFail || softFail) status = "succeeded_with_errors";
 
   return {
-    ok: !failed,
+    ok: !hardFail && !softFail,
     status,
     mode: simulate || results.some((r) => r.simulated) ? "simulated" : "real",
     steps: results,
     output,
-    error: failed ? results.find((r) => r.status === "failed")?.error : undefined,
+    error:
+      hardFail || softFail
+        ? results.find((r) => r.status === "failed")?.error
+        : undefined,
     context: ctx,
   };
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 interface ActionExecResult {
@@ -220,7 +251,11 @@ async function executeAction(
         .split(sep)
         .map((s) => s.trim())
         .filter(Boolean);
-      return { ok: true, message: `List created with ${ctx.list.length} items`, data: { count: ctx.list.length } };
+      return {
+        ok: true,
+        message: `List created with ${ctx.list.length} items`,
+        data: { count: ctx.list.length, list: ctx.list },
+      };
     }
     case "local_data.filter": {
       const kw = (config.keyword || "").toLowerCase();
@@ -233,22 +268,30 @@ async function executeAction(
       return {
         ok: true,
         message: `Filtered ${before} → ${ctx.list.length} items`,
-        data: { before, after: ctx.list.length },
+        data: { before, after: ctx.list.length, list: ctx.list },
       };
     }
     case "local_data.limit": {
       const n = Math.max(1, parseInt(config.count || "10", 10) || 10);
       ctx.list = ctx.list.slice(0, n);
-      return { ok: true, message: `Limited to ${ctx.list.length} items`, data: { count: ctx.list.length } };
+      return {
+        ok: true,
+        message: `Limited to ${ctx.list.length} items`,
+        data: { count: ctx.list.length, list: ctx.list },
+      };
     }
     case "local_data.template": {
       const tpl = config.template || "{{item}}";
       ctx.list = ctx.list.map((item) => tpl.replace(/\{\{\s*item\s*\}\}/gi, item));
-      return { ok: true, message: `Formatted ${ctx.list.length} items` };
+      return {
+        ok: true,
+        message: `Formatted ${ctx.list.length} items`,
+        data: { list: ctx.list },
+      };
     }
     case "local_data.note": {
       ctx.notes.push(config.note || "");
-      return { ok: true, message: "Note added" };
+      return { ok: true, message: "Note added", data: { notes: ctx.notes } };
     }
     case "local_data.report": {
       const title = config.title || "Report";
@@ -263,7 +306,7 @@ async function executeAction(
           : ["(No list items)"]),
       ];
       ctx.report = lines.join("\n");
-      return { ok: true, message: ctx.report, data: { title } };
+      return { ok: true, message: ctx.report, data: { title, report: ctx.report } };
     }
     case "local_comfyui.test_connection": {
       if (simulate) return { ok: true, message: "[Simulated] Local engine reachable" };
@@ -290,8 +333,7 @@ async function executeAction(
       if (!url) {
         return {
           ok: false,
-          message:
-            "Local image engine is not configured. Open Connections and set your ComfyUI URL.",
+          message: "Local image engine is not configured.",
           error: { category: "validation" },
         };
       }
@@ -312,10 +354,12 @@ async function executeAction(
       }
       ctx.imageUrl = result.imageUrl;
       ctx.sources.push({ title: "Generated image", url: result.imageUrl });
-      return { ok: true, message: `Image ready: ${result.imageUrl}`, data: { url: result.imageUrl } };
+      return {
+        ok: true,
+        message: `Image ready: ${result.imageUrl}`,
+        data: { url: result.imageUrl },
+      };
     }
-
-    // External providers — require token; never mark implemented in registry until OAuth+token path is verified
     case "slack.post_message": {
       if (simulate) return { ok: true, message: "[Simulated] Would post Slack message" };
       const r = await slackPostMessage({
@@ -360,7 +404,6 @@ async function executeAction(
       });
       return { ok: r.ok, message: r.message, data: r.data, error: r.error };
     }
-
     case "web.search":
     case "web.read_page":
       return {
@@ -368,7 +411,6 @@ async function executeAction(
         message: "Web search is not available as a workflow action.",
         error: { category: "validation" },
       };
-
     default:
       return {
         ok: false,
