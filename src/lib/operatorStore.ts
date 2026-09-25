@@ -24,7 +24,7 @@ function emptyState(): AppState {
   return {
     user: null,
     businessContext: null,
-    theme: "system",
+    theme: "light",
     agents: [],
     agentRuns: [],
     connections: structuredClone(DEFAULT_CONNECTIONS),
@@ -55,7 +55,7 @@ function migrateLegacy(parsed: any): AppState {
   const base = emptyState();
   base.user = parsed.user || null;
   base.businessContext = parsed.businessContext || null;
-  base.theme = parsed.theme || "system";
+  base.theme = parsed.theme || "light";
   base.agents = (parsed.agents || []).map(normalizeAgent);
   base.agentRuns = parsed.agentRuns || [];
   base.connections = mergeConnections(parsed.connections);
@@ -67,7 +67,7 @@ function normalize(s: AppState): AppState {
   return {
     user: s.user || null,
     businessContext: s.businessContext || null,
-    theme: s.theme || "system",
+    theme: s.theme || "light",
     agents: (s.agents || []).map(normalizeAgent),
     agentRuns: s.agentRuns || [],
     connections: mergeConnections(s.connections),
