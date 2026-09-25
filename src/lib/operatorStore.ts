@@ -28,6 +28,7 @@ function emptyState(): AppState {
     agents: [],
     agentRuns: [],
     connections: structuredClone(DEFAULT_CONNECTIONS),
+    connectionRecords: [],
   };
 }
 
@@ -59,6 +60,7 @@ function migrateLegacy(parsed: any): AppState {
   base.agents = (parsed.agents || []).map(normalizeAgent);
   base.agentRuns = parsed.agentRuns || [];
   base.connections = mergeConnections(parsed.connections);
+  base.connectionRecords = parsed.connectionRecords || [];
   saveOperatorState(base);
   return base;
 }
@@ -71,6 +73,7 @@ function normalize(s: AppState): AppState {
     agents: (s.agents || []).map(normalizeAgent),
     agentRuns: s.agentRuns || [],
     connections: mergeConnections(s.connections),
+    connectionRecords: s.connectionRecords || [],
   };
 }
 
@@ -85,9 +88,18 @@ function normalizeAgent(a: any): Agent {
     ? a.steps.map((s: any, i: number) => ({
         id: s.id || uid("step"),
         order: s.order ?? i,
+        type: s.type || "action",
         actionId: s.actionId,
         name: s.name || s.actionId,
+        connectorId: s.connectorId,
+        connectionId: s.connectionId,
         config: s.config || {},
+        inputMapping: s.inputMapping,
+        outputKey: s.outputKey,
+        onError: s.onError || "stop",
+        retryPolicy: s.retryPolicy,
+        requiresApproval: s.requiresApproval,
+        condition: s.condition,
       }))
     : [];
 
@@ -102,6 +114,7 @@ function normalizeAgent(a: any): Agent {
     constraints: a.constraints || "",
     templateType: a.templateType,
     status: a.status || "draft",
+    version: typeof a.version === "number" ? a.version : 1,
     tools: Array.isArray(a.tools) ? a.tools : [],
     steps,
     permissions: a.permissions || defaultPermissions(),
@@ -122,12 +135,6 @@ function mergeConnections(existing?: Connection[]): Connection[] {
     const found = existing.find((c) => c.id === d.id);
     if (!found) return d;
     if (d.provider === "builtin") return { ...d, status: "connected" };
-    if (d.status === "not_supported") {
-      return { ...d, mcpUrl: found.mcpUrl, mcpTools: found.mcpTools };
-    }
-    if (d.id === "mcp" && found.status === "connected" && found.mcpUrl) {
-      return { ...found, name: d.name, description: d.description };
-    }
     return { ...d, ...found, status: found.status || d.status };
   });
 }
@@ -168,6 +175,8 @@ export function createAgent(
     ...st,
     id: st.id || uid("step"),
     order: st.order ?? i,
+    type: st.type || "action",
+    onError: st.onError || "stop",
   }));
 
   const agent: Agent = {
@@ -181,6 +190,7 @@ export function createAgent(
     constraints: input.constraints || "",
     templateType: input.templateType,
     status: input.status || (steps.length ? "ready" : "draft"),
+    version: 1,
     tools: input.tools || [],
     steps,
     permissions: input.permissions || defaultPermissions(),
@@ -200,12 +210,17 @@ export function updateAgent(id: string, patch: Partial<Agent>): Agent | null {
   const s = loadOperatorState();
   const idx = s.agents.findIndex((a) => a.id === id);
   if (idx < 0) return null;
-  const next = { ...s.agents[idx], ...patch, id, updatedAt: new Date().toISOString() };
+  const prev = s.agents[idx];
+  const next = { ...prev, ...patch, id, updatedAt: new Date().toISOString() };
   if (patch.schedule) {
-    next.schedule = { ...s.agents[idx].schedule, ...patch.schedule };
+    next.schedule = { ...prev.schedule, ...patch.schedule };
     next.schedule.nextRunAt = computeNextRun(next.schedule);
   }
-  if (patch.steps) next.steps = patch.steps;
+  if (patch.steps) {
+    next.steps = patch.steps;
+    // Bump version on structural step changes
+    next.version = (prev.version || 1) + 1;
+  }
   next.status = deriveAgentStatus(next);
   s.agents[idx] = next;
   saveOperatorState(s);
