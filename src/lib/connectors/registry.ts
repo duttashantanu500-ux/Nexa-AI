@@ -1,7 +1,6 @@
 /**
  * Connector-first registry.
- * External work runs only through registered connectors the user configures.
- * No default web search. No silent provider fallback.
+ * Nexa bridges user-owned services. No web-search default. No fake connections.
  */
 
 export type CostLabel =
@@ -13,6 +12,13 @@ export type CostLabel =
   | "unsupported";
 
 export type ConnectionMethod = "local_endpoint" | "oauth" | "api_key" | "none";
+
+export type ConnectorUiStatus =
+  | "connected"
+  | "setup_required"
+  | "coming_soon"
+  | "unsupported"
+  | "available";
 
 export interface ActionField {
   key: string;
@@ -44,78 +50,141 @@ export interface ConnectorDefinition {
   connectionMethod: ConnectionMethod;
   costLabel: CostLabel;
   costNote: string;
-  /** Can this connector be configured in the UI today? */
+  /** Server/env can enable OAuth */
+  envHint?: string;
   configurable: boolean;
-  /** Is a real execution path implemented? */
   executable: boolean;
+  /** Default UI status when user has not connected */
+  defaultStatus: ConnectorUiStatus;
   actions: ConnectorAction[];
 }
 
+const notYet = (reason: string) => ({
+  available: false as const,
+  unavailableReason: reason,
+});
+
 export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
   {
-    id: "local_comfyui",
-    name: "Local image engine (ComfyUI)",
-    provider: "comfyui",
-    description:
-      "Generate images on your own machine via a local ComfyUI (or compatible) server. Free of Nexa API charges; uses your hardware.",
-    connectionMethod: "local_endpoint",
-    costLabel: "local_free",
-    costNote:
-      "Runs on your computer. You pay electricity/hardware only. Some models restrict commercial use — check the model license.",
+    id: "slack",
+    name: "Slack",
+    provider: "slack",
+    description: "Read channels, post messages, and notify teams through your Slack workspace.",
+    connectionMethod: "oauth",
+    costLabel: "user_paid",
+    costNote: "Uses your Slack workspace. Slack may require a paid plan for some APIs. Nexa does not pay Slack for you.",
+    envHint: "SLACK_CLIENT_ID, SLACK_CLIENT_SECRET",
     configurable: true,
-    executable: true,
+    executable: false,
+    defaultStatus: "setup_required",
     actions: [
       {
-        id: "local_comfyui.generate_image",
-        connectorId: "local_comfyui",
-        name: "Generate image",
-        description: "Send a prompt to your local ComfyUI endpoint and wait for a result URL or base64 image.",
+        id: "slack.post_message",
+        connectorId: "slack",
+        name: "Post message",
+        description: "Post a message to a channel. Requires approval by default.",
         readOnly: false,
-        requiresApproval: false,
-        available: true,
+        requiresApproval: true,
         fields: [
-          {
-            key: "prompt",
-            label: "Prompt",
-            type: "textarea",
-            required: true,
-            placeholder: "A clean product photo of…",
-          },
-          {
-            key: "negative_prompt",
-            label: "Negative prompt",
-            type: "textarea",
-            placeholder: "blurry, low quality",
-          },
-          {
-            key: "width",
-            label: "Width",
-            type: "number",
-            placeholder: "512",
-          },
-          {
-            key: "height",
-            label: "Height",
-            type: "number",
-            placeholder: "512",
-          },
-          {
-            key: "seed",
-            label: "Seed (optional)",
-            type: "number",
-            placeholder: "-1",
-          },
+          { key: "channel", label: "Channel ID or name", type: "text", required: true },
+          { key: "text", label: "Message", type: "textarea", required: true },
         ],
+        ...notYet("Slack OAuth is not configured on this Nexa deployment."),
       },
       {
-        id: "local_comfyui.test_connection",
-        connectorId: "local_comfyui",
-        name: "Test connection",
-        description: "Ping the local endpoint to verify it is reachable.",
+        id: "slack.list_channels",
+        connectorId: "slack",
+        name: "List channels",
+        description: "List channels the bot can access.",
         readOnly: true,
         requiresApproval: false,
-        available: true,
         fields: [],
+        ...notYet("Slack OAuth is not configured on this Nexa deployment."),
+      },
+    ],
+  },
+  {
+    id: "notion",
+    name: "Notion",
+    provider: "notion",
+    description: "Create pages and database rows in your Notion workspace.",
+    connectionMethod: "oauth",
+    costLabel: "user_paid",
+    costNote: "Uses your Notion workspace. Subject to Notion plan limits.",
+    envHint: "NOTION_CLIENT_ID, NOTION_CLIENT_SECRET",
+    configurable: true,
+    executable: false,
+    defaultStatus: "setup_required",
+    actions: [
+      {
+        id: "notion.create_page",
+        connectorId: "notion",
+        name: "Create page",
+        description: "Create a page under a parent page or database.",
+        readOnly: false,
+        requiresApproval: true,
+        fields: [
+          { key: "parent_id", label: "Parent page/database ID", type: "text", required: true },
+          { key: "title", label: "Title", type: "text", required: true },
+          { key: "content", label: "Content", type: "textarea" },
+        ],
+        ...notYet("Notion OAuth is not configured on this Nexa deployment."),
+      },
+      {
+        id: "notion.append_blocks",
+        connectorId: "notion",
+        name: "Append content",
+        description: "Append text blocks to an existing page.",
+        readOnly: false,
+        requiresApproval: true,
+        fields: [
+          { key: "page_id", label: "Page ID", type: "text", required: true },
+          { key: "content", label: "Content", type: "textarea", required: true },
+        ],
+        ...notYet("Notion OAuth is not configured on this Nexa deployment."),
+      },
+    ],
+  },
+  {
+    id: "github",
+    name: "GitHub",
+    provider: "github",
+    description: "Create issues, comment on PRs, and read repository data.",
+    connectionMethod: "oauth",
+    costLabel: "free_tier",
+    costNote: "Uses your GitHub account. Subject to GitHub API rate limits.",
+    envHint: "GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET",
+    configurable: true,
+    executable: false,
+    defaultStatus: "setup_required",
+    actions: [
+      {
+        id: "github.create_issue",
+        connectorId: "github",
+        name: "Create issue",
+        description: "Open an issue in a repository.",
+        readOnly: false,
+        requiresApproval: true,
+        fields: [
+          { key: "owner", label: "Owner", type: "text", required: true },
+          { key: "repo", label: "Repository", type: "text", required: true },
+          { key: "title", label: "Title", type: "text", required: true },
+          { key: "body", label: "Body", type: "textarea" },
+        ],
+        ...notYet("GitHub OAuth is not configured on this Nexa deployment."),
+      },
+      {
+        id: "github.list_issues",
+        connectorId: "github",
+        name: "List issues",
+        description: "List open issues in a repository.",
+        readOnly: true,
+        requiresApproval: false,
+        fields: [
+          { key: "owner", label: "Owner", type: "text", required: true },
+          { key: "repo", label: "Repository", type: "text", required: true },
+        ],
+        ...notYet("GitHub OAuth is not configured on this Nexa deployment."),
       },
     ],
   },
@@ -123,30 +192,24 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     id: "local_data",
     name: "Local data tools",
     provider: "builtin",
-    description:
-      "Deterministic list and text tools that run in Nexa with no external API.",
+    description: "Deterministic list and text tools that run in Nexa with no external API.",
     connectionMethod: "none",
     costLabel: "local_free",
     costNote: "Runs in the app. No third-party API charges.",
     configurable: true,
     executable: true,
+    defaultStatus: "connected",
     actions: [
       {
         id: "local_data.list_from_text",
         connectorId: "local_data",
         name: "Create list from text",
-        description: "Split text into a list (lines or commas).",
+        description: "Split text into a list.",
         readOnly: true,
         requiresApproval: false,
         available: true,
         fields: [
-          {
-            key: "text",
-            label: "Text",
-            type: "textarea",
-            required: true,
-            placeholder: "Item one\nItem two",
-          },
+          { key: "text", label: "Text", type: "textarea", required: true, placeholder: "Item one\nItem two" },
           {
             key: "separator",
             label: "Separator",
@@ -187,9 +250,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         readOnly: true,
         requiresApproval: false,
         available: true,
-        fields: [
-          { key: "count", label: "Max items", type: "number", required: true, placeholder: "10" },
-        ],
+        fields: [{ key: "count", label: "Max items", type: "number", required: true, placeholder: "10" }],
       },
       {
         id: "local_data.template",
@@ -199,27 +260,17 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         readOnly: true,
         requiresApproval: false,
         available: true,
-        fields: [
-          {
-            key: "template",
-            label: "Template",
-            type: "textarea",
-            required: true,
-            placeholder: "- {{item}}",
-          },
-        ],
+        fields: [{ key: "template", label: "Template", type: "textarea", required: true, placeholder: "- {{item}}" }],
       },
       {
         id: "local_data.report",
         connectorId: "local_data",
         name: "Build report",
-        description: "Combine notes and list into a readable report.",
+        description: "Combine notes and list into a report.",
         readOnly: true,
         requiresApproval: false,
         available: true,
-        fields: [
-          { key: "title", label: "Title", type: "text", required: true, placeholder: "Workflow result" },
-        ],
+        fields: [{ key: "title", label: "Title", type: "text", required: true, placeholder: "Workflow result" }],
       },
       {
         id: "local_data.note",
@@ -234,45 +285,42 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     ],
   },
   {
-    id: "buffer",
-    name: "Buffer",
-    provider: "buffer",
-    description: "Schedule or publish social posts through Buffer.",
-    connectionMethod: "oauth",
-    costLabel: "user_paid",
-    costNote:
-      "Requires your Buffer account. Buffer may charge for plans. Nexa does not pay Buffer usage for you. OAuth integration is not implemented yet.",
-    configurable: false,
-    executable: false,
+    id: "local_comfyui",
+    name: "Local image engine (ComfyUI)",
+    provider: "comfyui",
+    description: "Optional local image generation on your machine.",
+    connectionMethod: "local_endpoint",
+    costLabel: "local_free",
+    costNote: "Runs on your hardware. Check model licenses for commercial use.",
+    configurable: true,
+    executable: true,
+    defaultStatus: "setup_required",
     actions: [
       {
-        id: "buffer.create_draft",
-        connectorId: "buffer",
-        name: "Create draft post",
-        description: "Create a draft in Buffer (not published until you approve in Buffer or via publish action).",
+        id: "local_comfyui.generate_image",
+        connectorId: "local_comfyui",
+        name: "Generate image",
+        description: "Generate an image via local ComfyUI.",
         readOnly: false,
-        requiresApproval: true,
-        available: false,
-        unavailableReason: "Buffer OAuth is not implemented yet. Connect is unavailable.",
+        requiresApproval: false,
+        available: true,
         fields: [
-          { key: "text", label: "Caption", type: "textarea", required: true },
-          { key: "channel", label: "Channel", type: "text", required: true },
+          { key: "prompt", label: "Prompt", type: "textarea", required: true },
+          { key: "negative_prompt", label: "Negative prompt", type: "textarea" },
+          { key: "width", label: "Width", type: "number", placeholder: "512" },
+          { key: "height", label: "Height", type: "number", placeholder: "512" },
+          { key: "seed", label: "Seed", type: "number", placeholder: "-1" },
         ],
       },
       {
-        id: "buffer.schedule",
-        connectorId: "buffer",
-        name: "Schedule post",
-        description: "Schedule a post. Status will be scheduled, not published, until Buffer posts it.",
-        readOnly: false,
-        requiresApproval: true,
-        available: false,
-        unavailableReason: "Buffer OAuth is not implemented yet.",
-        fields: [
-          { key: "text", label: "Caption", type: "textarea", required: true },
-          { key: "channel", label: "Channel", type: "text", required: true },
-          { key: "scheduled_at", label: "Schedule time (ISO)", type: "text", required: true },
-        ],
+        id: "local_comfyui.test_connection",
+        connectorId: "local_comfyui",
+        name: "Test connection",
+        description: "Ping local endpoint.",
+        readOnly: true,
+        requiresApproval: false,
+        available: true,
+        fields: [],
       },
     ],
   },
@@ -280,42 +328,68 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     id: "gmail",
     name: "Gmail",
     provider: "google",
-    description: "Email actions through your Google account.",
+    description: "Send and read email via Google.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
-    costNote: "Uses your Google account. OAuth not implemented yet.",
+    costNote: "Requires administrator Google OAuth setup. Users should not paste Cloud Console secrets.",
+    envHint: "GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET",
     configurable: false,
     executable: false,
+    defaultStatus: "setup_required",
     actions: [
       {
         id: "gmail.send",
         connectorId: "gmail",
         name: "Send email",
-        description: "Send an email. Requires approval by default.",
+        description: "Send an email. Requires approval.",
         readOnly: false,
         requiresApproval: true,
-        available: false,
-        unavailableReason: "Gmail OAuth is not implemented yet.",
         fields: [
           { key: "to", label: "To", type: "text", required: true },
           { key: "subject", label: "Subject", type: "text", required: true },
           { key: "body", label: "Body", type: "textarea", required: true },
         ],
+        ...notYet("Google OAuth is not configured by the Nexa administrator."),
       },
     ],
   },
   {
-    id: "web_search",
-    name: "Web search",
-    provider: "optional",
-    description:
-      "Optional web search. Not enabled by default. Not used as a fallback for other connectors.",
-    connectionMethod: "api_key",
-    costLabel: "unsupported",
-    costNote:
-      "Disabled in this MVP. Will only appear if you explicitly enable a search provider later.",
+    id: "gdrive",
+    name: "Google Drive",
+    provider: "google",
+    description: "Files and folders in Google Drive.",
+    connectionMethod: "oauth",
+    costLabel: "user_paid",
+    costNote: "Requires administrator Google OAuth setup.",
     configurable: false,
     executable: false,
+    defaultStatus: "setup_required",
+    actions: [],
+  },
+  {
+    id: "gsheets",
+    name: "Google Sheets",
+    provider: "google",
+    description: "Read and write spreadsheet rows.",
+    connectionMethod: "oauth",
+    costLabel: "user_paid",
+    costNote: "Requires administrator Google OAuth setup.",
+    configurable: false,
+    executable: false,
+    defaultStatus: "setup_required",
+    actions: [],
+  },
+  {
+    id: "gcal",
+    name: "Google Calendar",
+    provider: "google",
+    description: "Calendar events.",
+    connectionMethod: "oauth",
+    costLabel: "user_paid",
+    costNote: "Requires administrator Google OAuth setup.",
+    configurable: false,
+    executable: false,
+    defaultStatus: "setup_required",
     actions: [],
   },
 ];
@@ -342,15 +416,26 @@ export function costLabelDisplay(label: CostLabel): string {
   const map: Record<CostLabel, string> = {
     local_free: "Local / Free",
     free_tier: "Free tier",
-    user_paid: "User-paid provider",
+    user_paid: "User-owned account",
     paid_api: "Paid API",
     not_configured: "Not configured",
-    unsupported: "Not available",
+    unsupported: "Unsupported",
   };
   return map[label];
 }
 
-/** Workflow starters — only when underlying actions exist */
+export function statusLabel(status: ConnectorUiStatus): string {
+  const map: Record<ConnectorUiStatus, string> = {
+    connected: "Connected",
+    setup_required: "Setup required",
+    coming_soon: "Coming soon",
+    unsupported: "Unsupported",
+    available: "Available",
+  };
+  return map[status];
+}
+
+/** Starters only when underlying actions can run */
 export const WORKFLOW_STARTERS: {
   id: string;
   name: string;
@@ -371,7 +456,7 @@ export const WORKFLOW_STARTERS: {
   {
     id: "local_list",
     name: "Local list processing",
-    description: "Create, filter, and report on a list — fully local, no external API.",
+    description: "Create, filter, and report on a list — fully local.",
     requiresConnectors: ["local_data"],
     steps: [
       { actionId: "local_data.list_from_text", config: { text: "", separator: "newline" } },
@@ -382,36 +467,21 @@ export const WORKFLOW_STARTERS: {
     available: true,
   },
   {
-    id: "local_image",
-    name: "Local image generation",
-    description: "Generate an image via your local ComfyUI server. Requires endpoint setup in Connections.",
-    requiresConnectors: ["local_comfyui"],
-    steps: [
-      {
-        actionId: "local_comfyui.generate_image",
-        config: {
-          prompt: "",
-          negative_prompt: "",
-          width: "512",
-          height: "512",
-          seed: "-1",
-        },
-      },
-      {
-        actionId: "local_data.note",
-        config: { note: "Review generated image before any publishing step." },
-      },
-    ],
-    available: true,
-  },
-  {
-    id: "image_to_buffer",
-    name: "Image → Buffer publish",
-    description: "Requires working Leonardo/ComfyUI and Buffer connectors.",
-    requiresConnectors: ["local_comfyui", "buffer"],
+    id: "slack_to_notion",
+    name: "Slack → Notion",
+    description: "Example bridge: capture a Slack message into a Notion page.",
+    requiresConnectors: ["slack", "notion"],
     steps: [],
     available: false,
-    unavailableReason:
-      "Buffer OAuth is not implemented. Local image generation works alone after you set the ComfyUI endpoint.",
+    unavailableReason: "Connect Slack and Notion first (OAuth setup required on this deployment).",
+  },
+  {
+    id: "github_issue",
+    name: "GitHub issue from notes",
+    description: "Turn structured notes into a GitHub issue.",
+    requiresConnectors: ["github", "local_data"],
+    steps: [],
+    available: false,
+    unavailableReason: "Connect GitHub first (OAuth setup required on this deployment).",
   },
 ];
