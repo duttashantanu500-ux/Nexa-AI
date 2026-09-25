@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { loadOperatorState, saveOperatorState } from "@/lib/operatorStore";
+import { loadOperatorState } from "@/lib/operatorStore";
 import {
   CONNECTOR_REGISTRY,
   costLabelDisplay,
@@ -169,14 +169,4 @@ export default function ConnectionsPage() {
       </div>
     </AppShell>
   );
-}
-
-/** Read Comfy URL for workflow runs */
-export function getComfyBaseUrl(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return localStorage.getItem(COMFY_KEY) || "";
-  } catch {
-    return "";
-  }
 }
