@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { loadOperatorState } from "@/lib/operatorStore";
-import { Agent } from "@/types";
+import { listDueAgents } from "@/lib/clientScheduler";
+import { statusBadgeClass } from "@/lib/runLifecycle";
+import type { Agent } from "@/types";
 
 export default function AgentsPage() {
   const router = useRouter();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [dueCount, setDueCount] = useState(0);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -17,59 +20,66 @@ export default function AgentsPage() {
       router.replace("/signup");
       return;
     }
-    setAgents(s.agents.filter((a) => a.userId === s.user!.id));
+    setAgents(s.agents);
+    setDueCount(listDueAgents().length);
   }, [router]);
 
   return (
     <AppShell>
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold">Agents</h1>
+            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Agents</h1>
             <p className="mt-1 text-sm text-zinc-500">
-              Workflow agents with explicit steps — no chat required.
+              Workflow agents across your connected tools.
             </p>
           </div>
           <Link
             href="/agents/new"
-            className="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white"
+            className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white"
           >
             Create agent
           </Link>
         </div>
 
+        {dueCount > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            {dueCount} schedule{dueCount === 1 ? "" : "s"} due while this app is open. Open the
+            agent and use Run now (browser cannot run schedules after the tab closes).
+          </div>
+        )}
+
         {agents.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-zinc-300 p-8 text-center dark:border-zinc-700">
-            <p className="text-sm text-zinc-600">No agents yet.</p>
-            <Link href="/agents/new" className="mt-3 inline-block text-sm font-medium text-indigo-600">
-              Create your first workflow →
+          <div className="rounded-xl border border-dashed border-zinc-200 p-10 text-center dark:border-zinc-800">
+            <p className="text-sm text-zinc-500">No agents yet.</p>
+            <Link href="/agents/new" className="mt-3 inline-block text-sm text-indigo-600">
+              Create your first agent
             </Link>
           </div>
         ) : (
-          <div className="space-y-3">
+          <ul className="space-y-2">
             {agents.map((a) => (
-              <Link
-                key={a.id}
-                href={`/agents/${a.id}`}
-                className="block rounded-xl border border-zinc-200 bg-white p-4 hover:border-indigo-300 dark:border-zinc-800 dark:bg-zinc-900"
-              >
-                <div className="flex items-start justify-between gap-2">
+              <li key={a.id}>
+                <Link
+                  href={`/agents/${a.id}`}
+                  className="flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-4 py-3 hover:border-indigo-300 dark:border-zinc-800 dark:bg-zinc-900"
+                >
                   <div>
-                    <div className="font-medium">{a.name}</div>
-                    <p className="mt-1 line-clamp-2 text-sm text-zinc-500">
-                      {a.purpose || a.description || `${a.steps?.length || 0} steps`}
+                    <div className="font-medium text-zinc-900 dark:text-zinc-50">{a.name}</div>
+                    <p className="text-xs text-zinc-500">
+                      {a.steps?.length || 0} steps · {a.schedule.frequency}
+                      {a.schedule.nextRunAt
+                        ? ` · next ${new Date(a.schedule.nextRunAt).toLocaleString()}`
+                        : ""}
                     </p>
                   </div>
-                  <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium capitalize text-zinc-600">
-                    {String(a.status).replace("_", " ")}
+                  <span className={statusBadgeClass(String(a.status))}>
+                    {String(a.status).replace(/_/g, " ")}
                   </span>
-                </div>
-                <div className="mt-2 text-[11px] text-zinc-400">
-                  {a.steps?.length || 0} steps · {a.schedule.frequency}
-                </div>
-              </Link>
+                </Link>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
       </div>
     </AppShell>

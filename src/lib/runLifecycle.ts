@@ -1,22 +1,10 @@
-/**
- * Canonical run status mapping (NEXA_AGENT_SYSTEM §8).
- */
-
 import type { AgentRunStatus } from "@/types";
 import type { WorkflowRunResult } from "./workflowEngine";
-
-export type CanonicalRunStatus =
-  | "queued"
-  | "running"
-  | "waiting_for_approval"
-  | "succeeded"
-  | "succeeded_with_errors"
-  | "failed"
-  | "cancelled";
 
 export function mapWorkflowResultToRunStatus(
   result: WorkflowRunResult
 ): AgentRunStatus {
+  if (result.status === "waiting_for_approval") return "waiting_for_approval";
   if (result.status === "completed" && result.ok) return "succeeded";
   if (result.status === "succeeded_with_errors") return "succeeded_with_errors";
   if (result.status === "partial") return "succeeded_with_errors";
@@ -49,14 +37,14 @@ export function runStatusTone(
       return "success";
     case "succeeded_with_errors":
     case "partial":
+    case "waiting_for_approval":
+    case "waiting_approval":
       return "warning";
     case "failed":
     case "cancelled":
       return "danger";
     case "running":
     case "queued":
-    case "waiting_for_approval":
-    case "waiting_approval":
       return "info";
     default:
       return "neutral";
