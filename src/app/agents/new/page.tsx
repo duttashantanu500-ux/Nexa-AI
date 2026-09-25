@@ -11,6 +11,7 @@ import {
   getAction,
 } from "@/lib/actionRegistry";
 import { validateAgentStructure } from "@/lib/validation/agentValidation";
+import { listUpstreamRefs } from "@/lib/mapping";
 import {
   ScheduleFrequency,
   WorkflowStep,
@@ -43,6 +44,8 @@ export default function NewAgentPage() {
       /* */
     }
   }, [router]);
+
+  const ordered = [...workflowSteps].sort((a, b) => a.order - b.order);
 
   const applyStarter = (id: string) => {
     const st = WORKFLOW_STARTERS.find((x) => x.id === id);
@@ -92,6 +95,19 @@ export default function NewAgentPage() {
     );
   };
 
+  const insertMapping = (stepIdStr: string, fieldKey: string, ref: string) => {
+    setWorkflowSteps((prev) =>
+      prev.map((s) => {
+        if (s.id !== stepIdStr) return s;
+        const cur = s.config?.[fieldKey] || "";
+        return {
+          ...s,
+          config: { ...s.config, [fieldKey]: cur ? `${cur} ${ref}` : ref },
+        };
+      })
+    );
+  };
+
   const removeStep = (id: string) => {
     setWorkflowSteps((prev) =>
       prev.filter((s) => s.id !== id).map((s, i) => ({ ...s, order: i }))
@@ -115,7 +131,7 @@ export default function NewAgentPage() {
   const save = (asDraft: boolean) => {
     const s = loadOperatorState();
     if (!s.user || !name.trim()) return;
-    if (!asDraft && !validation.ok) return;
+    if (!asDraft && activate && !validation.ok) return;
     setSaving(true);
     const agent = createAgent({
       userId: s.user.id,
@@ -133,11 +149,7 @@ export default function NewAgentPage() {
         timezone,
         enabled: frequency !== "once",
       },
-      status: asDraft
-        ? "draft"
-        : activate && workflowSteps.length
-          ? "active"
-          : "ready",
+      status: asDraft ? "draft" : activate && validation.ok ? "active" : "ready",
     });
     router.push(`/agents/${agent.id}`);
   };
@@ -153,7 +165,8 @@ export default function NewAgentPage() {
             Create workflow agent
           </h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Only implemented actions can be added. External services need OAuth setup first.
+            Map fields from earlier steps with {"{{step.output}}"}. Only implemented actions can be
+            added.
           </p>
           <div className="mt-3 flex flex-wrap gap-1">
             {STEPS.map((s, i) => (
@@ -204,19 +217,20 @@ export default function NewAgentPage() {
             <Field label="Workflow name" value={name} onChange={setName} placeholder="Weekly list cleanup" />
             <Field label="Description" value={description} onChange={setDescription} textarea />
             <Field
-              label="Notes for yourself (optional)"
+              label="Notes (optional)"
               value={outcome}
               onChange={setOutcome}
               textarea
-              placeholder="Not sent to an AI — just your notes"
+              placeholder="Your notes only"
             />
           </div>
         )}
 
         {step === 2 && (
           <div className="space-y-4">
-            {workflowSteps.map((ws, idx) => {
+            {ordered.map((ws, idx) => {
               const def = getAction(ws.actionId);
+              const upstream = listUpstreamRefs(ordered, idx);
               return (
                 <div
                   key={ws.id}
@@ -249,8 +263,8 @@ export default function NewAgentPage() {
                           value={ws.config[f.key] || ""}
                           onChange={(e) => updateStepConfig(ws.id, f.key, e.target.value)}
                           rows={3}
-                          placeholder={f.placeholder}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                          placeholder={f.placeholder || "Text or {{previous.output}}"}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
                         />
                       ) : f.type === "select" ? (
                         <select
@@ -269,12 +283,54 @@ export default function NewAgentPage() {
                           type={f.type === "number" ? "number" : "text"}
                           value={ws.config[f.key] || ""}
                           onChange={(e) => updateStepConfig(ws.id, f.key, e.target.value)}
-                          placeholder={f.placeholder}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                          placeholder={f.placeholder || "{{step.output}}"}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
                         />
+                      )}
+                      {upstream.length > 0 && f.type !== "select" && (
+                        <select
+                          className="mt-1 w-full rounded border border-dashed border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] dark:border-zinc-700 dark:bg-zinc-950"
+                          defaultValue=""
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              insertMapping(ws.id, f.key, e.target.value);
+                              e.target.value = "";
+                            }
+                          }}
+                        >
+                          <option value="">Insert from previous step…</option>
+                          {upstream.map((r) => (
+                            <option key={r} value={r}>
+                              {r}
+                            </option>
+                          ))}
+                        </select>
                       )}
                     </label>
                   ))}
+                  <label className="mt-2 block space-y-1">
+                    <span className="text-xs text-zinc-500">On error</span>
+                    <select
+                      value={ws.onError || "stop"}
+                      onChange={(e) =>
+                        setWorkflowSteps((prev) =>
+                          prev.map((s) =>
+                            s.id === ws.id
+                              ? {
+                                  ...s,
+                                  onError: e.target.value as "stop" | "continue" | "retry",
+                                }
+                              : s
+                          )
+                        )
+                      }
+                      className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                    >
+                      <option value="stop">Stop workflow</option>
+                      <option value="continue">Continue (mark errors)</option>
+                      <option value="retry">Retry then stop</option>
+                    </select>
+                  </label>
                 </div>
               );
             })}
@@ -287,28 +343,23 @@ export default function NewAgentPage() {
                     key={a.id}
                     type="button"
                     onClick={() => addAction(a.id)}
-                    className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-800 dark:border-zinc-700 dark:text-zinc-200"
+                    className="rounded-full border border-zinc-200 px-3 py-1 text-xs dark:border-zinc-700"
                   >
                     + {a.name}
                   </button>
                 ))}
               </div>
               {planned.length > 0 && (
-                <div className="mt-4">
-                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
-                    Planned (not yet available)
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {planned.slice(0, 12).map((a) => (
-                      <span
-                        key={a.id}
-                        title={a.availabilityNote || "Not implemented"}
-                        className="cursor-not-allowed rounded-full border border-dashed border-zinc-200 px-3 py-1 text-xs text-zinc-400 dark:border-zinc-700"
-                      >
-                        {a.name}
-                      </span>
-                    ))}
-                  </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {planned.slice(0, 8).map((a) => (
+                    <span
+                      key={a.id}
+                      title={a.availabilityNote || "Not implemented"}
+                      className="cursor-not-allowed rounded-full border border-dashed border-zinc-200 px-3 py-1 text-xs text-zinc-400"
+                    >
+                      {a.name}
+                    </span>
+                  ))}
                 </div>
               )}
             </div>
@@ -324,10 +375,10 @@ export default function NewAgentPage() {
                 onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)}
                 className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               >
-                <option value="once">Manual only (Run now)</option>
-                <option value="daily">Daily (stored; server scheduler in later phase)</option>
-                <option value="weekly">Weekly (stored; server scheduler in later phase)</option>
-                <option value="monthly">Monthly (stored; server scheduler in later phase)</option>
+                <option value="once">Manual only</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
               </select>
             </label>
             {frequency !== "once" && (
@@ -338,9 +389,7 @@ export default function NewAgentPage() {
                   onChange={(e) => setTime(e.target.value)}
                   className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
                 />
-                <p className="text-xs text-zinc-500">
-                  Timezone: {timezone}. Prefer Run now until Phase 5 backend scheduler is live.
-                </p>
+                <p className="text-xs text-zinc-500">Timezone: {timezone}</p>
               </>
             )}
           </div>
@@ -352,14 +401,11 @@ export default function NewAgentPage() {
               <span className="text-xs text-zinc-500">Name</span>
               <div>{name}</div>
             </div>
-            <div>
-              <span className="text-xs text-zinc-500">Steps</span>
-              <ol className="mt-1 list-decimal pl-4">
-                {workflowSteps.map((s) => (
-                  <li key={s.id}>{s.name}</li>
-                ))}
-              </ol>
-            </div>
+            <ol className="list-decimal pl-4">
+              {workflowSteps.map((s) => (
+                <li key={s.id}>{s.name}</li>
+              ))}
+            </ol>
             {!validation.ok && (
               <ul className="text-xs text-amber-600">
                 {validation.issues.map((i) => (
@@ -373,7 +419,7 @@ export default function NewAgentPage() {
                 checked={activate}
                 onChange={(e) => setActivate(e.target.checked)}
               />
-              Activate after save
+              Activate after save (requires validation)
             </label>
           </div>
         )}
@@ -443,14 +489,14 @@ function Field({
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           rows={3}
-          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         />
       ) : (
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         />
       )}
     </label>
