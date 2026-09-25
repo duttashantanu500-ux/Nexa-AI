@@ -33,13 +33,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
       <div className="mx-auto flex min-h-screen max-w-6xl">
-        {/* Desktop sidebar */}
         <aside className="hidden w-56 shrink-0 border-r border-zinc-200 bg-white px-3 py-5 dark:border-zinc-800 dark:bg-zinc-900 md:block">
           <div className="mb-8 px-2">
             <div className="text-lg font-semibold tracking-tight text-indigo-600 dark:text-indigo-400">
               Nexa
             </div>
-            <div className="mt-0.5 text-xs text-zinc-500">AI Agent OS</div>
+            <div className="mt-0.5 text-xs text-zinc-500">
+              Connect · Orchestrate
+            </div>
           </div>
           <nav className="space-y-0.5">
             {NAV.map((item) => (
@@ -64,7 +65,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          {/* Mobile top bar */}
           <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/90 md:hidden">
             <div className="flex items-center justify-between px-4 py-3">
               <span className="font-semibold text-indigo-600 dark:text-indigo-400">
