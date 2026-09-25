@@ -1,6 +1,6 @@
 /**
  * Connector-first registry.
- * Nexa bridges user-owned services. No web-search default. No fake connections.
+ * `implemented` mirrors real provider/local execution capability.
  */
 
 export type CostLabel =
@@ -38,7 +38,11 @@ export interface ConnectorAction {
   readOnly: boolean;
   requiresApproval: boolean;
   fields: ActionField[];
+  /** @deprecated prefer implemented */
   available: boolean;
+  /** Spec: only true when real execution path exists and verified */
+  implemented: boolean;
+  riskTier?: "low" | "medium" | "high";
   unavailableReason?: string;
 }
 
@@ -50,18 +54,22 @@ export interface ConnectorDefinition {
   connectionMethod: ConnectionMethod;
   costLabel: CostLabel;
   costNote: string;
-  /** Server/env can enable OAuth */
   envHint?: string;
   configurable: boolean;
   executable: boolean;
-  /** Default UI status when user has not connected */
   defaultStatus: ConnectorUiStatus;
   actions: ConnectorAction[];
 }
 
-const notYet = (reason: string) => ({
+const notImpl = (reason: string) => ({
   available: false as const,
+  implemented: false as const,
   unavailableReason: reason,
+});
+
+const impl = () => ({
+  available: true as const,
+  implemented: true as const,
 });
 
 export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
@@ -72,7 +80,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     description: "Read channels, post messages, and notify teams through your Slack workspace.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
-    costNote: "Uses your Slack workspace. Slack may require a paid plan for some APIs. Nexa does not pay Slack for you.",
+    costNote: "Uses your Slack workspace. Nexa does not pay Slack for you.",
     envHint: "SLACK_CLIENT_ID, SLACK_CLIENT_SECRET",
     configurable: true,
     executable: false,
@@ -82,14 +90,15 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         id: "slack.post_message",
         connectorId: "slack",
         name: "Post message",
-        description: "Post a message to a channel. Requires approval by default.",
+        description: "Post a message to a channel.",
         readOnly: false,
         requiresApproval: true,
+        riskTier: "medium",
         fields: [
           { key: "channel", label: "Channel ID or name", type: "text", required: true },
           { key: "text", label: "Message", type: "textarea", required: true },
         ],
-        ...notYet("Slack OAuth is not configured on this Nexa deployment."),
+        ...notImpl("Slack OAuth is not configured; action not implemented end-to-end."),
       },
       {
         id: "slack.list_channels",
@@ -98,8 +107,9 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "List channels the bot can access.",
         readOnly: true,
         requiresApproval: false,
+        riskTier: "low",
         fields: [],
-        ...notYet("Slack OAuth is not configured on this Nexa deployment."),
+        ...notImpl("Slack OAuth is not configured; action not implemented end-to-end."),
       },
     ],
   },
@@ -110,7 +120,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     description: "Create pages and database rows in your Notion workspace.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
-    costNote: "Uses your Notion workspace. Subject to Notion plan limits.",
+    costNote: "Uses your Notion workspace.",
     envHint: "NOTION_CLIENT_ID, NOTION_CLIENT_SECRET",
     configurable: true,
     executable: false,
@@ -123,12 +133,13 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "Create a page under a parent page or database.",
         readOnly: false,
         requiresApproval: true,
+        riskTier: "medium",
         fields: [
           { key: "parent_id", label: "Parent page/database ID", type: "text", required: true },
           { key: "title", label: "Title", type: "text", required: true },
           { key: "content", label: "Content", type: "textarea" },
         ],
-        ...notYet("Notion OAuth is not configured on this Nexa deployment."),
+        ...notImpl("Notion OAuth is not configured; action not implemented end-to-end."),
       },
       {
         id: "notion.append_blocks",
@@ -137,11 +148,12 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "Append text blocks to an existing page.",
         readOnly: false,
         requiresApproval: true,
+        riskTier: "medium",
         fields: [
           { key: "page_id", label: "Page ID", type: "text", required: true },
           { key: "content", label: "Content", type: "textarea", required: true },
         ],
-        ...notYet("Notion OAuth is not configured on this Nexa deployment."),
+        ...notImpl("Notion OAuth is not configured; action not implemented end-to-end."),
       },
     ],
   },
@@ -152,7 +164,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     description: "Create issues, comment on PRs, and read repository data.",
     connectionMethod: "oauth",
     costLabel: "free_tier",
-    costNote: "Uses your GitHub account. Subject to GitHub API rate limits.",
+    costNote: "Uses your GitHub account. Subject to API rate limits.",
     envHint: "GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET",
     configurable: true,
     executable: false,
@@ -165,13 +177,14 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "Open an issue in a repository.",
         readOnly: false,
         requiresApproval: true,
+        riskTier: "medium",
         fields: [
           { key: "owner", label: "Owner", type: "text", required: true },
           { key: "repo", label: "Repository", type: "text", required: true },
           { key: "title", label: "Title", type: "text", required: true },
           { key: "body", label: "Body", type: "textarea" },
         ],
-        ...notYet("GitHub OAuth is not configured on this Nexa deployment."),
+        ...notImpl("GitHub OAuth is not configured; action not implemented end-to-end."),
       },
       {
         id: "github.list_issues",
@@ -180,11 +193,12 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "List open issues in a repository.",
         readOnly: true,
         requiresApproval: false,
+        riskTier: "low",
         fields: [
           { key: "owner", label: "Owner", type: "text", required: true },
           { key: "repo", label: "Repository", type: "text", required: true },
         ],
-        ...notYet("GitHub OAuth is not configured on this Nexa deployment."),
+        ...notImpl("GitHub OAuth is not configured; action not implemented end-to-end."),
       },
     ],
   },
@@ -207,7 +221,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "Split text into a list.",
         readOnly: true,
         requiresApproval: false,
-        available: true,
+        riskTier: "low",
         fields: [
           { key: "text", label: "Text", type: "textarea", required: true, placeholder: "Item one\nItem two" },
           {
@@ -220,6 +234,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
             ],
           },
         ],
+        ...impl(),
       },
       {
         id: "local_data.filter",
@@ -228,7 +243,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "Keep or remove items matching a keyword.",
         readOnly: true,
         requiresApproval: false,
-        available: true,
+        riskTier: "low",
         fields: [
           { key: "keyword", label: "Keyword", type: "text", required: true },
           {
@@ -241,6 +256,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
             ],
           },
         ],
+        ...impl(),
       },
       {
         id: "local_data.limit",
@@ -249,8 +265,9 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "Keep the first N items.",
         readOnly: true,
         requiresApproval: false,
-        available: true,
+        riskTier: "low",
         fields: [{ key: "count", label: "Max items", type: "number", required: true, placeholder: "10" }],
+        ...impl(),
       },
       {
         id: "local_data.template",
@@ -259,8 +276,9 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "Map each item with {{item}}.",
         readOnly: true,
         requiresApproval: false,
-        available: true,
+        riskTier: "low",
         fields: [{ key: "template", label: "Template", type: "textarea", required: true, placeholder: "- {{item}}" }],
+        ...impl(),
       },
       {
         id: "local_data.report",
@@ -269,8 +287,9 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "Combine notes and list into a report.",
         readOnly: true,
         requiresApproval: false,
-        available: true,
+        riskTier: "low",
         fields: [{ key: "title", label: "Title", type: "text", required: true, placeholder: "Workflow result" }],
+        ...impl(),
       },
       {
         id: "local_data.note",
@@ -279,8 +298,9 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "Attach a note to the workflow context.",
         readOnly: true,
         requiresApproval: false,
-        available: true,
+        riskTier: "low",
         fields: [{ key: "note", label: "Note", type: "textarea", required: true }],
+        ...impl(),
       },
     ],
   },
@@ -303,7 +323,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "Generate an image via local ComfyUI.",
         readOnly: false,
         requiresApproval: false,
-        available: true,
+        riskTier: "low",
         fields: [
           { key: "prompt", label: "Prompt", type: "textarea", required: true },
           { key: "negative_prompt", label: "Negative prompt", type: "textarea" },
@@ -311,6 +331,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
           { key: "height", label: "Height", type: "number", placeholder: "512" },
           { key: "seed", label: "Seed", type: "number", placeholder: "-1" },
         ],
+        ...impl(),
       },
       {
         id: "local_comfyui.test_connection",
@@ -319,8 +340,9 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         description: "Ping local endpoint.",
         readOnly: true,
         requiresApproval: false,
-        available: true,
+        riskTier: "low",
         fields: [],
+        ...impl(),
       },
     ],
   },
@@ -331,7 +353,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     description: "Send and read email via Google.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
-    costNote: "Requires administrator Google OAuth setup. Users should not paste Cloud Console secrets.",
+    costNote: "Requires administrator Google OAuth setup.",
     envHint: "GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET",
     configurable: false,
     executable: false,
@@ -341,15 +363,16 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         id: "gmail.send",
         connectorId: "gmail",
         name: "Send email",
-        description: "Send an email. Requires approval.",
+        description: "Send an email.",
         readOnly: false,
         requiresApproval: true,
+        riskTier: "high",
         fields: [
           { key: "to", label: "To", type: "text", required: true },
           { key: "subject", label: "Subject", type: "text", required: true },
           { key: "body", label: "Body", type: "textarea", required: true },
         ],
-        ...notYet("Google OAuth is not configured by the Nexa administrator."),
+        ...notImpl("Google OAuth is not configured by the Nexa administrator."),
       },
     ],
   },
@@ -406,9 +429,10 @@ export function getAction(actionId: string): ConnectorAction | undefined {
   return undefined;
 }
 
+/** Only implemented + available actions may be added to live workflows */
 export function listAvailableActions(): ConnectorAction[] {
   return CONNECTOR_REGISTRY.flatMap((c) =>
-    c.actions.filter((a) => a.available && c.executable)
+    c.actions.filter((a) => a.implemented && a.available && c.executable)
   );
 }
 
@@ -435,7 +459,6 @@ export function statusLabel(status: ConnectorUiStatus): string {
   return map[status];
 }
 
-/** Starters only when underlying actions can run */
 export const WORKFLOW_STARTERS: {
   id: string;
   name: string;
@@ -473,7 +496,7 @@ export const WORKFLOW_STARTERS: {
     requiresConnectors: ["slack", "notion"],
     steps: [],
     available: false,
-    unavailableReason: "Connect Slack and Notion first (OAuth setup required on this deployment).",
+    unavailableReason: "Connect Slack and Notion first (OAuth + implemented actions required).",
   },
   {
     id: "github_issue",
@@ -482,6 +505,6 @@ export const WORKFLOW_STARTERS: {
     requiresConnectors: ["github", "local_data"],
     steps: [],
     available: false,
-    unavailableReason: "Connect GitHub first (OAuth setup required on this deployment).",
+    unavailableReason: "Connect GitHub first (OAuth + implemented actions required).",
   },
 ];

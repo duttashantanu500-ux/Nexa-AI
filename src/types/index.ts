@@ -152,6 +152,8 @@ export interface ApprovalRequest {
   status: "pending" | "approved" | "rejected";
   missionId?: string;
   actionId?: string;
+  runId?: string;
+  runStepId?: string;
   createdAt: string;
 }
 
@@ -170,6 +172,9 @@ export interface AgentSchedule {
   dayOfMonth?: number;
   enabled: boolean;
   nextRunAt?: string | null;
+  lastRunAt?: string | null;
+  lastRunStatus?: string | null;
+  consecutiveFailures?: number;
 }
 
 export type PermissionMode = "read" | "write" | "approval_required";
@@ -183,9 +188,18 @@ export type {
   WorkflowStep,
   WorkflowStepResult,
   WorkflowAgentStatus,
+  StepType,
+  ConnectionRecord,
+  AgentRunStatusExtended,
+  RunStepStatus,
 } from "./workflow";
 
-import type { WorkflowStep, WorkflowStepResult, WorkflowAgentStatus } from "./workflow";
+import type {
+  WorkflowStep,
+  WorkflowStepResult,
+  WorkflowAgentStatus,
+  ConnectionRecord,
+} from "./workflow";
 
 export type AgentStatus =
   | "idle"
@@ -205,6 +219,8 @@ export interface Agent {
   constraints?: string;
   templateType?: string;
   status: AgentStatus;
+  /** Incremented when steps structure changes */
+  version: number;
   tools: string[];
   steps: WorkflowStep[];
   permissions: AgentPermissions;
@@ -219,7 +235,10 @@ export type AgentRunStatus =
   | "queued"
   | "running"
   | "waiting_approval"
+  | "waiting_for_approval"
   | "completed"
+  | "succeeded"
+  | "succeeded_with_errors"
   | "partial"
   | "failed"
   | "cancelled";
@@ -228,8 +247,12 @@ export interface AgentRun {
   id: string;
   agentId: string;
   userId: string;
+  /** Version of agent steps that executed */
+  agentVersion?: number;
   trigger: "manual" | "schedule" | "test";
+  triggerSource?: string;
   status: AgentRunStatus;
+  isTest?: boolean;
   startedAt: string;
   endedAt?: string | null;
   durationMs?: number | null;
@@ -249,7 +272,10 @@ export type ConnectionStatus =
   | "not_supported"
   | "connecting"
   | "failed"
-  | "disconnected";
+  | "disconnected"
+  | "expired"
+  | "revoked"
+  | "error";
 
 export interface Connection {
   id: string;
@@ -269,6 +295,8 @@ export interface AppState {
   agents: Agent[];
   agentRuns: AgentRun[];
   connections: Connection[];
+  /** Phase 1: connection instances (no tokens client-side) */
+  connectionRecords?: ConnectionRecord[];
   memories?: MemoryItem[];
   conversations?: Conversation[];
   currentWorkspace?: WorkspaceId;
@@ -284,58 +312,42 @@ export const BUILTIN_TOOLS = [
     name: "Web Search",
     description: "Search the public web",
     connector: "Built-in",
-    available: true,
-    permission: "read" as const,
-  },
-  {
-    id: "web_page_reader",
-    name: "Page Reader",
-    description: "Read public pages",
-    connector: "Built-in",
-    available: true,
+    available: false,
     permission: "read" as const,
   },
 ];
 
 export const DEFAULT_CONNECTIONS: Connection[] = [
   {
-    id: "web",
-    name: "Web Research",
+    id: "local_data",
+    name: "Local data tools",
     provider: "builtin",
     status: "connected",
-    description: "Search and read public web pages",
-    tools: ["web_search", "web_page_reader"],
-  },
-  {
-    id: "gmail",
-    name: "Gmail",
-    provider: "google",
-    status: "not_supported",
-    description: "Email — not available yet",
-    tools: [],
-  },
-  {
-    id: "gdrive",
-    name: "Google Drive",
-    provider: "google",
-    status: "not_supported",
-    description: "Files — not available yet",
-    tools: [],
+    description: "Deterministic local actions",
+    tools: ["local_data.list_from_text", "local_data.filter", "local_data.report"],
   },
   {
     id: "slack",
     name: "Slack",
     provider: "slack",
-    status: "not_supported",
-    description: "Messaging — not available yet",
+    status: "setup_required",
+    description: "OAuth setup required",
     tools: [],
   },
   {
-    id: "mcp",
-    name: "Custom MCP",
-    provider: "mcp",
-    status: "available",
-    description: "Connect a custom MCP server",
+    id: "notion",
+    name: "Notion",
+    provider: "notion",
+    status: "setup_required",
+    description: "OAuth setup required",
+    tools: [],
+  },
+  {
+    id: "github",
+    name: "GitHub",
+    provider: "github",
+    status: "setup_required",
+    description: "OAuth setup required",
     tools: [],
   },
 ];
@@ -361,6 +373,7 @@ export function defaultSchedule(): AgentSchedule {
     timezone: tz,
     enabled: false,
     nextRunAt: null,
+    consecutiveFailures: 0,
   };
 }
 
@@ -402,10 +415,9 @@ export function deriveAgentStatus(agent: {
   steps?: WorkflowStep[];
 }): AgentStatus {
   if (agent.status === "paused") return "paused";
+  if (agent.status === "archived") return "archived";
   if (agent.status === "failed" || agent.status === "error") return "failed";
   if (!agent.steps?.length) return "draft";
-  const hasEmptyRequired = false;
-  if (hasEmptyRequired) return "needs_setup";
   if (agent.status === "active" || agent.status === "ready") return agent.status as AgentStatus;
   return "ready";
 }
