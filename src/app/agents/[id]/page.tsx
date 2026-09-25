@@ -18,6 +18,8 @@ import {
 import { runWorkflow } from "@/lib/workflowEngine";
 import { Agent, AgentRun } from "@/types";
 
+const COMFY_KEY = "nexa_comfy_base_url";
+
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -46,14 +48,17 @@ export default function AgentDetailPage() {
     const next = agent.status === "paused" ? "active" : "paused";
     updateAgent(agent.id, {
       status: next,
-      schedule: { ...agent.schedule, enabled: next !== "paused" && agent.schedule.frequency !== "once" },
+      schedule: {
+        ...agent.schedule,
+        enabled: next !== "paused" && agent.schedule.frequency !== "once",
+      },
     });
     refresh();
   };
 
   const remove = () => {
     if (!agent) return;
-    if (!confirm(`Delete "${agent.name}"? This cannot be undone.`)) return;
+    if (!confirm(`Delete "${agent.name}"?`)) return;
     deleteAgent(agent.id);
     router.push("/agents");
   };
@@ -90,14 +95,29 @@ export default function AgentDetailPage() {
     });
     refresh();
 
+    let comfyBaseUrl = "";
     try {
-      // Prefer client-side engine (works offline for data actions)
-      const result = await runWorkflow({ steps: agent.steps, simulate });
+      comfyBaseUrl = localStorage.getItem(COMFY_KEY) || "";
+    } catch {
+      /* */
+    }
+
+    try {
+      const result = await runWorkflow({
+        steps: agent.steps,
+        simulate,
+        connections: { comfyBaseUrl },
+      });
       const endedAt = new Date().toISOString();
       const durationMs = Date.parse(endedAt) - Date.parse(startedAt);
 
       updateAgentRun(runId, {
-        status: result.status === "completed" ? "completed" : result.status === "partial" ? "partial" : "failed",
+        status:
+          result.status === "completed"
+            ? "completed"
+            : result.status === "partial"
+              ? "partial"
+              : "failed",
         endedAt,
         durationMs,
         summary: result.output.slice(0, 200),
@@ -126,8 +146,7 @@ export default function AgentDetailPage() {
     return (
       <AppShell>
         <div className="px-4 py-16 text-center text-sm text-zinc-500">
-          Agent not found.{" "}
-          <Link href="/agents" className="text-indigo-600">Back to agents</Link>
+          Agent not found. <Link href="/agents" className="text-indigo-600">Back</Link>
         </div>
       </AppShell>
     );
@@ -142,7 +161,9 @@ export default function AgentDetailPage() {
             <h1 className="mt-1 text-xl font-semibold">{agent.name}</h1>
             <p className="mt-1 text-sm text-zinc-500">{agent.purpose || agent.description}</p>
           </div>
-          <StatusPill status={String(agent.status)} />
+          <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium capitalize dark:bg-zinc-800">
+            {String(agent.status).replace("_", " ")}
+          </span>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -155,12 +176,8 @@ export default function AgentDetailPage() {
           <button type="button" onClick={togglePause} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700">
             {agent.status === "paused" ? "Resume" : "Pause"}
           </button>
-          <button type="button" onClick={dup} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700">
-            Duplicate
-          </button>
-          <button type="button" onClick={remove} className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600">
-            Delete
-          </button>
+          <button type="button" onClick={dup} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700">Duplicate</button>
+          <button type="button" onClick={remove} className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600">Delete</button>
         </div>
 
         {error && (
@@ -168,9 +185,10 @@ export default function AgentDetailPage() {
         )}
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Card title="Workflow steps">
+          <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="mb-2 text-xs font-semibold uppercase text-zinc-400">Workflow steps</div>
             {!agent.steps?.length ? (
-              <p className="text-sm text-zinc-500">No steps configured.</p>
+              <p className="text-sm text-zinc-500">No steps</p>
             ) : (
               <ol className="list-decimal space-y-1 pl-4 text-sm">
                 {agent.steps.map((s) => (
@@ -178,18 +196,12 @@ export default function AgentDetailPage() {
                 ))}
               </ol>
             )}
-          </Card>
-          <Card title="Schedule">
+          </div>
+          <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="mb-2 text-xs font-semibold uppercase text-zinc-400">Schedule</div>
             <p className="text-sm capitalize">{agent.schedule.frequency}</p>
-            {agent.schedule.frequency !== "once" && (
-              <p className="mt-1 text-xs text-zinc-500">
-                {agent.schedule.time} · {agent.schedule.timezone}
-              </p>
-            )}
-            <p className="mt-2 text-[11px] text-zinc-400">
-              Background schedules need server cron. Prefer Run now.
-            </p>
-          </Card>
+            <p className="mt-2 text-[11px] text-zinc-400">Background cron not guaranteed. Use Run now.</p>
+          </div>
         </div>
 
         <section className="space-y-3">
@@ -200,30 +212,23 @@ export default function AgentDetailPage() {
             <ul className="space-y-3">
               {runs.map((r) => (
                 <li key={r.id} className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                  <div className="flex flex-wrap justify-between gap-2 text-sm">
                     <span className="font-medium capitalize">{r.status}</span>
                     <span className="text-xs text-zinc-500">
                       {new Date(r.startedAt).toLocaleString()}
-                      {r.durationMs != null ? ` · ${Math.round(r.durationMs / 1000)}s` : ""}
                       {` · ${r.trigger}`}
                       {r.mode === "simulated" ? " · Simulated" : " · Real"}
                     </span>
                   </div>
-                  {r.stepResults && r.stepResults.length > 0 && (
-                    <ul className="mt-2 space-y-1 text-xs text-zinc-600 dark:text-zinc-400">
-                      {r.stepResults.map((sr) => (
-                        <li key={sr.stepId}>
-                          {sr.status === "succeeded" ? "✓" : "✗"} {sr.name}
-                          {sr.error ? ` — ${sr.error}` : sr.output ? ` — ${sr.output.slice(0, 80)}` : ""}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  {r.stepResults?.map((sr) => (
+                    <div key={sr.stepId} className="mt-1 text-xs text-zinc-500">
+                      {sr.status === "succeeded" ? "✓" : "✗"} {sr.name}
+                      {sr.error ? ` — ${sr.error}` : ""}
+                    </div>
+                  ))}
                   {r.error && <p className="mt-2 text-sm text-red-600">{r.error}</p>}
                   {r.output && (
-                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-xs dark:bg-zinc-950">
-                      {r.output}
-                    </pre>
+                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-xs dark:bg-zinc-950">{r.output}</pre>
                   )}
                 </li>
               ))}
@@ -232,30 +237,5 @@ export default function AgentDetailPage() {
         </section>
       </div>
     </AppShell>
-  );
-}
-
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function StatusPill({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    active: "bg-emerald-50 text-emerald-700",
-    ready: "bg-sky-50 text-sky-700",
-    draft: "bg-zinc-100 text-zinc-600",
-    paused: "bg-amber-50 text-amber-700",
-    failed: "bg-red-50 text-red-700",
-    needs_setup: "bg-orange-50 text-orange-700",
-  };
-  return (
-    <span className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ${styles[status] || styles.draft}`}>
-      {status.replace("_", " ")}
-    </span>
   );
 }

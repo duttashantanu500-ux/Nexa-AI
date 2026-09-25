@@ -1,12 +1,12 @@
 /**
- * Compatibility layer — actions come from connector registry only.
- * Web search is NOT in the available set.
+ * Actions come only from the connector registry.
+ * Web search is not available and not used as a fallback.
  */
 
 import {
   CONNECTOR_REGISTRY,
   WORKFLOW_STARTERS,
-  getAction,
+  getAction as getConnectorAction,
   listAvailableActions,
   type ConnectorAction,
   type ActionField,
@@ -48,17 +48,11 @@ function toActionDef(a: ConnectorAction): ActionDefinition {
   };
 }
 
-/** Only executable, available actions — no web search */
 export const ACTION_REGISTRY: ActionDefinition[] = listAvailableActions().map(toActionDef);
 
-export function getActionDef(id: string): ActionDefinition | undefined {
-  const a = getAction(id);
-  return a ? toActionDef(a) : undefined;
-}
-
-// Alias used by builder pages
 export function getAction(id: string): ActionDefinition | undefined {
-  return getActionDef(id);
+  const a = getConnectorAction(id);
+  return a ? toActionDef(a) : undefined;
 }
 
 export function availableActions(): ActionDefinition[] {

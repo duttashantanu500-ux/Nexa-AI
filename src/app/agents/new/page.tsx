@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { createAgent, loadOperatorState, stepId } from "@/lib/operatorStore";
 import {
-  ACTION_REGISTRY,
   WORKFLOW_STARTERS,
   availableActions,
   getAction,
@@ -44,9 +43,9 @@ export default function NewAgentPage() {
   }, [router]);
 
   const applyStarter = (id: string) => {
-    setStarterId(id);
     const st = WORKFLOW_STARTERS.find((x) => x.id === id);
-    if (!st) return;
+    if (!st || !st.available) return;
+    setStarterId(id);
     setWorkflowSteps(
       st.steps.map((s, i) => {
         const def = getAction(s.actionId);
@@ -134,7 +133,7 @@ export default function NewAgentPage() {
         <div>
           <h1 className="text-xl font-semibold">Create workflow agent</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Build explicit steps. No AI chat required.
+            Connect services, pick actions, run steps. No web-search default. No paid AI required.
           </p>
           <div className="mt-3 flex flex-wrap gap-1">
             {STEPS.map((s, i) => (
@@ -156,132 +155,88 @@ export default function NewAgentPage() {
 
         {step === 0 && (
           <div className="space-y-3">
-            {WORKFLOW_STARTERS.map((st) => {
-              const blocked = st.id === "email";
-              return (
-                <button
-                  key={st.id}
-                  type="button"
-                  disabled={blocked}
-                  onClick={() => applyStarter(st.id)}
-                  className={`w-full rounded-xl border p-4 text-left ${
-                    starterId === st.id
-                      ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40"
-                      : "border-zinc-200 dark:border-zinc-800"
-                  } ${blocked ? "opacity-50" : ""}`}
-                >
-                  <div className="font-medium">{st.name}</div>
-                  <p className="mt-1 text-xs text-zinc-500">{st.description}</p>
-                  {blocked && (
-                    <p className="mt-1 text-[11px] text-amber-600">Coming soon</p>
-                  )}
-                </button>
-              );
-            })}
+            {WORKFLOW_STARTERS.map((st) => (
+              <button
+                key={st.id}
+                type="button"
+                disabled={!st.available}
+                onClick={() => applyStarter(st.id)}
+                className={`w-full rounded-xl border p-4 text-left ${
+                  starterId === st.id && st.available
+                    ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40"
+                    : "border-zinc-200 dark:border-zinc-800"
+                } ${!st.available ? "opacity-60" : ""}`}
+              >
+                <div className="font-medium">{st.name}</div>
+                <p className="mt-1 text-xs text-zinc-500">{st.description}</p>
+                {!st.available && (
+                  <p className="mt-1 text-[11px] text-amber-600">
+                    {st.unavailableReason || "Not available"}
+                  </p>
+                )}
+              </button>
+            ))}
           </div>
         )}
 
         {step === 1 && (
           <div className="space-y-4">
             <Field label="Workflow name" value={name} onChange={setName} placeholder="Weekly list cleanup" />
-            <Field label="Description (optional)" value={description} onChange={setDescription} textarea />
+            <Field label="Description" value={description} onChange={setDescription} textarea />
             <Field
-              label="Desired outcome (optional guidance)"
+              label="Notes for yourself (optional)"
               value={outcome}
               onChange={setOutcome}
               textarea
-              placeholder="What should this workflow produce? Not interpreted by AI — just notes for you."
+              placeholder="Not sent to an AI — just your notes"
             />
           </div>
         )}
 
         {step === 2 && (
           <div className="space-y-4">
-            <div className="space-y-2">
-              {workflowSteps.length === 0 && (
-                <p className="text-sm text-zinc-500">No steps yet. Add an action below.</p>
-              )}
-              {workflowSteps.map((ws, idx) => {
-                const def = getAction(ws.actionId);
-                return (
-                  <div
-                    key={ws.id}
-                    className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-medium">
-                        {idx + 1}. {ws.name}
-                      </div>
-                      <div className="flex gap-1">
-                        <button type="button" className="text-xs text-zinc-500" onClick={() => moveStep(ws.id, -1)}>
-                          ↑
-                        </button>
-                        <button type="button" className="text-xs text-zinc-500" onClick={() => moveStep(ws.id, 1)}>
-                          ↓
-                        </button>
-                        <button type="button" className="text-xs text-red-600" onClick={() => removeStep(ws.id)}>
-                          Remove
-                        </button>
-                      </div>
+            {workflowSteps.map((ws, idx) => {
+              const def = getAction(ws.actionId);
+              return (
+                <div key={ws.id} className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-medium">{idx + 1}. {ws.name}</div>
+                    <div className="flex gap-1">
+                      <button type="button" className="text-xs text-zinc-500" onClick={() => moveStep(ws.id, -1)}>↑</button>
+                      <button type="button" className="text-xs text-zinc-500" onClick={() => moveStep(ws.id, 1)}>↓</button>
+                      <button type="button" className="text-xs text-red-600" onClick={() => removeStep(ws.id)}>Remove</button>
                     </div>
-                    {def?.fields.map((f) => (
-                      <label key={f.key} className="mt-2 block space-y-1">
-                        <span className="text-xs text-zinc-500">
-                          {f.label}
-                          {f.required ? " *" : ""}
-                        </span>
-                        {f.type === "textarea" ? (
-                          <textarea
-                            value={ws.config[f.key] || ""}
-                            onChange={(e) => updateStepConfig(ws.id, f.key, e.target.value)}
-                            rows={3}
-                            placeholder={f.placeholder}
-                            className="w-full rounded-lg border border-zinc-200 px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                          />
-                        ) : f.type === "select" ? (
-                          <select
-                            value={ws.config[f.key] || f.options?.[0]?.value || ""}
-                            onChange={(e) => updateStepConfig(ws.id, f.key, e.target.value)}
-                            className="w-full rounded-lg border border-zinc-200 px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                          >
-                            {(f.options || []).map((o) => (
-                              <option key={o.value} value={o.value}>
-                                {o.label}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            type={f.type === "number" ? "number" : "text"}
-                            value={ws.config[f.key] || ""}
-                            onChange={(e) => updateStepConfig(ws.id, f.key, e.target.value)}
-                            placeholder={f.placeholder}
-                            className="w-full rounded-lg border border-zinc-200 px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                          />
-                        )}
-                      </label>
-                    ))}
                   </div>
-                );
-              })}
-            </div>
-
+                  {def?.fields.map((f) => (
+                    <label key={f.key} className="mt-2 block space-y-1">
+                      <span className="text-xs text-zinc-500">{f.label}{f.required ? " *" : ""}</span>
+                      {f.type === "textarea" ? (
+                        <textarea value={ws.config[f.key] || ""} onChange={(e) => updateStepConfig(ws.id, f.key, e.target.value)} rows={3} placeholder={f.placeholder} className="w-full rounded-lg border border-zinc-200 px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
+                      ) : f.type === "select" ? (
+                        <select value={ws.config[f.key] || f.options?.[0]?.value || ""} onChange={(e) => updateStepConfig(ws.id, f.key, e.target.value)} className="w-full rounded-lg border border-zinc-200 px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+                          {(f.options || []).map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input type={f.type === "number" ? "number" : "text"} value={ws.config[f.key] || ""} onChange={(e) => updateStepConfig(ws.id, f.key, e.target.value)} placeholder={f.placeholder} className="w-full rounded-lg border border-zinc-200 px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
+                      )}
+                    </label>
+                  ))}
+                </div>
+              );
+            })}
             <div>
-              <div className="mb-2 text-sm font-medium">Add action</div>
+              <div className="mb-2 text-sm font-medium">Add action (available only)</div>
               <div className="flex flex-wrap gap-2">
                 {availableActions().map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => addAction(a.id)}
-                    className="rounded-full border border-zinc-200 px-3 py-1 text-xs dark:border-zinc-700"
-                  >
+                  <button key={a.id} type="button" onClick={() => addAction(a.id)} className="rounded-full border border-zinc-200 px-3 py-1 text-xs dark:border-zinc-700">
                     + {a.name}
                   </button>
                 ))}
               </div>
               <p className="mt-2 text-[11px] text-zinc-400">
-                Unavailable actions (e.g. Send email) are not listed.
+                Buffer, Gmail, and web search are not listed until those connectors work.
               </p>
             </div>
           </div>
@@ -291,11 +246,7 @@ export default function NewAgentPage() {
           <div className="space-y-4">
             <label className="block space-y-1.5">
               <span className="text-sm font-medium">When to run</span>
-              <select
-                value={frequency}
-                onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)}
-                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-              >
+              <select value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
                 <option value="once">Manual only (Run now)</option>
                 <option value="daily">Daily (stored; background needs cron)</option>
                 <option value="weekly">Weekly (stored; background needs cron)</option>
@@ -304,14 +255,8 @@ export default function NewAgentPage() {
             </label>
             {frequency !== "once" && (
               <>
-                <label className="block space-y-1.5">
-                  <span className="text-sm font-medium">Time</span>
-                  <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
-                </label>
-                <p className="text-xs text-zinc-500">
-                  Timezone: {timezone}. Recurring background runs are not guaranteed
-                  without a server scheduler. Use <strong>Run now</strong> anytime.
-                </p>
+                <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
+                <p className="text-xs text-zinc-500">Timezone: {timezone}. Prefer Run now until server scheduling is reliable.</p>
               </>
             )}
           </div>
@@ -321,55 +266,28 @@ export default function NewAgentPage() {
           <div className="space-y-3 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800">
             <div><span className="text-xs text-zinc-500">Name</span><div>{name}</div></div>
             <div><span className="text-xs text-zinc-500">Steps</span>
-              <ol className="mt-1 list-decimal pl-4">
-                {workflowSteps.map((s) => (
-                  <li key={s.id}>{s.name}</li>
-                ))}
-              </ol>
-              {!workflowSteps.length && <p className="text-zinc-500">None — will save as draft</p>}
+              <ol className="mt-1 list-decimal pl-4">{workflowSteps.map((s) => <li key={s.id}>{s.name}</li>)}</ol>
             </div>
-            <div><span className="text-xs text-zinc-500">Schedule</span><div className="capitalize">{frequency}</div></div>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2">
               <input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} />
-              Activate after save (if steps exist)
+              Activate after save
             </label>
           </div>
         )}
 
         <div className="flex justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => (step === 0 ? router.push("/agents") : setStep(step - 1))}
-            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
-          >
+          <button type="button" onClick={() => (step === 0 ? router.push("/agents") : setStep(step - 1))} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700">
             {step === 0 ? "Cancel" : "Back"}
           </button>
           {step < STEPS.length - 1 ? (
-            <button
-              type="button"
-              disabled={step === 1 && !name.trim()}
-              onClick={() => setStep(step + 1)}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white disabled:opacity-40"
-            >
+            <button type="button" disabled={step === 1 && !name.trim()} onClick={() => setStep(step + 1)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white disabled:opacity-40">
               Continue
             </button>
           ) : (
             <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={saving || !name.trim()}
-                onClick={() => save(true)}
-                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
-              >
-                Save draft
-              </button>
-              <button
-                type="button"
-                disabled={saving || !name.trim()}
-                onClick={() => save(!activate)}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white disabled:opacity-40"
-              >
-                {saving ? "Saving…" : activate ? "Save & activate" : "Save"}
+              <button type="button" disabled={saving || !name.trim()} onClick={() => save(true)} className="rounded-lg border border-zinc-200 px-3 py-2 text-sm">Save draft</button>
+              <button type="button" disabled={saving || !name.trim()} onClick={() => save(!activate)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white disabled:opacity-40">
+                {saving ? "Saving…" : "Save"}
               </button>
             </div>
           )}
@@ -379,11 +297,7 @@ export default function NewAgentPage() {
   );
 }
 
-function Field({
-  label, value, onChange, placeholder, textarea,
-}: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string; textarea?: boolean;
-}) {
+function Field({ label, value, onChange, placeholder, textarea }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; textarea?: boolean }) {
   return (
     <label className="block space-y-1.5">
       <span className="text-sm font-medium">{label}</span>
