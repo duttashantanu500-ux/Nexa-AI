@@ -45,7 +45,7 @@ export function AgentBadge({ status }: { status: AgentStatus }) {
   };
   return (
     <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-      {map[status]}
+      {map[status] || status}
     </span>
   );
 }

@@ -1,5 +1,12 @@
 export type UserType = "founder" | "business_owner" | "agency" | "individual";
 
+export type WorkspaceId =
+  | "marketing"
+  | "sales"
+  | "strategy"
+  | "content_brand"
+  | "personal_growth";
+
 export interface UserProfile {
   id: string;
   email: string;
@@ -14,13 +21,159 @@ export interface BusinessContext {
   name?: string;
   businessName?: string;
   industry?: string;
+  subIndustry?: string;
   website?: string;
   websiteSummary?: string;
   mainGoal?: string;
+  biggestChallenge?: string;
+  whatBuilding?: string;
+  problemSolved?: string;
+  targetCustomer?: string;
+  stage?: string;
+  businessType?: string;
+  productsServices?: string;
+  targetCustomers?: string;
+  location?: string;
+  agencyType?: string;
+  servicesOffered?: string;
+  industriesServed?: string;
+  targetClients?: string;
   description?: string;
+  brandVoice?: string;
+  preferences?: string;
 }
 
-/** Schedule for an agent */
+/* ——— Internal execution types (not user-facing product) ——— */
+
+export type MissionStatus =
+  | "planning"
+  | "ready"
+  | "running"
+  | "waiting_approval"
+  | "completed"
+  | "failed"
+  | "paused"
+  | "cancelled";
+
+export interface MissionStep {
+  id: string;
+  title: string;
+  status: "pending" | "running" | "done" | "failed" | "skipped";
+  tool?: string;
+}
+
+export interface MissionActivity {
+  id: string;
+  text: string;
+  at: string;
+  type?: "info" | "success" | "warning";
+}
+
+export interface MissionSource {
+  title?: string;
+  url: string;
+}
+
+export interface ProspectRow {
+  company: string;
+  website: string;
+  reason: string;
+  evidence: string;
+  source: string;
+  qualification?: "qualified" | "discovered" | "unverified";
+}
+
+export interface MissionDeliverable {
+  type: string;
+  title: string;
+  content: string;
+  rows?: ProspectRow[];
+  discovered?: ProspectRow[];
+  qualified?: ProspectRow[];
+  unverified?: ProspectRow[];
+  sources: MissionSource[];
+  createdAt: string;
+}
+
+export interface Mission {
+  id: string;
+  userId: string;
+  title: string;
+  goal: string;
+  status: MissionStatus;
+  progress: number;
+  plan: MissionStep[];
+  activity: MissionActivity[];
+  result?: string;
+  deliverable?: MissionDeliverable;
+  tools?: string[];
+  researchQuery?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemoryItem {
+  id: string;
+  content: string;
+  category: string;
+  importance: number;
+  createdAt: string;
+  updatedAt: string;
+  source?: string;
+}
+
+export interface Message {
+  id: string;
+  conversationId: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  createdAt: string;
+  requestId?: string;
+  status?: "sending" | "complete" | "error";
+  attachments?: Attachment[];
+}
+
+export interface Attachment {
+  id: string;
+  type: "image" | "file";
+  name: string;
+  url: string;
+  mimeType?: string;
+}
+
+export interface Conversation {
+  id: string;
+  userId: string;
+  workspace: WorkspaceId;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+}
+
+export interface ActivityEvent {
+  id: string;
+  userId: string;
+  text: string;
+  at: string;
+  category?: "mission" | "agent" | "connection" | "approval" | "system";
+  refId?: string;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  userId: string;
+  title: string;
+  summary: string;
+  status: "pending" | "approved" | "rejected";
+  missionId?: string;
+  actionId?: string;
+  createdAt: string;
+}
+
+/* ——— Agent product model ——— */
+
 export type ScheduleFrequency =
   | "once"
   | "daily"
@@ -30,10 +183,10 @@ export type ScheduleFrequency =
 
 export interface AgentSchedule {
   frequency: ScheduleFrequency;
-  time: string; // HH:mm
+  time: string;
   timezone: string;
-  dayOfWeek?: number; // 0-6 for weekly
-  dayOfMonth?: number; // 1-31 for monthly
+  dayOfWeek?: number;
+  dayOfMonth?: number;
   enabled: boolean;
   nextRunAt?: string | null;
 }
@@ -45,7 +198,7 @@ export interface AgentPermissions {
   allowDestructive: boolean;
 }
 
-export type AgentStatus = "active" | "paused" | "error";
+export type AgentStatus = "idle" | "active" | "paused" | "error";
 
 export interface Agent {
   id: string;
@@ -96,7 +249,10 @@ export type ConnectionStatus =
   | "not_connected"
   | "available"
   | "setup_required"
-  | "not_supported";
+  | "not_supported"
+  | "connecting"
+  | "failed"
+  | "disconnected";
 
 export interface Connection {
   id: string;
@@ -118,7 +274,6 @@ export interface AppState {
   connections: Connection[];
 }
 
-/** Built-in tools that actually work without OAuth */
 export const BUILTIN_TOOLS = [
   {
     id: "web_search",

@@ -3,163 +3,79 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { loadAppState } from "@/lib/conversationStore";
+import { loadOperatorState } from "@/lib/operatorStore";
 
 export default function LandingPage() {
   const router = useRouter();
 
   useEffect(() => {
-    const state = loadAppState();
+    const state = loadOperatorState();
     if (state.user?.onboardingCompleted) {
       router.replace("/home");
     }
   }, [router]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-5">
-        <div className="text-sm font-semibold tracking-tight">Nexa</div>
+        <div className="text-sm font-semibold tracking-tight text-indigo-600 dark:text-indigo-400">
+          Nexa
+        </div>
         <div className="flex items-center gap-3 text-sm">
-          <Link href="/login" className="text-muted hover:text-foreground">
+          <Link href="/login" className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
             Sign in
           </Link>
           <Link
             href="/signup"
-            className="rounded-lg bg-zinc-900 px-3 py-1.5 text-white dark:bg-zinc-100 dark:text-zinc-900"
+            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-white hover:bg-indigo-500"
           >
-            Start Building
+            Get started
           </Link>
         </div>
       </header>
 
       <main className="mx-auto max-w-5xl px-4 pb-20">
-        {/* Hero */}
-        <section className="pt-16 pb-20 md:pt-24 md:pb-28">
-          <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted mb-4">
-            AI Business Operator
+        <section className="pt-16 pb-20 md:pt-24">
+          <p className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
+            AI Agent Operating System
           </p>
-          <h1 className="max-w-2xl text-4xl font-semibold tracking-tight md:text-5xl leading-[1.1]">
-            Your AI Business Operator
+          <h1 className="max-w-2xl text-4xl font-semibold tracking-tight leading-[1.1] md:text-5xl">
+            Create agents that run your workflows
           </h1>
-          <p className="mt-5 max-w-xl text-base text-muted leading-relaxed">
-            Give Nexa a business goal. It plans the work, executes what it can, and
-            delivers the result.
+          <p className="mt-5 max-w-xl text-base leading-relaxed text-zinc-600 dark:text-zinc-400">
+            Give each agent instructions, tools, permissions, and a schedule.
+            Nexa runs the work and shows results in the agent&apos;s history.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
               href="/signup"
-              className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
+              className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500"
             >
-              Start Building
+              Create your first agent
             </Link>
-            <a
-              href="#how"
-              className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium hover:bg-sidebar"
+            <Link
+              href="/login"
+              className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900"
             >
-              See How It Works
-            </a>
+              Sign in
+            </Link>
           </div>
 
-          {/* Product preview */}
-          <div className="mt-14 max-w-lg rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <div className="text-xs text-muted mb-1">Mission</div>
-            <div className="text-sm font-medium mb-4">Find 50 potential customers</div>
-            <ul className="space-y-2 text-sm">
-              <li className="flex items-center gap-2">
-                <span className="text-emerald-600">✓</span> Researching market
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="text-emerald-600">✓</span> Finding companies
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="text-emerald-600">✓</span> Qualifying prospects
-              </li>
-              <li className="flex items-center gap-2 text-muted">
-                <span>⏳</span> Preparing personalized outreach
-              </li>
-            </ul>
-          </div>
-        </section>
-
-        {/* How it works */}
-        <section id="how" className="border-t border-border py-16">
-          <h2 className="text-xl font-semibold tracking-tight mb-8">How Nexa works</h2>
-          <div className="grid gap-6 md:grid-cols-2">
+          <div className="mt-14 grid max-w-2xl gap-3 sm:grid-cols-3">
             {[
-              {
-                n: "1",
-                t: "Give Nexa a goal",
-                d: "Tell Nexa what you want accomplished.",
-              },
-              {
-                n: "2",
-                t: "Nexa creates a plan",
-                d: "It breaks the goal into actionable steps.",
-              },
-              {
-                n: "3",
-                t: "Nexa works",
-                d: "Nexa uses available tools and executes the task.",
-              },
-              {
-                n: "4",
-                t: "You get the result",
-                d: "Receive a completed deliverable, report, list, or action plan.",
-              },
+              { t: "Create", d: "Name, instructions, tools" },
+              { t: "Schedule", d: "Once, daily, weekly, monthly" },
+              { t: "Run", d: "Execute and review results" },
             ].map((s) => (
-              <div key={s.n} className="rounded-xl border border-border bg-card p-5">
-                <div className="text-xs text-muted mb-2">Step {s.n}</div>
-                <div className="font-medium">{s.t}</div>
-                <p className="mt-1 text-sm text-muted">{s.d}</p>
+              <div
+                key={s.t}
+                className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+              >
+                <div className="text-sm font-medium">{s.t}</div>
+                <p className="mt-1 text-xs text-zinc-500">{s.d}</p>
               </div>
             ))}
           </div>
-        </section>
-
-        {/* Example missions */}
-        <section className="border-t border-border py-16">
-          <h2 className="text-xl font-semibold tracking-tight mb-2">Example missions</h2>
-          <p className="text-sm text-muted mb-8">
-            Illustrations of the product concept. Full autonomous execution ships in later phases.
-          </p>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {[
-              {
-                t: "Lead Research",
-                d: "Find qualified potential customers.",
-              },
-              {
-                t: "Competitor Monitor",
-                d: "Track meaningful changes from competitors.",
-              },
-              {
-                t: "Content Research",
-                d: "Research trends and prepare content opportunities.",
-              },
-              {
-                t: "Market Research",
-                d: "Research a market and summarize opportunities.",
-              },
-            ].map((m) => (
-              <div key={m.t} className="rounded-xl border border-border bg-card p-5">
-                <div className="font-medium">{m.t}</div>
-                <p className="mt-1 text-sm text-muted">{m.d}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="border-t border-border py-16 text-center">
-          <h2 className="text-xl font-semibold">Ready to put Nexa to work?</h2>
-          <p className="mt-2 text-sm text-muted">
-            You give the goal. Nexa handles the work.
-          </p>
-          <Link
-            href="/signup"
-            className="mt-6 inline-flex rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
-          >
-            Start Building
-          </Link>
         </section>
       </main>
     </div>
