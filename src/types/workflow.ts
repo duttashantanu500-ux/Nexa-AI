@@ -1,6 +1,5 @@
 /**
- * Phase 1 aligned workflow models (NEXA_DATA_MODELS / AGENT_SYSTEM).
- * Additive — existing agents with simple steps still load.
+ * Workflow models aligned to NEXA_DATA_MODELS / AGENT_SYSTEM.
  */
 
 export type StepType = "action" | "approval" | "condition" | "transform";
@@ -12,23 +11,17 @@ export interface StepRetryPolicy {
   backoffSeconds: number;
 }
 
-/** Resolved at run time: literal or "{{stepId.output.field}}" */
 export type InputMappingValue = string;
 
 export interface WorkflowStep {
   id: string;
   order: number;
-  /** Defaults to "action" for legacy steps */
   type?: StepType;
   actionId: string;
   name: string;
-  /** Connector id when known */
   connectorId?: string;
-  /** User connection instance id when multi-connection exists */
   connectionId?: string;
-  /** Static config (legacy + form values) */
   config: Record<string, string>;
-  /** Spec-style mapping; merges with config at runtime */
   inputMapping?: Record<string, InputMappingValue>;
   outputKey?: string;
   onError?: StepOnError;
@@ -72,16 +65,23 @@ export interface WorkflowStepResult {
   status: RunStepStatus | "succeeded" | "failed" | "skipped";
   startedAt: string;
   endedAt?: string;
-  /** Human-readable summary */
   output?: string;
-  /** Actual payload sent (redact secrets before persist) */
   inputSent?: Record<string, unknown>;
-  /** Provider/raw response (redacted) */
   outputReceived?: unknown;
   error?: string;
   normalizedError?: NormalizedProviderError;
   retryCount?: number;
   simulated?: boolean;
+}
+
+export interface WorkflowContextSnapshot {
+  list?: string[];
+  notes?: string[];
+  report?: string;
+  imageUrl?: string;
+  vars?: Record<string, string>;
+  sources?: { title?: string; url: string }[];
+  stepOutputs?: Record<string, unknown>;
 }
 
 export type WorkflowAgentStatus =
@@ -120,7 +120,6 @@ export interface AgentScheduleRecord {
   consecutiveFailures?: number;
 }
 
-/** User connection instance (metadata only on client; tokens server-side only) */
 export interface ConnectionRecord {
   id: string;
   connectorId: string;
@@ -131,6 +130,5 @@ export interface ConnectionRecord {
   providerAccountRef?: string;
   connectedAt?: string;
   lastVerifiedAt?: string;
-  /** Never store access tokens in localStorage */
   hasServerToken?: boolean;
 }

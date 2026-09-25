@@ -4,7 +4,8 @@
  */
 
 import type { Agent } from "@/types";
-import { computeNextRun, loadOperatorState, updateAgent } from "./operatorStore";
+import { computeNextRun } from "@/types";
+import { loadOperatorState, updateAgent } from "./operatorStore";
 
 export interface DueAgent {
   agent: Agent;
@@ -27,7 +28,6 @@ export function listDueAgents(now = Date.now()): DueAgent[] {
   return due;
 }
 
-/** Advance nextRunAt after a client-side scheduled run */
 export function advanceAgentSchedule(agentId: string) {
   const s = loadOperatorState();
   const agent = s.agents.find((a) => a.id === agentId);

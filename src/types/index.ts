@@ -199,6 +199,7 @@ import type {
   WorkflowStepResult,
   WorkflowAgentStatus,
   ConnectionRecord,
+  WorkflowContextSnapshot,
 } from "./workflow";
 
 export type AgentStatus =
@@ -219,7 +220,6 @@ export interface Agent {
   constraints?: string;
   templateType?: string;
   status: AgentStatus;
-  /** Incremented when steps structure changes */
   version: number;
   tools: string[];
   steps: WorkflowStep[];
@@ -247,7 +247,6 @@ export interface AgentRun {
   id: string;
   agentId: string;
   userId: string;
-  /** Version of agent steps that executed */
   agentVersion?: number;
   trigger: "manual" | "schedule" | "test";
   triggerSource?: string;
@@ -262,6 +261,10 @@ export interface AgentRun {
   sources?: { title?: string; url: string }[];
   stepResults?: WorkflowStepResult[];
   mode?: "real" | "simulated";
+  /** Phase 4 approval */
+  pendingStepId?: string;
+  pendingStepIndex?: number;
+  contextSnapshot?: WorkflowContextSnapshot;
 }
 
 export type ConnectionStatus =
@@ -295,7 +298,6 @@ export interface AppState {
   agents: Agent[];
   agentRuns: AgentRun[];
   connections: Connection[];
-  /** Phase 1: connection instances (no tokens client-side) */
   connectionRecords?: ConnectionRecord[];
   memories?: MemoryItem[];
   conversations?: Conversation[];
