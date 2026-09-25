@@ -1,6 +1,7 @@
 /**
- * Deterministic workflow runner — connector actions only.
- * Lifecycle: stop / continue / retry per step; never fake provider success.
+ * Deterministic workflow runner.
+ * Phase 4: pauses on requiresApproval write steps (waiting_for_approval).
+ * Never fakes provider success.
  */
 
 import { getAction } from "./actionRegistry";
@@ -17,18 +18,25 @@ export interface WorkflowContext {
   imageUrl?: string;
   vars: Record<string, string>;
   sources: { title?: string; url: string }[];
-  /** Last outputs keyed by step id for future mapping */
   stepOutputs: Record<string, unknown>;
 }
 
 export interface WorkflowRunResult {
   ok: boolean;
-  status: "completed" | "failed" | "partial" | "succeeded_with_errors";
+  status:
+    | "completed"
+    | "failed"
+    | "partial"
+    | "succeeded_with_errors"
+    | "waiting_for_approval";
   mode: "real" | "simulated";
   steps: WorkflowStepResult[];
   output: string;
   error?: string;
   context: WorkflowContext;
+  /** Step index where approval is needed (for resume) */
+  pendingStepIndex?: number;
+  pendingStepId?: string;
 }
 
 export interface RuntimeConnectionConfig {
@@ -46,16 +54,38 @@ export async function runWorkflow(params: {
   steps: WorkflowStep[];
   simulate?: boolean;
   connections?: RuntimeConnectionConfig;
+  /** Resume after approval: start at this index */
+  startIndex?: number;
+  /** Prior step results when resuming */
+  priorResults?: WorkflowStepResult[];
+  /** Prior context snapshot (optional) */
+  priorContext?: Partial<WorkflowContext>;
+  /** Skip approval gate once (user approved) */
+  approvalGrantedForStepId?: string;
 }): Promise<WorkflowRunResult> {
-  const ctx = emptyContext();
-  const results: WorkflowStepResult[] = [];
+  const ctx: WorkflowContext = {
+    ...emptyContext(),
+    ...(params.priorContext || {}),
+    list: params.priorContext?.list || [],
+    notes: params.priorContext?.notes || [],
+    vars: params.priorContext?.vars || {},
+    sources: params.priorContext?.sources || [],
+    stepOutputs: params.priorContext?.stepOutputs || {},
+  };
+  const results: WorkflowStepResult[] = [...(params.priorResults || [])];
   const simulate = Boolean(params.simulate);
   let hardFail = false;
   let softFail = false;
-  const ordered = [...params.steps].sort((a, b) => a.order - b.order);
+  let waitingApproval = false;
+  let pendingStepIndex: number | undefined;
+  let pendingStepId: string | undefined;
 
-  for (const step of ordered) {
-    if (hardFail) break;
+  const ordered = [...params.steps].sort((a, b) => a.order - b.order);
+  const start = params.startIndex ?? 0;
+
+  for (let i = start; i < ordered.length; i++) {
+    if (hardFail || waitingApproval) break;
+    const step = ordered[i];
 
     const def = getAction(step.actionId);
     const started = new Date().toISOString();
@@ -67,60 +97,65 @@ export async function runWorkflow(params: {
         : 1;
 
     if (!def) {
-      results.push({
-        stepId: step.id,
-        actionId: step.actionId,
-        name: step.name || step.actionId,
-        status: "failed",
-        startedAt: started,
-        endedAt: new Date().toISOString(),
-        inputSent,
-        error: "Unknown action.",
-        retryCount: 0,
-        simulated: simulate,
-      });
+      results.push(failResult(step, started, inputSent, "Unknown action.", simulate));
       if (onError === "continue") softFail = true;
       else hardFail = true;
       continue;
     }
 
     if (!def.implemented || !def.available) {
-      results.push({
-        stepId: step.id,
-        actionId: step.actionId,
-        name: def.name,
-        status: "failed",
-        startedAt: started,
-        endedAt: new Date().toISOString(),
-        inputSent,
-        error:
-          def.availabilityNote ||
-          "Action is not implemented. Connect the service first.",
-        normalizedError: { category: "not_configured" },
-        retryCount: 0,
-        simulated: simulate,
-      });
+      results.push(
+        failResult(
+          step,
+          started,
+          inputSent,
+          def.availabilityNote || "Action is not implemented.",
+          simulate,
+          { category: "not_configured" }
+        )
+      );
       if (onError === "continue") softFail = true;
       else hardFail = true;
       continue;
     }
 
+    // Phase 4: approval gate for write / requiresApproval steps (live runs only)
+    const needsApproval =
+      !simulate &&
+      (step.requiresApproval || def.requiresApproval) &&
+      !def.readOnly &&
+      params.approvalGrantedForStepId !== step.id;
+
+    if (needsApproval) {
+      results.push({
+        stepId: step.id,
+        actionId: step.actionId,
+        name: def.name,
+        status: "awaiting_approval",
+        startedAt: started,
+        inputSent,
+        output: "Waiting for your approval before this write action runs.",
+        simulated: false,
+      });
+      waitingApproval = true;
+      pendingStepIndex = i;
+      pendingStepId = step.id;
+      break;
+    }
+
     let missing = false;
     for (const f of def.fields) {
       if (f.required && !String(step.config?.[f.key] ?? "").trim()) {
-        results.push({
-          stepId: step.id,
-          actionId: step.actionId,
-          name: def.name,
-          status: "failed",
-          startedAt: started,
-          endedAt: new Date().toISOString(),
-          inputSent,
-          error: `Missing required field: ${f.label}`,
-          normalizedError: { category: "validation" },
-          retryCount: 0,
-          simulated: simulate,
-        });
+        results.push(
+          failResult(
+            step,
+            started,
+            inputSent,
+            `Missing required field: ${f.label}`,
+            simulate,
+            { category: "validation" }
+          )
+        );
         missing = true;
         break;
       }
@@ -169,8 +204,7 @@ export async function runWorkflow(params: {
           lastData = detail.data;
           lastNorm = detail.error;
           if (attempts < maxAttempts) {
-            const backoff = (step.retryPolicy?.backoffSeconds ?? 1) * attempts;
-            await sleep(Math.min(backoff, 5) * 1000);
+            await sleep(Math.min((step.retryPolicy?.backoffSeconds ?? 1) * attempts, 5) * 1000);
           }
         }
       } catch (err: unknown) {
@@ -208,11 +242,12 @@ export async function runWorkflow(params: {
 
   const hadSuccess = results.some((r) => r.status === "succeeded");
   let status: WorkflowRunResult["status"] = "completed";
-  if (hardFail && !hadSuccess) status = "failed";
+  if (waitingApproval) status = "waiting_for_approval";
+  else if (hardFail && !hadSuccess) status = "failed";
   else if (hardFail || softFail) status = "succeeded_with_errors";
 
   return {
-    ok: !hardFail && !softFail,
+    ok: !hardFail && !softFail && !waitingApproval,
     status,
     mode: simulate || results.some((r) => r.simulated) ? "simulated" : "real",
     steps: results,
@@ -220,8 +255,35 @@ export async function runWorkflow(params: {
     error:
       hardFail || softFail
         ? results.find((r) => r.status === "failed")?.error
-        : undefined,
+        : waitingApproval
+          ? "Waiting for approval"
+          : undefined,
     context: ctx,
+    pendingStepIndex,
+    pendingStepId,
+  };
+}
+
+function failResult(
+  step: WorkflowStep,
+  started: string,
+  inputSent: Record<string, string>,
+  error: string,
+  simulate: boolean,
+  normalizedError?: WorkflowStepResult["normalizedError"]
+): WorkflowStepResult {
+  return {
+    stepId: step.id,
+    actionId: step.actionId,
+    name: step.name || step.actionId,
+    status: "failed",
+    startedAt: started,
+    endedAt: new Date().toISOString(),
+    inputSent,
+    error,
+    normalizedError,
+    retryCount: 0,
+    simulated: simulate,
   };
 }
 
@@ -247,10 +309,7 @@ async function executeAction(
     case "local_data.list_from_text": {
       const text = config.text || "";
       const sep = config.separator === "comma" ? "," : "\n";
-      ctx.list = text
-        .split(sep)
-        .map((s) => s.trim())
-        .filter(Boolean);
+      ctx.list = text.split(sep).map((s) => s.trim()).filter(Boolean);
       return {
         ok: true,
         message: `List created with ${ctx.list.length} items`,
@@ -283,11 +342,7 @@ async function executeAction(
     case "local_data.template": {
       const tpl = config.template || "{{item}}";
       ctx.list = ctx.list.map((item) => tpl.replace(/\{\{\s*item\s*\}\}/gi, item));
-      return {
-        ok: true,
-        message: `Formatted ${ctx.list.length} items`,
-        data: { list: ctx.list },
-      };
+      return { ok: true, message: `Formatted ${ctx.list.length} items`, data: { list: ctx.list } };
     }
     case "local_data.note": {
       ctx.notes.push(config.note || "");
@@ -311,13 +366,8 @@ async function executeAction(
     case "local_comfyui.test_connection": {
       if (simulate) return { ok: true, message: "[Simulated] Local engine reachable" };
       const url = connections.comfyBaseUrl || "";
-      if (!url) {
-        return {
-          ok: false,
-          message: "Set your ComfyUI endpoint in Connections first.",
-          error: { category: "validation" },
-        };
-      }
+      if (!url)
+        return { ok: false, message: "Set ComfyUI URL in Connections.", error: { category: "validation" } };
       const { testComfyConnection } = await import("./connectors/localComfy");
       const r = await testComfyConnection(url);
       return r.ok
@@ -326,17 +376,16 @@ async function executeAction(
     }
     case "local_comfyui.generate_image": {
       if (simulate) {
-        ctx.imageUrl = "[Simulated image — not a real file]";
-        return { ok: true, message: "[Simulated] Image would be generated locally" };
+        ctx.imageUrl = "[Simulated image]";
+        return { ok: true, message: "[Simulated] Image would be generated" };
       }
       const url = connections.comfyBaseUrl || "";
-      if (!url) {
+      if (!url)
         return {
           ok: false,
           message: "Local image engine is not configured.",
           error: { category: "validation" },
         };
-      }
       const result = await generateWithComfy({
         baseUrl: url,
         prompt: config.prompt || "",
@@ -354,11 +403,7 @@ async function executeAction(
       }
       ctx.imageUrl = result.imageUrl;
       ctx.sources.push({ title: "Generated image", url: result.imageUrl });
-      return {
-        ok: true,
-        message: `Image ready: ${result.imageUrl}`,
-        data: { url: result.imageUrl },
-      };
+      return { ok: true, message: `Image ready: ${result.imageUrl}`, data: { url: result.imageUrl } };
     }
     case "slack.post_message": {
       if (simulate) return { ok: true, message: "[Simulated] Would post Slack message" };
@@ -370,7 +415,7 @@ async function executeAction(
       return { ok: r.ok, message: r.message, data: r.data, error: r.error };
     }
     case "slack.list_channels": {
-      if (simulate) return { ok: true, message: "[Simulated] Would list Slack channels" };
+      if (simulate) return { ok: true, message: "[Simulated] Would list channels" };
       const r = await slackListChannels({ accessToken: connections.slackToken });
       return { ok: r.ok, message: r.message, data: r.data, error: r.error };
     }
@@ -385,7 +430,7 @@ async function executeAction(
       return { ok: r.ok, message: r.message, data: r.data, error: r.error };
     }
     case "github.create_issue": {
-      if (simulate) return { ok: true, message: "[Simulated] Would create GitHub issue" };
+      if (simulate) return { ok: true, message: "[Simulated] Would create issue" };
       const r = await githubCreateIssue({
         accessToken: connections.githubToken,
         owner: config.owner || "",
@@ -396,7 +441,7 @@ async function executeAction(
       return { ok: r.ok, message: r.message, data: r.data, error: r.error };
     }
     case "github.list_issues": {
-      if (simulate) return { ok: true, message: "[Simulated] Would list GitHub issues" };
+      if (simulate) return { ok: true, message: "[Simulated] Would list issues" };
       const r = await githubListIssues({
         accessToken: connections.githubToken,
         owner: config.owner || "",
@@ -404,13 +449,6 @@ async function executeAction(
       });
       return { ok: r.ok, message: r.message, data: r.data, error: r.error };
     }
-    case "web.search":
-    case "web.read_page":
-      return {
-        ok: false,
-        message: "Web search is not available as a workflow action.",
-        error: { category: "validation" },
-      };
     default:
       return {
         ok: false,
