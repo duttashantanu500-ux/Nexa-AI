@@ -21,26 +21,11 @@ export interface BusinessContext {
   name?: string;
   businessName?: string;
   industry?: string;
-  subIndustry?: string;
   website?: string;
   websiteSummary?: string;
   mainGoal?: string;
-  biggestChallenge?: string;
-  whatBuilding?: string;
-  problemSolved?: string;
-  targetCustomer?: string;
-  stage?: string;
-  businessType?: string;
-  productsServices?: string;
-  targetCustomers?: string;
-  location?: string;
-  agencyType?: string;
-  servicesOffered?: string;
-  industriesServed?: string;
-  targetClients?: string;
   description?: string;
-  brandVoice?: string;
-  preferences?: string;
+  [key: string]: unknown;
 }
 
 export type MissionStatus =
@@ -194,7 +179,20 @@ export interface AgentPermissions {
   allowDestructive: boolean;
 }
 
-export type AgentStatus = "idle" | "active" | "paused" | "error";
+export type {
+  WorkflowStep,
+  WorkflowStepResult,
+  WorkflowAgentStatus,
+} from "./workflow";
+
+import type { WorkflowStep, WorkflowStepResult, WorkflowAgentStatus } from "./workflow";
+
+export type AgentStatus =
+  | "idle"
+  | "active"
+  | "paused"
+  | "error"
+  | WorkflowAgentStatus;
 
 export interface Agent {
   id: string;
@@ -208,6 +206,7 @@ export interface Agent {
   templateType?: string;
   status: AgentStatus;
   tools: string[];
+  steps: WorkflowStep[];
   permissions: AgentPermissions;
   schedule: AgentSchedule;
   lastRunAt?: string | null;
@@ -229,7 +228,7 @@ export interface AgentRun {
   id: string;
   agentId: string;
   userId: string;
-  trigger: "manual" | "schedule";
+  trigger: "manual" | "schedule" | "test";
   status: AgentRunStatus;
   startedAt: string;
   endedAt?: string | null;
@@ -238,6 +237,8 @@ export interface AgentRun {
   output?: string;
   error?: string;
   sources?: { title?: string; url: string }[];
+  stepResults?: WorkflowStepResult[];
+  mode?: "real" | "simulated";
 }
 
 export type ConnectionStatus =
@@ -261,7 +262,6 @@ export interface Connection {
   mcpTools?: string[];
 }
 
-/** Shared app state — agent fields are primary; chat/mission fields are legacy-compatible */
 export interface AppState {
   user: UserProfile | null;
   businessContext: BusinessContext | null;
@@ -290,7 +290,7 @@ export const BUILTIN_TOOLS = [
   {
     id: "web_page_reader",
     name: "Page Reader",
-    description: "Read and extract content from public pages",
+    description: "Read public pages",
     connector: "Built-in",
     available: true,
     permission: "read" as const,
@@ -311,7 +311,7 @@ export const DEFAULT_CONNECTIONS: Connection[] = [
     name: "Gmail",
     provider: "google",
     status: "not_supported",
-    description: "Email — connect later with Google OAuth",
+    description: "Email — not available yet",
     tools: [],
   },
   {
@@ -323,35 +323,11 @@ export const DEFAULT_CONNECTIONS: Connection[] = [
     tools: [],
   },
   {
-    id: "gcal",
-    name: "Google Calendar",
-    provider: "google",
-    status: "not_supported",
-    description: "Calendar — not available yet",
-    tools: [],
-  },
-  {
     id: "slack",
     name: "Slack",
     provider: "slack",
     status: "not_supported",
     description: "Messaging — not available yet",
-    tools: [],
-  },
-  {
-    id: "notion",
-    name: "Notion",
-    provider: "notion",
-    status: "not_supported",
-    description: "Notes — not available yet",
-    tools: [],
-  },
-  {
-    id: "github",
-    name: "GitHub",
-    provider: "github",
-    status: "not_supported",
-    description: "Code — not available yet",
     tools: [],
   },
   {
@@ -372,56 +348,7 @@ export const AGENT_TEMPLATES: {
   instructions: string;
   tools: string[];
   executable: boolean;
-}[] = [
-  {
-    id: "research",
-    name: "Research Agent",
-    description: "Researches topics using public web search",
-    purpose: "Find and summarize public information based on your instructions",
-    instructions:
-      "Research the topic specified by the user. Use only public web sources. Follow the user's category and location exactly. Do not assume SaaS or software unless asked.",
-    tools: ["web_search", "web_page_reader"],
-    executable: true,
-  },
-  {
-    id: "competitor",
-    name: "Competitor Monitor",
-    description: "Tracks public competitor pages",
-    purpose: "Monitor public competitor information",
-    instructions:
-      "Research competitors named by the user. Report only what is found on public pages.",
-    tools: ["web_search", "web_page_reader"],
-    executable: true,
-  },
-  {
-    id: "content",
-    name: "Content Agent",
-    description: "Finds content ideas from public sources",
-    purpose: "Discover content opportunities",
-    instructions:
-      "Find public content ideas and sources relevant to the user's topic.",
-    tools: ["web_search", "web_page_reader"],
-    executable: true,
-  },
-  {
-    id: "custom",
-    name: "Custom Agent",
-    description: "Define your own instructions and tools",
-    purpose: "",
-    instructions: "",
-    tools: ["web_search", "web_page_reader"],
-    executable: true,
-  },
-  {
-    id: "email",
-    name: "Email Assistant",
-    description: "Requires Gmail connection",
-    purpose: "Help with email workflows",
-    instructions: "",
-    tools: [],
-    executable: false,
-  },
-];
+}[] = [];
 
 export function defaultSchedule(): AgentSchedule {
   const tz =
@@ -432,7 +359,7 @@ export function defaultSchedule(): AgentSchedule {
     frequency: "once",
     time: "09:00",
     timezone: tz,
-    enabled: true,
+    enabled: false,
     nextRunAt: null,
   };
 }
@@ -454,9 +381,7 @@ export function computeNextRun(schedule: AgentSchedule): string | null {
   }
   if (schedule.frequency === "weekly") {
     const target = schedule.dayOfWeek ?? 1;
-    while (next.getDay() !== target || next <= now) {
-      next.setDate(next.getDate() + 1);
-    }
+    while (next.getDay() !== target || next <= now) next.setDate(next.getDate() + 1);
     return next.toISOString();
   }
   if (schedule.frequency === "monthly") {
@@ -470,4 +395,17 @@ export function computeNextRun(schedule: AgentSchedule): string | null {
     return next.toISOString();
   }
   return null;
+}
+
+export function deriveAgentStatus(agent: {
+  status?: string;
+  steps?: WorkflowStep[];
+}): AgentStatus {
+  if (agent.status === "paused") return "paused";
+  if (agent.status === "failed" || agent.status === "error") return "failed";
+  if (!agent.steps?.length) return "draft";
+  const hasEmptyRequired = false;
+  if (hasEmptyRequired) return "needs_setup";
+  if (agent.status === "active" || agent.status === "ready") return agent.status as AgentStatus;
+  return "ready";
 }

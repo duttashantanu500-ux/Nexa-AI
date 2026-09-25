@@ -7,12 +7,14 @@ import {
   Connection,
   DEFAULT_CONNECTIONS,
   UserProfile,
+  WorkflowStep,
   computeNextRun,
   defaultPermissions,
   defaultSchedule,
+  deriveAgentStatus,
 } from "@/types";
 
-const KEY = "nexa_operator_v3";
+const KEY = "nexa_operator_v4";
 
 function uid(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -34,16 +36,16 @@ export function loadOperatorState(): AppState {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) {
-      // migrate from older keys
-      const old = localStorage.getItem("nexa_operator_v1");
+      const old =
+        localStorage.getItem("nexa_operator_v3") ||
+        localStorage.getItem("nexa_operator_v1");
       if (old) {
         const parsed = JSON.parse(old);
         return migrateLegacy(parsed);
       }
       return emptyState();
     }
-    const parsed = JSON.parse(raw) as AppState;
-    return normalize(parsed);
+    return normalize(JSON.parse(raw) as AppState);
   } catch {
     return emptyState();
   }
@@ -79,7 +81,17 @@ function normalizeAgent(a: any): Agent {
   if (schedule.enabled && schedule.frequency !== "once" && !schedule.nextRunAt) {
     schedule.nextRunAt = computeNextRun(schedule);
   }
-  return {
+  const steps: WorkflowStep[] = Array.isArray(a.steps)
+    ? a.steps.map((s: any, i: number) => ({
+        id: s.id || uid("step"),
+        order: s.order ?? i,
+        actionId: s.actionId,
+        name: s.name || s.actionId,
+        config: s.config || {},
+      }))
+    : [];
+
+  const agent: Agent = {
     id: a.id,
     userId: a.userId,
     name: a.name || "Agent",
@@ -89,8 +101,9 @@ function normalizeAgent(a: any): Agent {
     expectedOutput: a.expectedOutput || "",
     constraints: a.constraints || "",
     templateType: a.templateType,
-    status: a.status === "paused" || a.status === "error" ? a.status : "active",
-    tools: Array.isArray(a.tools) ? a.tools : ["web_search", "web_page_reader"],
+    status: a.status || "draft",
+    tools: Array.isArray(a.tools) ? a.tools : [],
+    steps,
     permissions: a.permissions || defaultPermissions(),
     schedule,
     lastRunAt: a.lastRunAt || null,
@@ -98,6 +111,8 @@ function normalizeAgent(a: any): Agent {
     createdAt: a.createdAt || new Date().toISOString(),
     updatedAt: a.updatedAt || a.createdAt || new Date().toISOString(),
   };
+  agent.status = deriveAgentStatus(agent);
+  return agent;
 }
 
 function mergeConnections(existing?: Connection[]): Connection[] {
@@ -106,14 +121,13 @@ function mergeConnections(existing?: Connection[]): Connection[] {
   return defaults.map((d) => {
     const found = existing.find((c) => c.id === d.id);
     if (!found) return d;
-    // Never trust client "connected" for OAuth services without verification
-    if (d.provider !== "builtin" && d.status === "not_supported") {
+    if (d.provider === "builtin") return { ...d, status: "connected" };
+    if (d.status === "not_supported") {
       return { ...d, mcpUrl: found.mcpUrl, mcpTools: found.mcpTools };
     }
     if (d.id === "mcp" && found.status === "connected" && found.mcpUrl) {
       return { ...found, name: d.name, description: d.description };
     }
-    if (d.provider === "builtin") return { ...d, status: "connected" };
     return { ...d, ...found, status: found.status || d.status };
   });
 }
@@ -145,22 +159,16 @@ export function setTheme(theme: AppState["theme"]) {
 }
 
 export function createAgent(
-  input: Omit<
-    Agent,
-    | "id"
-    | "createdAt"
-    | "updatedAt"
-    | "status"
-    | "lastRunAt"
-    | "lastRunStatus"
-  > & { status?: Agent["status"] }
+  input: Partial<Agent> & { userId: string; name: string }
 ): Agent {
   const s = loadOperatorState();
-  const schedule = {
-    ...defaultSchedule(),
-    ...input.schedule,
-  };
+  const schedule = { ...defaultSchedule(), ...(input.schedule || {}) };
   schedule.nextRunAt = computeNextRun(schedule);
+  const steps = (input.steps || []).map((st, i) => ({
+    ...st,
+    id: st.id || uid("step"),
+    order: st.order ?? i,
+  }));
 
   const agent: Agent = {
     id: uid("agent"),
@@ -172,8 +180,9 @@ export function createAgent(
     expectedOutput: input.expectedOutput || "",
     constraints: input.constraints || "",
     templateType: input.templateType,
-    status: input.status || "active",
-    tools: input.tools?.length ? input.tools : ["web_search", "web_page_reader"],
+    status: input.status || (steps.length ? "ready" : "draft"),
+    tools: input.tools || [],
+    steps,
     permissions: input.permissions || defaultPermissions(),
     schedule,
     lastRunAt: null,
@@ -181,6 +190,7 @@ export function createAgent(
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+  agent.status = deriveAgentStatus(agent);
   s.agents = [agent, ...s.agents];
   saveOperatorState(s);
   return agent;
@@ -195,9 +205,21 @@ export function updateAgent(id: string, patch: Partial<Agent>): Agent | null {
     next.schedule = { ...s.agents[idx].schedule, ...patch.schedule };
     next.schedule.nextRunAt = computeNextRun(next.schedule);
   }
+  if (patch.steps) next.steps = patch.steps;
+  next.status = deriveAgentStatus(next);
   s.agents[idx] = next;
   saveOperatorState(s);
   return next;
+}
+
+export function duplicateAgent(id: string): Agent | null {
+  const src = getAgent(id);
+  if (!src) return null;
+  return createAgent({
+    ...src,
+    name: `${src.name} (copy)`,
+    status: "draft",
+  });
 }
 
 export function deleteAgent(id: string) {
@@ -262,5 +284,10 @@ export function updateConnection(id: string, patch: Partial<Connection>) {
 export function clearSession() {
   if (typeof window === "undefined") return;
   localStorage.removeItem(KEY);
+  localStorage.removeItem("nexa_operator_v3");
   localStorage.removeItem("nexa_operator_v1");
+}
+
+export function stepId() {
+  return uid("step");
 }
