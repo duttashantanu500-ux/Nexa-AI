@@ -49,6 +49,13 @@ export default function AgentsPage() {
           </div>
         )}
 
+        {agents.some((a) => (a.schedule?.consecutiveFailures || 0) >= 3) && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+            One or more agents have failed their schedule 3+ times. Check Connections and recent run
+            history.
+          </div>
+        )}
+
         {agents.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-200 p-10 text-center dark:border-zinc-800">
             <p className="text-sm text-zinc-500">No agents yet.</p>
@@ -70,6 +77,9 @@ export default function AgentsPage() {
                       {a.steps?.length || 0} steps · {a.schedule.frequency}
                       {a.schedule.nextRunAt
                         ? ` · next ${new Date(a.schedule.nextRunAt).toLocaleString()}`
+                        : ""}
+                      {(a.schedule?.consecutiveFailures || 0) >= 3
+                        ? ` · ${a.schedule.consecutiveFailures} schedule failures`
                         : ""}
                     </p>
                   </div>
