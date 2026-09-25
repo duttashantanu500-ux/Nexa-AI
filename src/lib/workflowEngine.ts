@@ -1,7 +1,6 @@
 /**
  * Deterministic workflow runner.
- * Phase 4: pauses on requiresApproval write steps (waiting_for_approval).
- * Never fakes provider success.
+ * Phase 4: approval gates. Phase 6: mapping resolve. Phase 7: rate limit + redaction.
  */
 
 import { getAction } from "./actionRegistry";
@@ -10,6 +9,9 @@ import { slackListChannels, slackPostMessage } from "./connectors/providers/slac
 import { notionCreatePage } from "./connectors/providers/notion";
 import { githubCreateIssue, githubListIssues } from "./connectors/providers/github";
 import type { WorkflowStep, WorkflowStepResult } from "@/types";
+import { resolveConfig } from "./mapping";
+import { takeToken } from "./rateLimit";
+import { redactStepResult } from "./redact";
 
 export interface WorkflowContext {
   list: string[];
@@ -34,7 +36,6 @@ export interface WorkflowRunResult {
   output: string;
   error?: string;
   context: WorkflowContext;
-  /** Step index where approval is needed (for resume) */
   pendingStepIndex?: number;
   pendingStepId?: string;
 }
@@ -54,13 +55,9 @@ export async function runWorkflow(params: {
   steps: WorkflowStep[];
   simulate?: boolean;
   connections?: RuntimeConnectionConfig;
-  /** Resume after approval: start at this index */
   startIndex?: number;
-  /** Prior step results when resuming */
   priorResults?: WorkflowStepResult[];
-  /** Prior context snapshot (optional) */
   priorContext?: Partial<WorkflowContext>;
-  /** Skip approval gate once (user approved) */
   approvalGrantedForStepId?: string;
 }): Promise<WorkflowRunResult> {
   const ctx: WorkflowContext = {
@@ -119,7 +116,6 @@ export async function runWorkflow(params: {
       continue;
     }
 
-    // Phase 4: approval gate for write / requiresApproval steps (live runs only)
     const needsApproval =
       !simulate &&
       (step.requiresApproval || def.requiresApproval) &&
@@ -145,7 +141,10 @@ export async function runWorkflow(params: {
 
     let missing = false;
     for (const f of def.fields) {
-      if (f.required && !String(step.config?.[f.key] ?? "").trim()) {
+      const has =
+        String(step.config?.[f.key] ?? "").trim() ||
+        String(step.inputMapping?.[f.key] ?? "").trim();
+      if (f.required && !has) {
         results.push(
           failResult(
             step,
@@ -175,9 +174,24 @@ export async function runWorkflow(params: {
     while (attempts < maxAttempts && !succeeded) {
       attempts += 1;
       try {
+        const connectorId = step.connectorId || step.actionId.split(".")[0];
+        const rl = takeToken(connectorId);
+        if (!rl.ok) {
+          lastError = `Rate limit: wait ${Math.ceil((rl.retryAfterMs || 1000) / 1000)}s for ${connectorId}`;
+          lastNorm = { category: "rate_limit" };
+          if (attempts < maxAttempts) {
+            await sleep(rl.retryAfterMs || 1000);
+          }
+          continue;
+        }
+        const resolvedConfig = resolveConfig(
+          step.config || {},
+          step.inputMapping,
+          ctx.stepOutputs
+        );
         const detail = await executeAction(
           step.actionId,
-          step.config || {},
+          resolvedConfig,
           ctx,
           simulate,
           params.connections || {}
@@ -193,7 +207,7 @@ export async function runWorkflow(params: {
             status: "succeeded",
             startedAt: started,
             endedAt: new Date().toISOString(),
-            inputSent,
+            inputSent: resolvedConfig,
             outputReceived: detail.data,
             output: detail.message,
             retryCount: attempts - 1,
@@ -246,12 +260,17 @@ export async function runWorkflow(params: {
   else if (hardFail && !hadSuccess) status = "failed";
   else if (hardFail || softFail) status = "succeeded_with_errors";
 
+  const safeSteps = results.map(
+    (r) =>
+      redactStepResult(r as unknown as Record<string, unknown>) as unknown as WorkflowStepResult
+  );
+
   return {
     ok: !hardFail && !softFail && !waitingApproval,
     status,
     mode: simulate || results.some((r) => r.simulated) ? "simulated" : "real",
-    steps: results,
-    output,
+    steps: safeSteps,
+    output: String(redactStepResult({ output } as Record<string, unknown>).output || output),
     error:
       hardFail || softFail
         ? results.find((r) => r.status === "failed")?.error
@@ -313,7 +332,7 @@ async function executeAction(
       return {
         ok: true,
         message: `List created with ${ctx.list.length} items`,
-        data: { count: ctx.list.length, list: ctx.list },
+        data: { count: ctx.list.length, list: ctx.list, message: `List created with ${ctx.list.length} items` },
       };
     }
     case "local_data.filter": {
@@ -327,7 +346,7 @@ async function executeAction(
       return {
         ok: true,
         message: `Filtered ${before} → ${ctx.list.length} items`,
-        data: { before, after: ctx.list.length, list: ctx.list },
+        data: { before, after: ctx.list.length, list: ctx.list, count: ctx.list.length },
       };
     }
     case "local_data.limit": {
@@ -342,7 +361,7 @@ async function executeAction(
     case "local_data.template": {
       const tpl = config.template || "{{item}}";
       ctx.list = ctx.list.map((item) => tpl.replace(/\{\{\s*item\s*\}\}/gi, item));
-      return { ok: true, message: `Formatted ${ctx.list.length} items`, data: { list: ctx.list } };
+      return { ok: true, message: `Formatted ${ctx.list.length} items`, data: { list: ctx.list, count: ctx.list.length } };
     }
     case "local_data.note": {
       ctx.notes.push(config.note || "");
@@ -361,7 +380,7 @@ async function executeAction(
           : ["(No list items)"]),
       ];
       ctx.report = lines.join("\n");
-      return { ok: true, message: ctx.report, data: { title, report: ctx.report } };
+      return { ok: true, message: ctx.report, data: { title, report: ctx.report, list: ctx.list, count: ctx.list.length } };
     }
     case "local_comfyui.test_connection": {
       if (simulate) return { ok: true, message: "[Simulated] Local engine reachable" };
