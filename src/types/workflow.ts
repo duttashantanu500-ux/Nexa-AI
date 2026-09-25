@@ -55,7 +55,14 @@ export type RunStepStatus =
 export interface NormalizedProviderError {
   providerStatusCode?: number;
   providerMessage?: string;
-  category?: "auth" | "rate_limit" | "validation" | "server_error" | "unknown" | "mapping_error";
+  category?:
+    | "auth"
+    | "rate_limit"
+    | "validation"
+    | "server_error"
+    | "unknown"
+    | "mapping_error"
+    | "not_configured";
 }
 
 export interface WorkflowStepResult {
