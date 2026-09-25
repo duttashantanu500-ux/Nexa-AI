@@ -43,8 +43,6 @@ export interface BusinessContext {
   preferences?: string;
 }
 
-/* ——— Internal execution types (not user-facing product) ——— */
-
 export type MissionStatus =
   | "planning"
   | "ready"
@@ -172,8 +170,6 @@ export interface ApprovalRequest {
   createdAt: string;
 }
 
-/* ——— Agent product model ——— */
-
 export type ScheduleFrequency =
   | "once"
   | "daily"
@@ -265,6 +261,7 @@ export interface Connection {
   mcpTools?: string[];
 }
 
+/** Shared app state — agent fields are primary; chat/mission fields are legacy-compatible */
 export interface AppState {
   user: UserProfile | null;
   businessContext: BusinessContext | null;
@@ -272,6 +269,13 @@ export interface AppState {
   agents: Agent[];
   agentRuns: AgentRun[];
   connections: Connection[];
+  memories?: MemoryItem[];
+  conversations?: Conversation[];
+  currentWorkspace?: WorkspaceId;
+  currentConversationId?: string | null;
+  missions?: Mission[];
+  activity?: ActivityEvent[];
+  approvals?: ApprovalRequest[];
 }
 
 export const BUILTIN_TOOLS = [
@@ -444,7 +448,6 @@ export function computeNextRun(schedule: AgentSchedule): string | null {
   const next = new Date(now);
   next.setSeconds(0, 0);
   next.setHours(hh, mm, 0, 0);
-
   if (schedule.frequency === "daily") {
     if (next <= now) next.setDate(next.getDate() + 1);
     return next.toISOString();

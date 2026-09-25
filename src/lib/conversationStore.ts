@@ -1,5 +1,5 @@
 /**
- * Nexa conversationStore + shared app state persistence
+ * Legacy conversation helpers (not the primary product UI).
  */
 
 import {
@@ -26,6 +26,7 @@ const defaultState: AppState = {
   theme: "system",
   missions: [],
   agents: [],
+  agentRuns: [],
   connections: DEFAULT_CONNECTIONS,
   activity: [],
   approvals: [],
@@ -52,7 +53,6 @@ export function loadAppState(): AppState {
   try {
     const v2 = localStorage.getItem(APP_KEY);
     if (v2) return { ...defaultState, ...safeParse(v2, {}) };
-
     const v1 = localStorage.getItem("nexa_app_state_v1");
     if (v1) {
       const parsed = safeParse<AppState>(v1, defaultState);
@@ -91,7 +91,7 @@ export function getConversationsByWorkspace(workspace: WorkspaceId): Conversatio
 
 export function getConversation(id: string): Conversation | null {
   const state = loadAppState();
-  return state.conversations.find((c) => c.id === id) || null;
+  return (state.conversations || []).find((c) => c.id === id) || null;
 }
 
 export function createConversation(params: {
@@ -108,7 +108,6 @@ export function createConversation(params: {
     updatedAt: new Date().toISOString(),
     messageCount: 0,
   };
-
   const state = loadAppState();
   const conversations = [conv, ...(state.conversations || [])];
   saveAppState({
@@ -120,10 +119,7 @@ export function createConversation(params: {
   return conv;
 }
 
-export function updateConversation(
-  id: string,
-  patch: Partial<Conversation>
-): void {
+export function updateConversation(id: string, patch: Partial<Conversation>): void {
   const state = loadAppState();
   const conversations = (state.conversations || []).map((c) =>
     c.id === id ? { ...c, ...patch, updatedAt: new Date().toISOString() } : c
@@ -141,7 +137,7 @@ export function deleteConversation(id: string): void {
     localStorage.removeItem(MSG_PREFIX + id);
     localStorage.removeItem("nexa_messages_" + id);
   } catch {
-    /* ignore */
+    /* */
   }
 }
 
@@ -150,7 +146,6 @@ export function loadMessages(conversationId: string): Message[] {
   try {
     const v2 = localStorage.getItem(MSG_PREFIX + conversationId);
     if (v2) return safeParse<Message[]>(v2, []);
-
     const v1 = localStorage.getItem("nexa_messages_" + conversationId);
     if (v1) {
       const msgs = safeParse<Message[]>(v1, []);
@@ -229,7 +224,6 @@ export function addMemory(
     (m) => m.content.toLowerCase().trim() === content.toLowerCase().trim()
   );
   if (exists) return memories;
-
   const item: MemoryItem = {
     id: createId(),
     content,
