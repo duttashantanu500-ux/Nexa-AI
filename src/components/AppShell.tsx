@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
 import { loadOperatorState } from "@/lib/operatorStore";
+import { applyTheme, readStoredTheme } from "@/lib/theme";
 
 const NAV = [
   { href: "/home", label: "Home" },
@@ -19,12 +20,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const s = loadOperatorState();
     setName(s.user?.name || "");
-    const theme = s.theme || "system";
-    const root = document.documentElement;
-    if (theme === "dark") root.classList.add("dark");
-    else if (theme === "light") root.classList.remove("dark");
-    else if (window.matchMedia("(prefers-color-scheme: dark)").matches)
-      root.classList.add("dark");
+    // Re-apply stored theme (do not force system/dark)
+    applyTheme(s.theme || readStoredTheme());
   }, [pathname]);
 
   const active = (href: string) =>
@@ -38,7 +35,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="text-lg font-semibold tracking-tight text-indigo-600 dark:text-indigo-400">
               Nexa
             </div>
-            <div className="mt-0.5 text-xs text-zinc-500">
+            <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
               Connect · Orchestrate
             </div>
           </div>
@@ -58,7 +55,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             ))}
           </nav>
           {name && (
-            <div className="mt-8 border-t border-zinc-100 px-2 pt-4 text-xs text-zinc-500 dark:border-zinc-800">
+            <div className="mt-8 border-t border-zinc-100 px-2 pt-4 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
               {name}
             </div>
           )}
@@ -70,7 +67,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="font-semibold text-indigo-600 dark:text-indigo-400">
                 Nexa
               </span>
-              <span className="text-xs text-zinc-500">{name}</span>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">{name}</span>
             </div>
             <nav className="flex gap-1 overflow-x-auto px-2 pb-2">
               {NAV.map((item) => (
@@ -89,7 +86,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </nav>
           </header>
 
-          <main className="flex-1">{children}</main>
+          <main className="flex-1 text-zinc-900 dark:text-zinc-50">{children}</main>
         </div>
       </div>
     </div>

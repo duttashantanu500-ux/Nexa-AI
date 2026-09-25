@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
+/* Class-based dark mode (not media-only). Required for Light theme to work. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
+  color-scheme: light;
   --background: #f8fafc;
   --foreground: #0f172a;
   --sidebar: #ffffff;
@@ -14,12 +18,12 @@
   --success: #059669;
   --warning: #d97706;
   --danger: #dc2626;
-  --user-bubble: #4f46e5;
-  --user-bubble-fg: #f8fafc;
-  --assistant-bubble: transparent;
+  --input-bg: #ffffff;
+  --input-fg: #0f172a;
 }
 
 .dark {
+  color-scheme: dark;
   --background: #0b1220;
   --foreground: #f1f5f9;
   --sidebar: #111827;
@@ -33,9 +37,8 @@
   --success: #34d399;
   --warning: #fbbf24;
   --danger: #f87171;
-  --user-bubble: #4f46e5;
-  --user-bubble-fg: #f8fafc;
-  --assistant-bubble: transparent;
+  --input-bg: #0f172a;
+  --input-fg: #f1f5f9;
 }
 
 @theme inline {
@@ -57,6 +60,11 @@
   border-color: var(--border);
 }
 
+html {
+  background: var(--background);
+  color: var(--foreground);
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
@@ -64,9 +72,27 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Smooth interactive defaults */
-button, a, input, textarea, select {
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease, transform 0.1s ease;
+/* Inputs always readable in both themes */
+input,
+textarea,
+select {
+  background-color: var(--input-bg);
+  color: var(--input-fg);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    opacity 0.15s ease, transform 0.1s ease;
 }
 
 button:active:not(:disabled) {
@@ -85,34 +111,16 @@ button:active:not(:disabled) {
   border-radius: 3px;
 }
 
-.prose-nexa {
-  line-height: 1.65;
-  white-space: pre-wrap;
-}
-
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .animate-fade-in {
   animation: fade-in 0.25s ease-out;
-}
-
-@keyframes pulse-soft {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
-}
-.animate-pulse-soft {
-  animation: pulse-soft 1.4s ease-in-out infinite;
-}
-
-.skeleton {
-  background: linear-gradient(90deg, var(--border) 25%, var(--card) 50%, var(--border) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.2s infinite;
-  border-radius: 8px;
-}
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
 }

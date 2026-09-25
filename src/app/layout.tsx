@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nexa — AI Agent OS",
+  title: "Nexa — Connect · Orchestrate",
   description:
-    "Create agents, connect tools, set schedules, and view results. Nexa is your AI agent operating system.",
+    "Connect your services and build workflows. Nexa bridges the gap between your tools.",
 };
 
 export default function RootLayout({
@@ -27,7 +27,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50`}
+        className={`${geistSans.variable} ${geistMono.variable} min-h-full antialiased bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50`}
       >
         <ThemeProvider>{children}</ThemeProvider>
       </body>

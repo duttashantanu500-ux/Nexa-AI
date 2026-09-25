@@ -1,25 +1,20 @@
 "use client";
 
 import { useEffect } from "react";
-import { loadAppState } from "@/lib/storage";
+import { applyTheme, readStoredTheme } from "@/lib/theme";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
-    const state = loadAppState();
-    const theme = state.theme || "system";
-    const root = document.documentElement;
+    const theme = readStoredTheme();
+    applyTheme(theme);
 
-    if (theme === "dark") {
-      root.classList.add("dark");
-    } else if (theme === "light") {
-      root.classList.remove("dark");
-    } else {
-      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-        root.classList.add("dark");
-      } else {
-        root.classList.remove("dark");
-      }
-    }
+    // Keep system theme in sync when user chose "system"
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => {
+      if (readStoredTheme() === "system") applyTheme("system");
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
   }, []);
 
   return <>{children}</>;
