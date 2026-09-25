@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { loadOperatorState } from "@/lib/operatorStore";
@@ -22,6 +22,20 @@ type OAuthStatus = {
 };
 
 export default function ConnectionsPage() {
+  return (
+    <Suspense
+      fallback={
+        <AppShell>
+          <div className="px-4 py-12 text-center text-sm text-zinc-500">Loading…</div>
+        </AppShell>
+      }
+    >
+      <ConnectionsInner />
+    </Suspense>
+  );
+}
+
+function ConnectionsInner() {
   const router = useRouter();
   const search = useSearchParams();
   const [comfyUrl, setComfyUrl] = useState("");
@@ -88,13 +102,13 @@ export default function ConnectionsPage() {
     if (!def) return "unsupported";
     if (id === "local_data") return "connected";
     if (id === "local_comfyui") {
-      return comfyStatus === "ok" || comfyUrl.trim()
-        ? comfyStatus === "ok"
-          ? "connected"
-          : "setup_required"
-        : "setup_required";
+      return comfyStatus === "ok" ? "connected" : "setup_required";
     }
-    const p = oauth?.providers?.[id === "gmail" || id === "gdrive" || id === "gsheets" || id === "gcal" ? "google" : id];
+    const key =
+      id === "gmail" || id === "gdrive" || id === "gsheets" || id === "gcal"
+        ? "google"
+        : id;
+    const p = oauth?.providers?.[key];
     if (p?.configured) return "available";
     return def.defaultStatus;
   };
@@ -149,9 +163,7 @@ export default function ConnectionsPage() {
                 </div>
                 <p className="mt-2 text-xs text-zinc-400">{c.costNote}</p>
                 {c.envHint && status === "setup_required" && (
-                  <p className="mt-1 text-[11px] text-zinc-400">
-                    Admin env: {c.envHint}
-                  </p>
+                  <p className="mt-1 text-[11px] text-zinc-400">Admin env: {c.envHint}</p>
                 )}
 
                 {c.id === "local_comfyui" && (
@@ -191,10 +203,7 @@ export default function ConnectionsPage() {
                 )}
 
                 {href && (
-                  <a
-                    href={href}
-                    className="mt-3 inline-block rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white"
-                  >
+                  <a href={href} className="mt-3 inline-block rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white">
                     Connect {c.name}
                   </a>
                 )}
@@ -215,9 +224,7 @@ export default function ConnectionsPage() {
                         <li key={a.id}>
                           {a.available ? "•" : "○"} {a.name}
                           {a.requiresApproval ? " (approval)" : ""}
-                          {!a.available && a.unavailableReason
-                            ? ` — ${a.unavailableReason}`
-                            : ""}
+                          {!a.available && a.unavailableReason ? ` — ${a.unavailableReason}` : ""}
                         </li>
                       ))}
                     </ul>
