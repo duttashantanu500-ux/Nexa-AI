@@ -1,504 +1,364 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { createAgent, loadOperatorState, stepId } from "@/lib/operatorStore";
+import { getAction } from "@/lib/actionRegistry";
 import {
-  WORKFLOW_STARTERS,
-  availableActions,
-  catalogActions,
-  getAction,
-} from "@/lib/actionRegistry";
-import { validateAgentStructure } from "@/lib/validation/agentValidation";
-import { listUpstreamRefs } from "@/lib/mapping";
-import {
-  ScheduleFrequency,
-  WorkflowStep,
   defaultPermissions,
   defaultSchedule,
+  type ScheduleFrequency,
+  type WorkflowStep,
 } from "@/types";
+import type { ValidatedProposal } from "@/lib/agentBuilder/types";
 
-const STEPS = ["Start", "Basics", "Actions", "Schedule", "Review"];
+interface ChatLine {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+}
 
 export default function NewAgentPage() {
   const router = useRouter();
-  const [step, setStep] = useState(0);
-  const [starterId, setStarterId] = useState("blank");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [outcome, setOutcome] = useState("");
-  const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([]);
-  const [frequency, setFrequency] = useState<ScheduleFrequency>("once");
-  const [time, setTime] = useState("09:00");
-  const [timezone, setTimezone] = useState("UTC");
-  const [activate, setActivate] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [lines, setLines] = useState<ChatLine[]>([
+    {
+      id: "welcome",
+      role: "assistant",
+      content:
+        "Describe the automation agent you want. I'll propose a workflow using only Nexa's available connectors and actions — then you confirm before anything is created.",
+    },
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [validated, setValidated] = useState<ValidatedProposal | null>(null);
+  const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const s = loadOperatorState();
     if (!s.user?.onboardingCompleted) router.replace("/signup");
-    try {
-      setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
-    } catch {
-      /* */
-    }
   }, [router]);
 
-  const ordered = [...workflowSteps].sort((a, b) => a.order - b.order);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [lines, validated]);
 
-  const applyStarter = (id: string) => {
-    const st = WORKFLOW_STARTERS.find((x) => x.id === id);
-    if (!st || !st.available) return;
-    setStarterId(id);
-    setWorkflowSteps(
-      st.steps.map((s, i) => {
-        const def = getAction(s.actionId);
-        return {
-          id: stepId(),
-          order: i,
-          type: "action" as const,
-          actionId: s.actionId,
-          name: def?.name || s.actionId,
-          config: { ...s.config },
-          onError: "stop" as const,
-        };
-      })
-    );
-    if (!name && id !== "blank") setName(st.name);
+  const send = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+    setInput("");
+    setError("");
+    setValidated(null);
+
+    const userLine: ChatLine = {
+      id: `u-${Date.now()}`,
+      role: "user",
+      content: text,
+    };
+    const nextLines = [...lines, userLine];
+    setLines(nextLines);
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/agent-builder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: nextLines
+            .filter((l) => l.id !== "welcome")
+            .map((l) => ({ role: l.role, content: l.content })),
+        }),
+      });
+      const data = await res.json();
+
+      if (data.kind === "off_topic") {
+        setLines((prev) => [
+          ...prev,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            content:
+              data.message ||
+              "I'm Nexa's Agent Builder. I can only help you create or modify automation agents.",
+          },
+        ]);
+        return;
+      }
+
+      if (!data.ok || data.kind === "error") {
+        setError(data.message || "Something went wrong.");
+        setLines((prev) => [
+          ...prev,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            content: data.message || "Could not build a proposal. Try again.",
+          },
+        ]);
+        return;
+      }
+
+      setLines((prev) => [
+        ...prev,
+        {
+          id: `a-${Date.now()}`,
+          role: "assistant",
+          content: data.message || "Here is a proposed agent. Review it below.",
+        },
+      ]);
+      setValidated(data.validated as ValidatedProposal);
+    } catch {
+      setError("Network error. Try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const addAction = (actionId: string) => {
-    const def = getAction(actionId);
-    if (!def || !def.available || !def.implemented) return;
-    setWorkflowSteps((prev) => [
-      ...prev,
-      {
-        id: stepId(),
-        order: prev.length,
-        type: "action",
-        actionId,
-        name: def.name,
-        connectorId: def.connectionId || undefined,
-        config: Object.fromEntries(def.fields.map((f) => [f.key, ""])),
-        onError: "stop",
-        requiresApproval: def.requiresApproval,
-      },
-    ]);
-  };
-
-  const updateStepConfig = (id: string, key: string, value: string) => {
-    setWorkflowSteps((prev) =>
-      prev.map((s) =>
-        s.id === id ? { ...s, config: { ...s.config, [key]: value } } : s
-      )
-    );
-  };
-
-  const insertMapping = (stepIdStr: string, fieldKey: string, ref: string) => {
-    setWorkflowSteps((prev) =>
-      prev.map((s) => {
-        if (s.id !== stepIdStr) return s;
-        const cur = s.config?.[fieldKey] || "";
-        return {
-          ...s,
-          config: { ...s.config, [fieldKey]: cur ? `${cur} ${ref}` : ref },
-        };
-      })
-    );
-  };
-
-  const removeStep = (id: string) => {
-    setWorkflowSteps((prev) =>
-      prev.filter((s) => s.id !== id).map((s, i) => ({ ...s, order: i }))
-    );
-  };
-
-  const moveStep = (id: string, dir: -1 | 1) => {
-    setWorkflowSteps((prev) => {
-      const idx = prev.findIndex((s) => s.id === id);
-      if (idx < 0) return prev;
-      const j = idx + dir;
-      if (j < 0 || j >= prev.length) return prev;
-      const next = [...prev];
-      [next[idx], next[j]] = [next[j], next[idx]];
-      return next.map((s, i) => ({ ...s, order: i }));
-    });
-  };
-
-  const validation = validateAgentStructure({ name, steps: workflowSteps });
-
-  const save = (asDraft: boolean) => {
+  const createFromProposal = (asDraft: boolean) => {
+    if (!validated) return;
     const s = loadOperatorState();
-    if (!s.user || !name.trim()) return;
-    if (!asDraft && activate && !validation.ok) return;
-    setSaving(true);
+    if (!s.user) return;
+
+    if (!asDraft && !validated.canActivate) {
+      setError("Cannot activate until all actions are available. Save as draft instead.");
+      return;
+    }
+    if (!validated.canDraft) {
+      setError("Proposal is not complete enough to save.");
+      return;
+    }
+
+    setCreating(true);
+    const p = validated.proposal;
+    const steps: WorkflowStep[] = p.steps.map((st, i) => {
+      const def = getAction(st.actionId);
+      return {
+        id: stepId(),
+        order: i,
+        type: "action",
+        actionId: st.actionId,
+        name: def?.name || st.name || st.actionId,
+        connectorId: def?.connectionId || undefined,
+        config: { ...(st.config || {}) },
+        onError: st.onError || "stop",
+        requiresApproval: def?.requiresApproval || st.requiresApproval,
+      };
+    });
+
+    const frequency = p.schedule.frequency as ScheduleFrequency;
     const agent = createAgent({
       userId: s.user.id,
-      name: name.trim(),
-      description,
-      purpose: outcome || description,
-      instructions: outcome,
-      steps: workflowSteps,
-      tools: [...new Set(workflowSteps.map((st) => st.actionId))],
+      name: p.name.trim(),
+      description: p.description || "",
+      purpose: p.purpose || p.description || "",
+      instructions: p.purpose || p.description || "",
+      steps,
+      tools: [...new Set(steps.map((st) => st.actionId))],
       permissions: defaultPermissions(),
       schedule: {
         ...defaultSchedule(),
         frequency,
-        time,
-        timezone,
+        time: p.schedule.time || "09:00",
+        timezone:
+          p.schedule.timezone ||
+          (typeof Intl !== "undefined"
+            ? Intl.DateTimeFormat().resolvedOptions().timeZone
+            : "UTC"),
         enabled: frequency !== "once",
       },
-      status: asDraft ? "draft" : activate && validation.ok ? "active" : "ready",
+      status: asDraft ? "draft" : validated.canActivate ? "active" : "ready",
     });
     router.push(`/agents/${agent.id}`);
   };
 
-  const usable = availableActions();
-  const planned = catalogActions().filter((a) => !a.implemented);
-
   return (
     <AppShell>
-      <div className="mx-auto max-w-xl space-y-6 px-4 py-8">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-            Create workflow agent
-          </h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            Map fields from earlier steps with {"{{step.output}}"}. Only implemented actions can be
-            added.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-1">
-            {STEPS.map((s, i) => (
-              <span
-                key={s}
-                className={`rounded-full px-2.5 py-1 text-[11px] ${
-                  i === step
-                    ? "bg-indigo-600 text-white"
-                    : i < step
-                      ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
-                      : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800"
-                }`}
-              >
-                {s}
-              </span>
-            ))}
+      <div className="mx-auto flex max-w-2xl flex-col px-4 py-6" style={{ minHeight: "calc(100vh - 4rem)" }}>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <Link href="/agents" className="text-xs text-zinc-500 hover:text-indigo-600">
+              ← Agents
+            </Link>
+            <h1 className="mt-1 text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+              Agent Builder
+            </h1>
+            <p className="mt-0.5 text-sm text-zinc-500">
+              Natural language only for creating agents — not a general chatbot.
+            </p>
           </div>
         </div>
 
-        {step === 0 && (
-          <div className="space-y-3">
-            {WORKFLOW_STARTERS.map((st) => (
-              <button
-                key={st.id}
-                type="button"
-                disabled={!st.available}
-                onClick={() => applyStarter(st.id)}
-                className={`w-full rounded-xl border p-4 text-left ${
-                  starterId === st.id && st.available
-                    ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40"
-                    : "border-zinc-200 dark:border-zinc-800"
-                } ${!st.available ? "opacity-60" : ""}`}
-              >
-                <div className="font-medium">{st.name}</div>
-                <p className="mt-1 text-xs text-zinc-500">{st.description}</p>
-                {!st.available && (
-                  <p className="mt-1 text-[11px] text-amber-600">
-                    {st.unavailableReason || "Not available"}
-                  </p>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="flex flex-1 flex-col gap-3 overflow-y-auto pb-4">
+          {lines.map((l) => (
+            <div
+              key={l.id}
+              className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-sm ${
+                l.role === "user"
+                  ? "ml-auto bg-indigo-600 text-white"
+                  : "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100"
+              }`}
+            >
+              {l.content}
+            </div>
+          ))}
 
-        {step === 1 && (
-          <div className="space-y-4">
-            <Field label="Workflow name" value={name} onChange={setName} placeholder="Weekly list cleanup" />
-            <Field label="Description" value={description} onChange={setDescription} textarea />
-            <Field
-              label="Notes (optional)"
-              value={outcome}
-              onChange={setOutcome}
-              textarea
-              placeholder="Your notes only"
-            />
-          </div>
-        )}
+          {loading && (
+            <div className="text-sm text-zinc-500">Designing workflow…</div>
+          )}
 
-        {step === 2 && (
-          <div className="space-y-4">
-            {ordered.map((ws, idx) => {
-              const def = getAction(ws.actionId);
-              const upstream = listUpstreamRefs(ordered, idx);
-              return (
-                <div
-                  key={ws.id}
-                  className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-medium">
-                      {idx + 1}. {ws.name}
-                    </div>
-                    <div className="flex gap-1">
-                      <button type="button" className="text-xs text-zinc-500" onClick={() => moveStep(ws.id, -1)}>
-                        ↑
-                      </button>
-                      <button type="button" className="text-xs text-zinc-500" onClick={() => moveStep(ws.id, 1)}>
-                        ↓
-                      </button>
-                      <button type="button" className="text-xs text-red-600" onClick={() => removeStep(ws.id)}>
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                  {def?.fields.map((f) => (
-                    <label key={f.key} className="mt-2 block space-y-1">
-                      <span className="text-xs text-zinc-500">
-                        {f.label}
-                        {f.required ? " *" : ""}
-                      </span>
-                      {f.type === "textarea" ? (
-                        <textarea
-                          value={ws.config[f.key] || ""}
-                          onChange={(e) => updateStepConfig(ws.id, f.key, e.target.value)}
-                          rows={3}
-                          placeholder={f.placeholder || "Text or {{previous.output}}"}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                        />
-                      ) : f.type === "select" ? (
-                        <select
-                          value={ws.config[f.key] || f.options?.[0]?.value || ""}
-                          onChange={(e) => updateStepConfig(ws.id, f.key, e.target.value)}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                        >
-                          {(f.options || []).map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          type={f.type === "number" ? "number" : "text"}
-                          value={ws.config[f.key] || ""}
-                          onChange={(e) => updateStepConfig(ws.id, f.key, e.target.value)}
-                          placeholder={f.placeholder || "{{step.output}}"}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                        />
-                      )}
-                      {upstream.length > 0 && f.type !== "select" && (
-                        <select
-                          className="mt-1 w-full rounded border border-dashed border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] dark:border-zinc-700 dark:bg-zinc-950"
-                          defaultValue=""
-                          onChange={(e) => {
-                            if (e.target.value) {
-                              insertMapping(ws.id, f.key, e.target.value);
-                              e.target.value = "";
-                            }
-                          }}
-                        >
-                          <option value="">Insert from previous step…</option>
-                          {upstream.map((r) => (
-                            <option key={r} value={r}>
-                              {r}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </label>
-                  ))}
-                  <label className="mt-2 block space-y-1">
-                    <span className="text-xs text-zinc-500">On error</span>
-                    <select
-                      value={ws.onError || "stop"}
-                      onChange={(e) =>
-                        setWorkflowSteps((prev) =>
-                          prev.map((s) =>
-                            s.id === ws.id
-                              ? {
-                                  ...s,
-                                  onError: e.target.value as "stop" | "continue" | "retry",
-                                }
-                              : s
-                          )
-                        )
-                      }
-                      className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                    >
-                      <option value="stop">Stop workflow</option>
-                      <option value="continue">Continue (mark errors)</option>
-                      <option value="retry">Retry then stop</option>
-                    </select>
-                  </label>
-                </div>
-              );
-            })}
-
-            <div>
-              <div className="mb-2 text-sm font-medium">Add action</div>
-              <div className="flex flex-wrap gap-2">
-                {usable.map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => addAction(a.id)}
-                    className="rounded-full border border-zinc-200 px-3 py-1 text-xs dark:border-zinc-700"
-                  >
-                    + {a.name}
-                  </button>
-                ))}
+          {validated && (
+            <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                Workflow preview
               </div>
-              {planned.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {planned.slice(0, 8).map((a) => (
-                    <span
-                      key={a.id}
-                      title={a.availabilityNote || "Not implemented"}
-                      className="cursor-not-allowed rounded-full border border-dashed border-zinc-200 px-3 py-1 text-xs text-zinc-400"
-                    >
-                      {a.name}
-                    </span>
+              <h2 className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+                {validated.proposal.name}
+              </h2>
+              {validated.proposal.description && (
+                <p className="mt-1 text-sm text-zinc-500">{validated.proposal.description}</p>
+              )}
+
+              <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-[11px] uppercase text-zinc-400">Trigger</dt>
+                  <dd className="capitalize">{validated.proposal.trigger}</dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] uppercase text-zinc-400">Schedule</dt>
+                  <dd>
+                    {validated.proposal.schedule.frequency}
+                    {validated.proposal.schedule.frequency !== "once"
+                      ? ` · ${validated.proposal.schedule.time || "09:00"}`
+                      : " · Run now only"}
+                  </dd>
+                </div>
+              </dl>
+
+              <div className="mt-3">
+                <div className="text-[11px] font-semibold uppercase text-zinc-400">Steps</div>
+                <ol className="mt-1 list-decimal space-y-1 pl-4 text-sm">
+                  {validated.proposal.steps.map((s, i) => (
+                    <li key={`${s.actionId}-${i}`}>
+                      {s.name || s.actionId}
+                      <span className="ml-1 font-mono text-[10px] text-zinc-400">
+                        {s.actionId}
+                      </span>
+                    </li>
                   ))}
+                </ol>
+              </div>
+
+              {validated.requiredConnectors.length > 0 && (
+                <div className="mt-3">
+                  <div className="text-[11px] font-semibold uppercase text-zinc-400">
+                    Required connections
+                  </div>
+                  <ul className="mt-1 space-y-1 text-sm">
+                    {validated.requiredConnectors.map((c) => (
+                      <li key={c.id} className="flex items-center justify-between gap-2">
+                        <span>{c.name}</span>
+                        <span className="text-[10px] capitalize text-zinc-500">
+                          {c.status.replace(/_/g, " ")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
-            </div>
-          </div>
-        )}
 
-        {step === 3 && (
-          <div className="space-y-4">
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium">When to run</span>
-              <select
-                value={frequency}
-                onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)}
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-              >
-                <option value="once">Manual only</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-            </label>
-            {frequency !== "once" && (
-              <>
-                <input
-                  type="time"
-                  value={time}
-                  onChange={(e) => setTime(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                />
-                <p className="text-xs text-zinc-500">Timezone: {timezone}</p>
-              </>
-            )}
-          </div>
-        )}
+              {validated.approvalSteps.length > 0 && (
+                <div className="mt-3 text-sm">
+                  <div className="text-[11px] font-semibold uppercase text-zinc-400">
+                    Requires approval
+                  </div>
+                  <p className="text-zinc-600 dark:text-zinc-400">
+                    {validated.approvalSteps.join(", ")}
+                  </p>
+                </div>
+              )}
 
-        {step === 4 && (
-          <div className="space-y-3 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800">
-            <div>
-              <span className="text-xs text-zinc-500">Name</span>
-              <div>{name}</div>
-            </div>
-            <ol className="list-decimal pl-4">
-              {workflowSteps.map((s) => (
-                <li key={s.id}>{s.name}</li>
-              ))}
-            </ol>
-            {!validation.ok && (
-              <ul className="text-xs text-amber-600">
-                {validation.issues.map((i) => (
-                  <li key={i.code + (i.stepId || "")}>{i.message}</li>
-                ))}
-              </ul>
-            )}
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={activate}
-                onChange={(e) => setActivate(e.target.checked)}
-              />
-              Activate after save (requires validation)
-            </label>
-          </div>
-        )}
+              {validated.issues.length > 0 && (
+                <ul className="mt-3 space-y-1 text-xs">
+                  {validated.issues.map((iss, i) => (
+                    <li
+                      key={iss.code + i}
+                      className={
+                        iss.severity === "error" ? "text-amber-700 dark:text-amber-300" : "text-zinc-500"
+                      }
+                    >
+                      {iss.message}
+                    </li>
+                  ))}
+                </ul>
+              )}
 
-        <div className="flex justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => (step === 0 ? router.push("/agents") : setStep(step - 1))}
-            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
-          >
-            {step === 0 ? "Cancel" : "Back"}
-          </button>
-          {step < STEPS.length - 1 ? (
-            <button
-              type="button"
-              disabled={step === 1 && !name.trim()}
-              onClick={() => setStep(step + 1)}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white disabled:opacity-40"
-            >
-              Continue
-            </button>
-          ) : (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={saving || !name.trim()}
-                onClick={() => save(true)}
-                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm"
-              >
-                Save draft
-              </button>
-              <button
-                type="button"
-                disabled={saving || !name.trim() || (activate && !validation.ok)}
-                onClick={() => save(false)}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white disabled:opacity-40"
-              >
-                {saving ? "Saving…" : "Save"}
-              </button>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={creating || !validated.canActivate}
+                  onClick={() => createFromProposal(false)}
+                  className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white disabled:opacity-40"
+                >
+                  {creating ? "Creating…" : "Create agent"}
+                </button>
+                <button
+                  type="button"
+                  disabled={creating || !validated.canDraft}
+                  onClick={() => createFromProposal(true)}
+                  className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+                >
+                  Save draft
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setValidated(null);
+                    setInput("Change the proposal: ");
+                  }}
+                  className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+                >
+                  Edit in chat
+                </button>
+              </div>
             </div>
           )}
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div ref={bottomRef} />
+        </div>
+
+        <div className="sticky bottom-0 border-t border-zinc-200 bg-white pt-3 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex gap-2">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+              rows={2}
+              placeholder='e.g. "Create an agent that filters a list daily and builds a report"'
+              className="flex-1 resize-none rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+            />
+            <button
+              type="button"
+              disabled={loading || !input.trim()}
+              onClick={() => void send()}
+              className="self-end rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+            >
+              Send
+            </button>
+          </div>
+          <p className="mt-1.5 text-[11px] text-zinc-400">
+            Unrelated questions are declined. Agents are only created after you confirm.
+          </p>
         </div>
       </div>
     </AppShell>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  textarea,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  textarea?: boolean;
-}) {
-  return (
-    <label className="block space-y-1.5">
-      <span className="text-sm font-medium">{label}</span>
-      {textarea ? (
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          rows={3}
-          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-        />
-      ) : (
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-        />
-      )}
-    </label>
   );
 }
