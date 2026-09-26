@@ -46,8 +46,6 @@ function ConnectorDetailInner() {
   const [notionMsg, setNotionMsg] = useState("");
   const [notionWorkspace, setNotionWorkspace] = useState<string | null>(null);
   const [notionConnectPath, setNotionConnectPath] = useState<string | null>(null);
-  const [notionCanDisconnect, setNotionCanDisconnect] = useState(false);
-  const [notionSource, setNotionSource] = useState<string | null>(null);
   const [notionBusy, setNotionBusy] = useState(false);
   const [notionDefaultParent, setNotionDefaultParent] = useState("");
 
@@ -62,11 +60,9 @@ function ConnectorDetailInner() {
       setNotionMsg(data.message || "");
       setNotionWorkspace(data.workspaceName || null);
       setNotionConnectPath(data.connectPath || null);
-      setNotionCanDisconnect(Boolean(data.canDisconnect));
-      setNotionSource(data.source || null);
     } catch {
       setNotionStatus("error");
-      setNotionMsg("Could not load Notion status.");
+      setNotionMsg("Could not load status.");
     }
   }, []);
 
@@ -88,8 +84,10 @@ function ConnectorDetailInner() {
     const connected = search.get("connected");
     if (err) setBanner(`Something went wrong: ${err.replace(/_/g, " ")}`);
     if (connected) {
-      setBanner("Checking Notion…");
-      void refreshNotion(s.user.id).then(() => setBanner("Notion is linked."));
+      setBanner("Saving your Notion connection…");
+      void refreshNotion(s.user.id).then(() =>
+        setBanner("Your Notion account is connected.")
+      );
     }
   }, [router, id, search, refreshNotion]);
 
@@ -129,10 +127,29 @@ function ConnectorDetailInner() {
         body: JSON.stringify({ userId }),
       });
       const data = await res.json();
-      setBanner(data.message || (data.ok ? "Success" : "Test failed"));
+      setBanner(data.message || (data.ok ? "Success" : "Failed"));
       await refreshNotion(userId);
     } catch {
       setBanner("Test failed");
+    }
+    setNotionBusy(false);
+  };
+
+  const disconnectNotion = async () => {
+    if (!userId) return;
+    if (!confirm("Disconnect your Notion account from Nexa?")) return;
+    setNotionBusy(true);
+    try {
+      const res = await fetch("/api/connections/notion/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      setBanner(data.message || "Disconnected.");
+      await refreshNotion(userId);
+    } catch {
+      setBanner("Could not disconnect.");
     }
     setNotionBusy(false);
   };
@@ -157,10 +174,10 @@ function ConnectorDetailInner() {
               </div>
               <p className="mt-1 text-sm text-zinc-500">
                 {connector.id === "notion"
-                  ? "Use Notion pages from Nexa agents."
+                  ? "Connect your Notion. Agents use only your account — not Nexa's."
                   : connector.detailDescription || connector.description}
               </p>
-              {connector.id === "notion" && notionWorkspace && (
+              {connector.id === "notion" && notionWorkspace && status === "connected" && (
                 <p className="mt-1 text-xs text-zinc-400">{notionWorkspace}</p>
               )}
             </div>
@@ -175,30 +192,48 @@ function ConnectorDetailInner() {
 
         {connector.id === "notion" && (
           <div className="space-y-3">
-            {notionSource === "internal" && status === "connected" && (
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Notion is linked for this site. That is expected with your workspace setup.
-              </p>
-            )}
             <div className="flex flex-wrap gap-2">
-              {status === "connected" && (
-                <button
-                  type="button"
-                  disabled={notionBusy}
-                  onClick={() => void testNotion()}
-                  className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+              {status !== "connected" && notionConnectPath && (
+                <a
+                  href={notionConnectPath}
+                  className="inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
                 >
-                  {notionBusy ? "Checking…" : "Test"}
-                </button>
+                  Connect your Notion
+                </a>
+              )}
+              {status !== "connected" && !notionConnectPath && (
+                <p className="text-sm text-amber-700 dark:text-amber-300">
+                  {notionMsg ||
+                    "Admin must set up Notion sign-in (public integration) before users can connect."}
+                </p>
+              )}
+              {status === "connected" && (
+                <>
+                  <button
+                    type="button"
+                    disabled={notionBusy}
+                    onClick={() => void testNotion()}
+                    className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+                  >
+                    {notionBusy ? "Checking…" : "Test"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={notionBusy}
+                    onClick={() => void disconnectNotion()}
+                    className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600"
+                  >
+                    Disconnect
+                  </button>
+                </>
               )}
             </div>
 
             {status === "connected" && (
               <section className="space-y-2 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
-                <h2 className="text-sm font-semibold">Default page (set once)</h2>
+                <h2 className="text-sm font-semibold">Default page (optional, set once)</h2>
                 <p className="text-xs text-zinc-500">
-                  Paste a Notion page link. New pages will be created under it. Share that page with
-                  Nexa in Notion first.
+                  Paste a link to a page in your Notion. New pages go under it.
                 </p>
                 <input
                   value={notionDefaultParent}
@@ -212,13 +247,13 @@ function ConnectorDetailInner() {
                   onClick={() => {
                     try {
                       localStorage.setItem(NOTION_PARENT_KEY, notionDefaultParent.trim());
-                      setBanner("Default page saved. You can use plain language with agents now.");
+                      setBanner("Default page saved.");
                     } catch {
                       setBanner("Could not save.");
                     }
                   }}
                 >
-                  Save default page
+                  Save
                 </button>
               </section>
             )}
