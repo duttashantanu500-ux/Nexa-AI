@@ -1,12 +1,16 @@
 /**
  * Deterministic workflow runner.
- * Phase 4: approval gates. Phase 6: mapping resolve. Phase 7: rate limit + redaction.
+ * Notion actions call /api/connections/notion/execute (token stays server-side).
  */
 
 import { getAction } from "./actionRegistry";
 import { generateWithComfy } from "./connectors/localComfy";
 import { slackListChannels, slackPostMessage } from "./connectors/providers/slack";
-import { notionCreatePage } from "./connectors/providers/notion";
+import {
+  notionAppendBlocks,
+  notionCreatePage,
+  notionSearch,
+} from "./connectors/providers/notion";
 import { githubCreateIssue, githubListIssues } from "./connectors/providers/github";
 import type { WorkflowStep, WorkflowStepResult } from "@/types";
 import { resolveConfig } from "./mapping";
@@ -45,6 +49,7 @@ export interface RuntimeConnectionConfig {
   slackToken?: string;
   notionToken?: string;
   githubToken?: string;
+  userId?: string;
 }
 
 function emptyContext(): WorkflowContext {
@@ -438,15 +443,54 @@ async function executeAction(
       const r = await slackListChannels({ accessToken: connections.slackToken });
       return { ok: r.ok, message: r.message, data: r.data, error: r.error };
     }
-    case "notion.create_page": {
-      if (simulate) return { ok: true, message: "[Simulated] Would create Notion page" };
-      const r = await notionCreatePage({
-        accessToken: connections.notionToken,
-        parentId: config.parent_id || "",
-        title: config.title || "",
-        content: config.content,
-      });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    case "notion.create_page":
+    case "notion.append_blocks":
+    case "notion.search": {
+      if (simulate) {
+        return { ok: true, message: `[Simulated] Would run ${actionId}` };
+      }
+      if (typeof window !== "undefined" && connections.userId) {
+        const res = await fetch("/api/connections/notion/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: connections.userId,
+            actionId,
+            input: config,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        return {
+          ok: Boolean(data.ok),
+          message: data.message || (data.ok ? "OK" : "Failed"),
+          data: data.data,
+          error: data.error,
+        };
+      }
+      if (actionId === "notion.create_page") {
+        const r = await notionCreatePage({
+          accessToken: connections.notionToken,
+          parentId: config.parent_id || "",
+          title: config.title || "",
+          content: config.content,
+        });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
+      if (actionId === "notion.append_blocks") {
+        const r = await notionAppendBlocks({
+          accessToken: connections.notionToken,
+          pageId: config.page_id || "",
+          content: config.content || "",
+        });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
+      {
+        const r = await notionSearch({
+          accessToken: connections.notionToken,
+          query: config.query || "",
+        });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
     }
     case "github.create_issue": {
       if (simulate) return { ok: true, message: "[Simulated] Would create issue" };
