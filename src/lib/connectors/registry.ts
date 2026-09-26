@@ -13,7 +13,6 @@ export type CostLabel =
 
 export type ConnectionMethod = "local_endpoint" | "oauth" | "api_key" | "none";
 
-/** User-facing card/detail statuses (honest) */
 export type ConnectorUiStatus =
   | "connected"
   | "available"
@@ -51,11 +50,8 @@ export interface ConnectorDefinition {
   id: string;
   name: string;
   provider: string;
-  /** One-line summary for cards (max ~80 chars) */
   description: string;
-  /** Longer blurb for detail page only */
   detailDescription?: string;
-  /** 1–2 letter icon fallback */
   icon: string;
   connectionMethod: ConnectionMethod;
   costLabel: CostLabel;
@@ -64,7 +60,6 @@ export interface ConnectorDefinition {
   configurable: boolean;
   executable: boolean;
   defaultStatus: ConnectorUiStatus;
-  /** Scopes shown on detail page (informational until OAuth live) */
   scopes?: string[];
   actions: ConnectorAction[];
 }
@@ -130,38 +125,45 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     name: "Notion",
     provider: "notion",
     icon: "N",
-    description: "Create pages and append content in Notion.",
+    description: "Create pages, append content, search pages.",
     detailDescription:
-      "Connect Notion to create pages and append blocks under parents you choose.",
+      "Connect your Notion workspace via OAuth. Tokens stay on the server. Write actions require approval.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
-    costNote: "Uses your Notion workspace.",
-    envHint: "NOTION_CLIENT_ID, NOTION_CLIENT_SECRET",
+    costNote: "Uses your Notion workspace. Nexa does not pay Notion for you.",
+    envHint: "NOTION_CLIENT_ID, NOTION_CLIENT_SECRET, CONNECTOR_TOKEN_SECRET",
     configurable: true,
-    executable: false,
-    defaultStatus: "unavailable",
+    executable: true,
+    defaultStatus: "available",
     scopes: ["insert content", "read content"],
     actions: [
       {
         id: "notion.create_page",
         connectorId: "notion",
         name: "Create page",
-        description: "Create a page under a parent page or database.",
+        description: "Create a page under a parent page you share with the integration.",
         readOnly: false,
         requiresApproval: true,
         riskTier: "medium",
         fields: [
-          { key: "parent_id", label: "Parent page/database ID", type: "text", required: true },
+          {
+            key: "parent_id",
+            label: "Parent page ID",
+            type: "text",
+            required: true,
+            placeholder: "Notion page ID",
+            help: "Share the parent page with the Nexa integration in Notion.",
+          },
           { key: "title", label: "Title", type: "text", required: true },
           { key: "content", label: "Content", type: "textarea" },
         ],
-        ...notImpl("Notion OAuth is not configured end-to-end."),
+        ...impl(),
       },
       {
         id: "notion.append_blocks",
         connectorId: "notion",
         name: "Append content",
-        description: "Append text blocks to an existing page.",
+        description: "Append a paragraph to an existing page.",
         readOnly: false,
         requiresApproval: true,
         riskTier: "medium",
@@ -169,7 +171,18 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
           { key: "page_id", label: "Page ID", type: "text", required: true },
           { key: "content", label: "Content", type: "textarea", required: true },
         ],
-        ...notImpl("Notion OAuth is not configured end-to-end."),
+        ...impl(),
+      },
+      {
+        id: "notion.search",
+        connectorId: "notion",
+        name: "Search pages",
+        description: "Search pages the integration can access.",
+        readOnly: true,
+        requiresApproval: false,
+        riskTier: "low",
+        fields: [{ key: "query", label: "Query", type: "text", placeholder: "Optional search text" }],
+        ...impl(),
       },
     ],
   },
