@@ -128,9 +128,13 @@ function normalizeProposal(raw: unknown, issues: ValidationIssue[]): AgentPropos
     ? o.schedule
     : {}) as Record<string, unknown>;
 
-  const freq = String(sched.frequency || o.trigger === "schedule" ? sched.frequency || "daily" : "once");
-  const frequency =
-    freq === "daily" || freq === "weekly" || freq === "monthly" ? freq : "once";
+  let frequency: "once" | "daily" | "weekly" | "monthly" = "once";
+  const rawFreq = String(sched.frequency || "");
+  if (rawFreq === "daily" || rawFreq === "weekly" || rawFreq === "monthly") {
+    frequency = rawFreq;
+  } else if (o.trigger === "schedule") {
+    frequency = "daily";
+  }
 
   const stepsRaw = Array.isArray(o.steps) ? o.steps : [];
   const steps: ProposedStep[] = stepsRaw.map((s) => {
