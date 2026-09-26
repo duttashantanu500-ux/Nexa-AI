@@ -21,10 +21,10 @@ import {
   runStatusLabel,
   statusBadgeClass,
 } from "@/lib/runLifecycle";
-import { advanceAgentSchedule } from "@/lib/clientScheduler";
 import { Agent, AgentRun } from "@/types";
 
 const COMFY_KEY = "nexa_comfy_base_url";
+const NOTION_PARENT_KEY = "nexa_notion_default_parent";
 
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -33,7 +33,6 @@ export default function AgentDetailPage() {
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
-  const [expandedRun, setExpandedRun] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     const a = getAgent(id);
@@ -50,32 +49,6 @@ export default function AgentDetailPage() {
     refresh();
   }, [router, refresh]);
 
-  const togglePause = () => {
-    if (!agent) return;
-    const next = agent.status === "paused" ? "active" : "paused";
-    updateAgent(agent.id, {
-      status: next,
-      schedule: {
-        ...agent.schedule,
-        enabled: next !== "paused" && agent.schedule.frequency !== "once",
-      },
-    });
-    refresh();
-  };
-
-  const remove = () => {
-    if (!agent) return;
-    if (!confirm(`Delete "${agent.name}"?`)) return;
-    deleteAgent(agent.id);
-    router.push("/agents");
-  };
-
-  const dup = () => {
-    if (!agent) return;
-    const copy = duplicateAgent(agent.id);
-    if (copy) router.push(`/agents/${copy.id}`);
-  };
-
   const getComfy = () => {
     try {
       return localStorage.getItem(COMFY_KEY) || "";
@@ -83,6 +56,20 @@ export default function AgentDetailPage() {
       return "";
     }
   };
+
+  const getNotionParent = () => {
+    try {
+      return localStorage.getItem(NOTION_PARENT_KEY) || "";
+    } catch {
+      return "";
+    }
+  };
+
+  const connections = () => ({
+    comfyBaseUrl: getComfy(),
+    userId: agent?.userId || "",
+    notionDefaultParent: getNotionParent(),
+  });
 
   const execute = async (simulate: boolean) => {
     if (!agent || running) return;
@@ -120,7 +107,7 @@ export default function AgentDetailPage() {
       const result = await runWorkflow({
         steps: agent.steps,
         simulate,
-        connections: { comfyBaseUrl: getComfy(), userId: agent.userId },
+        connections: connections(),
       });
       const endedAt = new Date().toISOString();
       const durationMs = Date.parse(endedAt) - Date.parse(startedAt);
@@ -178,7 +165,12 @@ export default function AgentDetailPage() {
     if (decision === "rejected") {
       const steps = (run.stepResults || []).map((s) =>
         s.status === "awaiting_approval"
-          ? { ...s, status: "rejected" as const, endedAt: new Date().toISOString(), error: "Rejected by user" }
+          ? {
+              ...s,
+              status: "rejected" as const,
+              endedAt: new Date().toISOString(),
+              error: "Rejected by user",
+            }
           : s
       );
       updateAgentRun(run.id, {
@@ -203,7 +195,7 @@ export default function AgentDetailPage() {
       const result = await runWorkflow({
         steps: agent.steps,
         simulate: false,
-        connections: { comfyBaseUrl: getComfy(), userId: agent.userId },
+        connections: connections(),
         startIndex,
         priorResults: (run.stepResults || []).filter((s) => s.status !== "awaiting_approval"),
         priorContext: run.contextSnapshot,
@@ -275,7 +267,6 @@ export default function AgentDetailPage() {
               {agent.name}
             </h1>
             <p className="mt-1 text-sm text-zinc-500">{agent.purpose || agent.description}</p>
-            <p className="mt-1 text-[11px] text-zinc-400">Version {agent.version || 1}</p>
           </div>
           <span className={statusBadgeClass(String(agent.status))}>
             {String(agent.status).replace(/_/g, " ")}
@@ -297,25 +288,32 @@ export default function AgentDetailPage() {
             disabled={running}
             className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
           >
-            Preview (simulated)
+            Preview
           </button>
           <button
             type="button"
-            onClick={togglePause}
+            onClick={() => {
+              const next = agent.status === "paused" ? "active" : "paused";
+              updateAgent(agent.id, {
+                status: next,
+                schedule: {
+                  ...agent.schedule,
+                  enabled: next !== "paused" && agent.schedule.frequency !== "once",
+                },
+              });
+              refresh();
+            }}
             className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
           >
             {agent.status === "paused" ? "Resume" : "Pause"}
           </button>
           <button
             type="button"
-            onClick={dup}
-            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
-          >
-            Duplicate
-          </button>
-          <button
-            type="button"
-            onClick={remove}
+            onClick={() => {
+              if (!confirm(`Delete "${agent.name}"?`)) return;
+              deleteAgent(agent.id);
+              router.push("/agents");
+            }}
             className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600"
           >
             Delete
@@ -339,9 +337,6 @@ export default function AgentDetailPage() {
                 <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
                   <div>
                     <div className="font-medium">{step?.name || "Write action"}</div>
-                    <pre className="mt-1 max-h-20 overflow-auto text-[11px] text-zinc-600 dark:text-zinc-400">
-                      {JSON.stringify(step?.inputSent || {}, null, 0)}
-                    </pre>
                   </div>
                   <div className="flex gap-2">
                     <button
@@ -367,36 +362,17 @@ export default function AgentDetailPage() {
           </section>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="mb-2 text-xs font-semibold uppercase text-zinc-400">Workflow steps</div>
-            {!agent.steps?.length ? (
-              <p className="text-sm text-zinc-500">No steps</p>
-            ) : (
-              <ol className="list-decimal space-y-1 pl-4 text-sm">
-                {agent.steps.map((s) => (
-                  <li key={s.id}>
-                    {s.name}
-                    {(s.requiresApproval || false) && (
-                      <span className="ml-1 text-[10px] text-amber-600">approval</span>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            )}
-          </div>
-          <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="mb-2 text-xs font-semibold uppercase text-zinc-400">Schedule</div>
-            <p className="text-sm capitalize">{agent.schedule.frequency}</p>
-            {agent.schedule.nextRunAt && (
-              <p className="mt-1 text-xs text-zinc-500">
-                Next: {new Date(agent.schedule.nextRunAt).toLocaleString()}
-              </p>
-            )}
-            <p className="mt-2 text-[11px] text-zinc-400">
-              Browser schedules need the app open or Run now.
-            </p>
-          </div>
+        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="mb-2 text-xs font-semibold uppercase text-zinc-400">Steps</div>
+          {!agent.steps?.length ? (
+            <p className="text-sm text-zinc-500">No steps</p>
+          ) : (
+            <ol className="list-decimal space-y-1 pl-4 text-sm">
+              {agent.steps.map((s) => (
+                <li key={s.id}>{s.name}</li>
+              ))}
+            </ol>
+          )}
         </div>
 
         <section className="space-y-3">
@@ -414,33 +390,14 @@ export default function AgentDetailPage() {
                     <span className={statusBadgeClass(r.status)}>{runStatusLabel(r.status)}</span>
                     <span className="text-xs text-zinc-500">
                       {new Date(r.startedAt).toLocaleString()}
-                      {` · ${r.trigger}`}
-                      {r.isTest || r.mode === "simulated" ? " · Test" : " · Live"}
                     </span>
                   </div>
-                  {r.stepResults?.map((sr) => (
-                    <div key={sr.stepId} className="mt-2 border-t border-zinc-100 pt-2 text-xs dark:border-zinc-800">
-                      <span
-                        className={
-                          sr.status === "succeeded"
-                            ? "text-emerald-600"
-                            : sr.status === "failed" || sr.status === "rejected"
-                              ? "text-red-600"
-                              : sr.status === "awaiting_approval"
-                                ? "text-amber-600"
-                                : "text-zinc-500"
-                        }
-                      >
-                        {sr.status} — {sr.name}
-                      </span>
-                      {sr.error && <p className="text-red-600">{sr.error}</p>}
-                    </div>
-                  ))}
                   {r.output && (
                     <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-xs dark:bg-zinc-950">
                       {r.output}
                     </pre>
                   )}
+                  {r.error && <p className="mt-1 text-xs text-red-600">{r.error}</p>}
                 </li>
               ))}
             </ul>
