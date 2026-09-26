@@ -1,5 +1,15 @@
 import { NextResponse } from "next/server";
 
+function appOrigin(): string {
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
+  }
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
+  }
+  return "http://localhost:3000";
+}
+
 export async function GET() {
   const clientId = process.env.SLACK_CLIENT_ID;
   if (!clientId) {
@@ -11,13 +21,12 @@ export async function GET() {
       { status: 503 }
     );
   }
-  const origin = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : "http://localhost:3000";
-  const redirect = `${origin.replace(/\/$/, "")}/api/oauth/slack/callback`;
+
+  const redirect = `${appOrigin()}/api/oauth/slack/callback`;
   const scopes = ["channels:read", "chat:write", "channels:history"].join(",");
   const url = `https://slack.com/oauth/v2/authorize?client_id=${encodeURIComponent(
     clientId
   )}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(redirect)}`;
+
   return NextResponse.redirect(url);
 }
