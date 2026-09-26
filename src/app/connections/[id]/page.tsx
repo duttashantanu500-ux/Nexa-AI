@@ -6,8 +6,6 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { loadOperatorState } from "@/lib/operatorStore";
 import {
-  connectionMethodLabel,
-  costLabelDisplay,
   getConnector,
   statusBadgeClass,
   statusLabel,
@@ -48,6 +46,8 @@ function ConnectorDetailInner() {
   const [notionMsg, setNotionMsg] = useState("");
   const [notionWorkspace, setNotionWorkspace] = useState<string | null>(null);
   const [notionConnectPath, setNotionConnectPath] = useState<string | null>(null);
+  const [notionCanDisconnect, setNotionCanDisconnect] = useState(false);
+  const [notionSource, setNotionSource] = useState<string | null>(null);
   const [notionBusy, setNotionBusy] = useState(false);
 
   const refreshNotion = useCallback(async (uid: string) => {
@@ -61,6 +61,8 @@ function ConnectorDetailInner() {
       setNotionMsg(data.message || "");
       setNotionWorkspace(data.workspaceName || null);
       setNotionConnectPath(data.connectPath || null);
+      setNotionCanDisconnect(Boolean(data.canDisconnect));
+      setNotionSource(data.source || null);
     } catch {
       setNotionStatus("error");
       setNotionMsg("Could not load Notion status.");
@@ -84,10 +86,10 @@ function ConnectorDetailInner() {
     }
     const err = search.get("error");
     const connected = search.get("connected");
-    if (err) setBanner(`Connection issue: ${err.replace(/_/g, " ")}`);
+    if (err) setBanner(`Something went wrong: ${err.replace(/_/g, " ")}`);
     if (connected) {
-      setBanner("Notion authorized. Verifying…");
-      void refreshNotion(s.user.id).then(() => setBanner("Notion connected."));
+      setBanner("Checking Notion…");
+      void refreshNotion(s.user.id).then(() => setBanner("Notion is linked."));
     }
   }, [router, id, search, refreshNotion]);
 
@@ -95,7 +97,7 @@ function ConnectorDetailInner() {
     return (
       <AppShell>
         <div className="px-4 py-16 text-center text-sm text-zinc-500">
-          Connector not found.{" "}
+          Not found.{" "}
           <Link href="/connections" className="text-indigo-600">
             Back
           </Link>
@@ -119,7 +121,7 @@ function ConnectorDetailInner() {
   const saveComfy = () => {
     try {
       localStorage.setItem(COMFY_KEY, comfyUrl.trim());
-      setComfyMsg("Saved. Test the connection before running image workflows.");
+      setComfyMsg("Saved.");
       setComfyStatus("unknown");
     } catch {
       setComfyMsg("Could not save");
@@ -153,7 +155,7 @@ function ConnectorDetailInner() {
         body: JSON.stringify({ userId }),
       });
       const data = await res.json();
-      setBanner(data.message || (data.ok ? "OK" : "Test failed"));
+      setBanner(data.message || (data.ok ? "Success" : "Test failed"));
       await refreshNotion(userId);
     } catch {
       setBanner("Test failed");
@@ -163,25 +165,28 @@ function ConnectorDetailInner() {
 
   const disconnectNotion = async () => {
     if (!userId) return;
-    if (!confirm("Disconnect Notion from this Nexa account?")) return;
+    if (!notionCanDisconnect) {
+      setBanner(
+        "This site uses a workspace key. To turn Notion off, remove NOTION_INTERNAL_TOKEN in Vercel and redeploy."
+      );
+      return;
+    }
+    if (!confirm("Disconnect Notion from your Nexa account?")) return;
     setNotionBusy(true);
     try {
-      await fetch("/api/connections/notion/disconnect", {
+      const res = await fetch("/api/connections/notion/disconnect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId }),
       });
+      const data = await res.json();
+      setBanner(data.message || (data.ok ? "Disconnected." : "Could not disconnect."));
       await refreshNotion(userId);
-      setBanner("Notion disconnected.");
     } catch {
-      setBanner("Disconnect failed");
+      setBanner("Could not disconnect.");
     }
     setNotionBusy(false);
   };
-
-  const readActions = connector.actions.filter((a) => a.readOnly);
-  const writeActions = connector.actions.filter((a) => !a.readOnly);
-  const approvalActions = connector.actions.filter((a) => a.requiresApproval);
 
   return (
     <AppShell>
@@ -202,78 +207,96 @@ function ConnectorDetailInner() {
                 <span className={statusBadgeClass(status)}>{statusLabel(status)}</span>
               </div>
               <p className="mt-1 text-sm text-zinc-500">
-                {connector.detailDescription || connector.description}
+                {connector.id === "notion"
+                  ? "Use Notion pages from Nexa agents."
+                  : connector.detailDescription || connector.description}
               </p>
               {connector.id === "notion" && notionWorkspace && (
-                <p className="mt-1 text-xs text-zinc-400">Workspace: {notionWorkspace}</p>
+                <p className="mt-1 text-xs text-zinc-400">{notionWorkspace}</p>
               )}
             </div>
           </div>
         </div>
 
         {banner && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
             {banner}
           </div>
         )}
 
         {status === "coming_soon" && (
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-            This integration is not available yet.
+            Coming soon.
           </div>
         )}
 
         {connector.id === "notion" && (
-          <div className="flex flex-wrap gap-2">
-            {status !== "connected" && notionConnectPath && (
-              <a
-                href={notionConnectPath}
-                className="inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
-              >
-                Connect Notion
-              </a>
-            )}
-            {status === "connected" && (
-              <>
-                <button
-                  type="button"
-                  disabled={notionBusy}
-                  onClick={() => void testNotion()}
-                  className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
-                >
-                  {notionBusy ? "Working…" : "Test connection"}
-                </button>
-                <button
-                  type="button"
-                  disabled={notionBusy}
-                  onClick={() => void disconnectNotion()}
-                  className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600"
-                >
-                  Disconnect
-                </button>
-              </>
-            )}
-            {status === "available" && !notionConnectPath && (
-              <p className="text-sm text-amber-700">
-                {notionMsg ||
-                  "Set NOTION_CLIENT_ID and NOTION_CLIENT_SECRET, then redeploy."}
+          <div className="space-y-3">
+            {notionSource === "internal" && status === "connected" && (
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                Notion is linked for this whole site (workspace key). You did not need a separate
+                "Connect" click — that is expected.
               </p>
             )}
+            <div className="flex flex-wrap gap-2">
+              {status !== "connected" && notionConnectPath && (
+                <a
+                  href={notionConnectPath}
+                  className="inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
+                >
+                  Connect Notion
+                </a>
+              )}
+              {status === "connected" && (
+                <>
+                  <button
+                    type="button"
+                    disabled={notionBusy}
+                    onClick={() => void testNotion()}
+                    className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+                  >
+                    {notionBusy ? "Checking…" : "Test"}
+                  </button>
+                  {notionCanDisconnect ? (
+                    <button
+                      type="button"
+                      disabled={notionBusy}
+                      onClick={() => void disconnectNotion()}
+                      className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600"
+                    >
+                      Disconnect
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setBanner(
+                          "To turn Notion off, remove NOTION_INTERNAL_TOKEN in Vercel, then redeploy."
+                        )
+                      }
+                      className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-700"
+                    >
+                      How to turn off
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
             {status === "error" && <p className="text-sm text-red-600">{notionMsg}</p>}
           </div>
         )}
 
         {connector.id === "local_data" && (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-            Built-in and ready — no connection step required.
+            Built-in — always ready.
           </div>
         )}
 
         {connector.id === "local_comfyui" && (
           <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
-            <h2 className="text-sm font-semibold">Configure endpoint</h2>
+            <h2 className="text-sm font-semibold">Local image engine</h2>
             <label className="block space-y-1">
-              <span className="text-xs text-zinc-500">Local URL</span>
+              <span className="text-xs text-zinc-500">Address</span>
               <input
                 value={comfyUrl}
                 onChange={(e) => setComfyUrl(e.target.value)}
@@ -295,55 +318,17 @@ function ConnectorDetailInner() {
                 onClick={() => void testComfy()}
                 className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white disabled:opacity-40"
               >
-                {testing ? "Testing…" : "Test connection"}
+                {testing ? "Testing…" : "Test"}
               </button>
             </div>
-            {comfyMsg && (
-              <p
-                className={`text-xs ${
-                  comfyStatus === "ok"
-                    ? "text-emerald-600"
-                    : comfyStatus === "fail"
-                      ? "text-red-600"
-                      : "text-zinc-500"
-                }`}
-              >
-                {comfyMsg}
-              </p>
-            )}
+            {comfyMsg && <p className="text-xs text-zinc-500">{comfyMsg}</p>}
           </section>
         )}
 
         <section className="space-y-2">
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Overview</h2>
-          <dl className="grid gap-2 text-sm sm:grid-cols-2">
-            <div className="rounded-lg border border-zinc-100 px-3 py-2 dark:border-zinc-800">
-              <dt className="text-[11px] uppercase text-zinc-400">Connection method</dt>
-              <dd>{connectionMethodLabel(connector.connectionMethod)}</dd>
-            </div>
-            <div className="rounded-lg border border-zinc-100 px-3 py-2 dark:border-zinc-800">
-              <dt className="text-[11px] uppercase text-zinc-400">Cost</dt>
-              <dd>{costLabelDisplay(connector.costLabel)}</dd>
-            </div>
-          </dl>
-          <p className="text-xs text-zinc-500">{connector.costNote}</p>
-        </section>
-
-        {connector.scopes && connector.scopes.length > 0 && (
-          <section className="space-y-2">
-            <h2 className="text-sm font-semibold">Permissions & scopes</h2>
-            <ul className="list-inside list-disc text-sm text-zinc-600 dark:text-zinc-400">
-              {connector.scopes.map((s) => (
-                <li key={s}>{s}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold">Supported actions</h2>
+          <h2 className="text-sm font-semibold">What it can do</h2>
           {connector.actions.length === 0 ? (
-            <p className="text-sm text-zinc-500">No actions registered yet.</p>
+            <p className="text-sm text-zinc-500">Nothing available yet.</p>
           ) : (
             <ul className="space-y-2">
               {connector.actions.map((a) => (
@@ -353,53 +338,14 @@ function ConnectorDetailInner() {
                 >
                   <div className="font-medium">{a.name}</div>
                   <p className="text-xs text-zinc-500">{a.description}</p>
-                  <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-zinc-400">
-                    <span>{a.readOnly ? "Read-only" : "Write"}</span>
-                    {a.requiresApproval && <span>Requires approval</span>}
-                    {!a.implemented && <span>Not implemented</span>}
-                  </div>
+                  {a.requiresApproval && (
+                    <p className="mt-1 text-[11px] text-zinc-400">Asks you before running</p>
+                  )}
                 </li>
               ))}
             </ul>
           )}
         </section>
-
-        {(readActions.length > 0 || writeActions.length > 0) && (
-          <section className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg border border-zinc-100 p-3 dark:border-zinc-800">
-              <div className="text-[11px] font-medium uppercase text-zinc-400">Read-only</div>
-              <ul className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-                {readActions.map((a) => (
-                  <li key={a.id}>{a.name}</li>
-                ))}
-                {readActions.length === 0 && <li>—</li>}
-              </ul>
-            </div>
-            <div className="rounded-lg border border-zinc-100 p-3 dark:border-zinc-800">
-              <div className="text-[11px] font-medium uppercase text-zinc-400">Write</div>
-              <ul className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-                {writeActions.map((a) => (
-                  <li key={a.id}>{a.name}</li>
-                ))}
-                {writeActions.length === 0 && <li>—</li>}
-              </ul>
-            </div>
-          </section>
-        )}
-
-        {approvalActions.length > 0 && (
-          <section className="space-y-1">
-            <h2 className="text-sm font-semibold">Requires approval</h2>
-            <p className="text-xs text-zinc-500">
-              These write actions pause the run until you approve.
-            </p>
-            <ul className="list-inside list-disc text-sm text-zinc-600 dark:text-zinc-400">
-              {approvalActions.map((a) => (
-                <li key={a.id}>{a.name}</li>
-              ))}
-            </ul>
-          </section>
-        )}
       </div>
     </AppShell>
   );
