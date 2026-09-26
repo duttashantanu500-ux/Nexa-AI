@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
+import { ConnectorLogo } from "@/components/ConnectorLogo";
 import { loadOperatorState } from "@/lib/operatorStore";
 import {
   getConnector,
@@ -111,6 +112,7 @@ function ConnectorDetailInner() {
     if (connector.id === "local_comfyui") {
       return comfyStatus === "ok" || comfyUrl.trim() ? "connected" : "available";
     }
+    if (!connector.executable) return "coming_soon";
     return connector.defaultStatus;
   };
 
@@ -162,8 +164,8 @@ function ConnectorDetailInner() {
             ← Connections
           </Link>
           <div className="mt-3 flex items-start gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-lg font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-              {connector.icon}
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
+              <ConnectorLogo id={connector.id} size={28} />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -173,9 +175,7 @@ function ConnectorDetailInner() {
                 <span className={statusBadgeClass(status)}>{statusLabel(status)}</span>
               </div>
               <p className="mt-1 text-sm text-zinc-500">
-                {connector.id === "notion"
-                  ? "Connect your Notion. Agents use only your account — not Nexa's."
-                  : connector.detailDescription || connector.description}
+                {connector.detailDescription || connector.description}
               </p>
               {connector.id === "notion" && notionWorkspace && status === "connected" && (
                 <p className="mt-1 text-xs text-zinc-400">{notionWorkspace}</p>
@@ -190,7 +190,13 @@ function ConnectorDetailInner() {
           </div>
         )}
 
-        {connector.id === "notion" && (
+        {status === "coming_soon" && (
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+            Coming soon — not available to connect yet.
+          </div>
+        )}
+
+        {connector.id === "notion" && status !== "coming_soon" && (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2">
               {status !== "connected" && notionConnectPath && (
@@ -203,8 +209,7 @@ function ConnectorDetailInner() {
               )}
               {status !== "connected" && !notionConnectPath && (
                 <p className="text-sm text-amber-700 dark:text-amber-300">
-                  {notionMsg ||
-                    "Admin must set up Notion sign-in (public integration) before users can connect."}
+                  {notionMsg || "Notion sign-in is not configured on this site yet."}
                 </p>
               )}
               {status === "connected" && (
@@ -215,7 +220,7 @@ function ConnectorDetailInner() {
                     onClick={() => void testNotion()}
                     className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
                   >
-                    {notionBusy ? "Checking…" : "Test"}
+                    {notionBusy ? "Checking…" : "Test connection"}
                   </button>
                   <button
                     type="button"
@@ -231,7 +236,7 @@ function ConnectorDetailInner() {
 
             {status === "connected" && (
               <section className="space-y-2 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
-                <h2 className="text-sm font-semibold">Default page (optional, set once)</h2>
+                <h2 className="text-sm font-semibold">Default page (optional)</h2>
                 <p className="text-xs text-zinc-500">
                   Paste a link to a page in your Notion. New pages go under it.
                 </p>
@@ -291,17 +296,21 @@ function ConnectorDetailInner() {
 
         <section className="space-y-2">
           <h2 className="text-sm font-semibold">What it can do</h2>
-          <ul className="space-y-2">
-            {connector.actions.map((a) => (
-              <li
-                key={a.id}
-                className="rounded-lg border border-zinc-100 px-3 py-2 text-sm dark:border-zinc-800"
-              >
-                <div className="font-medium">{a.name}</div>
-                <p className="text-xs text-zinc-500">{a.description}</p>
-              </li>
-            ))}
-          </ul>
+          {connector.actions.length === 0 ? (
+            <p className="text-sm text-zinc-500">No actions yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {connector.actions.map((a) => (
+                <li
+                  key={a.id}
+                  className="rounded-lg border border-zinc-100 px-3 py-2 text-sm dark:border-zinc-800"
+                >
+                  <div className="font-medium">{a.name}</div>
+                  <p className="text-xs text-zinc-500">{a.description}</p>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       </div>
     </AppShell>
