@@ -120,7 +120,7 @@ export default function AgentDetailPage() {
       const result = await runWorkflow({
         steps: agent.steps,
         simulate,
-        connections: { comfyBaseUrl: getComfy() },
+        connections: { comfyBaseUrl: getComfy(), userId: agent.userId },
       });
       const endedAt = new Date().toISOString();
       const durationMs = Date.parse(endedAt) - Date.parse(startedAt);
@@ -194,7 +194,6 @@ export default function AgentDetailPage() {
       return;
     }
 
-    // Approve: resume from pending step with approval granted
     setRunning(true);
     setError("");
     updateAgentRun(run.id, { status: "running" });
@@ -204,7 +203,7 @@ export default function AgentDetailPage() {
       const result = await runWorkflow({
         steps: agent.steps,
         simulate: false,
-        connections: { comfyBaseUrl: getComfy() },
+        connections: { comfyBaseUrl: getComfy(), userId: agent.userId },
         startIndex,
         priorResults: (run.stepResults || []).filter((s) => s.status !== "awaiting_approval"),
         priorContext: run.contextSnapshot,
@@ -395,20 +394,8 @@ export default function AgentDetailPage() {
               </p>
             )}
             <p className="mt-2 text-[11px] text-zinc-400">
-              Server cron polls hourly when Supabase schedules exist. Browser-only agents need the app open or Run now.
+              Browser schedules need the app open or Run now.
             </p>
-            {agent.schedule.enabled && agent.schedule.frequency !== "once" && (
-              <button
-                type="button"
-                className="mt-2 text-xs text-indigo-600"
-                onClick={() => {
-                  advanceAgentSchedule(agent.id);
-                  refresh();
-                }}
-              >
-                Advance next run time
-              </button>
-            )}
           </div>
         </div>
 
@@ -429,7 +416,6 @@ export default function AgentDetailPage() {
                       {new Date(r.startedAt).toLocaleString()}
                       {` · ${r.trigger}`}
                       {r.isTest || r.mode === "simulated" ? " · Test" : " · Live"}
-                      {r.agentVersion != null ? ` · v${r.agentVersion}` : ""}
                     </span>
                   </div>
                   {r.stepResults?.map((sr) => (
@@ -450,31 +436,6 @@ export default function AgentDetailPage() {
                       {sr.error && <p className="text-red-600">{sr.error}</p>}
                     </div>
                   ))}
-                  <button
-                    type="button"
-                    className="mt-2 text-[11px] text-indigo-600"
-                    onClick={() => setExpandedRun(expandedRun === r.id ? null : r.id)}
-                  >
-                    {expandedRun === r.id ? "Hide audit" : "Show audit"}
-                  </button>
-                  {expandedRun === r.id &&
-                    r.stepResults?.map((sr) => (
-                      <pre
-                        key={`${sr.stepId}-a`}
-                        className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-zinc-50 p-2 text-[10px] dark:bg-zinc-950"
-                      >
-                        {JSON.stringify(
-                          {
-                            status: sr.status,
-                            inputSent: sr.inputSent,
-                            outputReceived: sr.outputReceived,
-                            error: sr.error,
-                          },
-                          null,
-                          2
-                        )}
-                      </pre>
-                    ))}
                   {r.output && (
                     <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-xs dark:bg-zinc-950">
                       {r.output}
