@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { loadOperatorState } from "@/lib/operatorStore";
 import {
@@ -17,20 +17,55 @@ import { testComfyConnection } from "@/lib/connectors/localComfy";
 
 const COMFY_KEY = "nexa_comfy_base_url";
 
-type OAuthStatus = {
-  providers: Record<string, { configured: boolean; connectPath: string | null }>;
-};
-
 export default function ConnectorDetailPage() {
+  return (
+    <Suspense
+      fallback={
+        <AppShell>
+          <div className="px-4 py-12 text-center text-sm text-zinc-500">Loading…</div>
+        </AppShell>
+      }
+    >
+      <ConnectorDetailInner />
+    </Suspense>
+  );
+}
+
+function ConnectorDetailInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const search = useSearchParams();
   const connector = getConnector(id);
 
-  const [oauth, setOauth] = useState<OAuthStatus | null>(null);
+  const [userId, setUserId] = useState("");
   const [comfyUrl, setComfyUrl] = useState("");
   const [comfyStatus, setComfyStatus] = useState<"unknown" | "ok" | "fail">("unknown");
   const [comfyMsg, setComfyMsg] = useState("");
   const [testing, setTesting] = useState(false);
+  const [banner, setBanner] = useState("");
+
+  const [notionStatus, setNotionStatus] = useState<ConnectorUiStatus | null>(null);
+  const [notionMsg, setNotionMsg] = useState("");
+  const [notionWorkspace, setNotionWorkspace] = useState<string | null>(null);
+  const [notionConnectPath, setNotionConnectPath] = useState<string | null>(null);
+  const [notionBusy, setNotionBusy] = useState(false);
+
+  const refreshNotion = useCallback(async (uid: string) => {
+    if (!uid) return;
+    try {
+      const res = await fetch(
+        `/api/connections/notion/status?userId=${encodeURIComponent(uid)}`
+      );
+      const data = await res.json();
+      setNotionStatus((data.status as ConnectorUiStatus) || "available");
+      setNotionMsg(data.message || "");
+      setNotionWorkspace(data.workspaceName || null);
+      setNotionConnectPath(data.connectPath || null);
+    } catch {
+      setNotionStatus("error");
+      setNotionMsg("Could not load Notion status.");
+    }
+  }, []);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -38,16 +73,23 @@ export default function ConnectorDetailPage() {
       router.replace("/signup");
       return;
     }
+    setUserId(s.user.id);
     try {
       setComfyUrl(localStorage.getItem(COMFY_KEY) || "");
     } catch {
       /* */
     }
-    fetch("/api/oauth/status")
-      .then((r) => r.json())
-      .then((d) => setOauth(d))
-      .catch(() => setOauth(null));
-  }, [router]);
+    if (id === "notion") {
+      void refreshNotion(s.user.id);
+    }
+    const err = search.get("error");
+    const connected = search.get("connected");
+    if (err) setBanner(`Connection issue: ${err.replace(/_/g, " ")}`);
+    if (connected) {
+      setBanner("Notion authorized. Verifying…");
+      void refreshNotion(s.user.id).then(() => setBanner("Notion connected."));
+    }
+  }, [router, id, search, refreshNotion]);
 
   if (!connector) {
     return (
@@ -63,40 +105,16 @@ export default function ConnectorDetailPage() {
   }
 
   const resolveStatus = (): ConnectorUiStatus => {
+    if (connector.id === "notion" && notionStatus) return notionStatus;
     if (connector.defaultStatus === "coming_soon") return "coming_soon";
     if (connector.id === "local_data") return "connected";
     if (connector.id === "local_comfyui") {
       return comfyStatus === "ok" || comfyUrl.trim() ? "connected" : "available";
     }
-    const key =
-      connector.id === "gmail" ||
-      connector.id === "gdrive" ||
-      connector.id === "gsheets" ||
-      connector.id === "gcal"
-        ? "google"
-        : connector.id;
-    const p = oauth?.providers?.[key];
-    // Never show Connected without verified token storage
-    if (p?.configured && connector.executable) return "available";
-    if (connector.defaultStatus === "setup_required") return "unavailable";
     return connector.defaultStatus;
   };
 
   const status = resolveStatus();
-
-  const connectHref = (): string | null => {
-    if (status === "coming_soon" || status === "unavailable") return null;
-    if (connector.id === "slack") return oauth?.providers?.slack?.connectPath || null;
-    if (connector.id === "notion") return oauth?.providers?.notion?.connectPath || null;
-    if (connector.id === "github") return oauth?.providers?.github?.connectPath || null;
-    return null;
-  };
-
-  const href = connectHref();
-  const canShowConnect =
-    Boolean(href) &&
-    (status === "available" || status === "error") &&
-    connector.connectionMethod === "oauth";
 
   const saveComfy = () => {
     try {
@@ -124,6 +142,43 @@ export default function ConnectorDetailPage() {
     setTesting(false);
   };
 
+  const testNotion = async () => {
+    if (!userId) return;
+    setNotionBusy(true);
+    setBanner("");
+    try {
+      const res = await fetch("/api/connections/notion/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      setBanner(data.message || (data.ok ? "OK" : "Test failed"));
+      await refreshNotion(userId);
+    } catch {
+      setBanner("Test failed");
+    }
+    setNotionBusy(false);
+  };
+
+  const disconnectNotion = async () => {
+    if (!userId) return;
+    if (!confirm("Disconnect Notion from this Nexa account?")) return;
+    setNotionBusy(true);
+    try {
+      await fetch("/api/connections/notion/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      await refreshNotion(userId);
+      setBanner("Notion disconnected.");
+    } catch {
+      setBanner("Disconnect failed");
+    }
+    setNotionBusy(false);
+  };
+
   const readActions = connector.actions.filter((a) => a.readOnly);
   const writeActions = connector.actions.filter((a) => !a.readOnly);
   const approvalActions = connector.actions.filter((a) => a.requiresApproval);
@@ -149,31 +204,63 @@ export default function ConnectorDetailPage() {
               <p className="mt-1 text-sm text-zinc-500">
                 {connector.detailDescription || connector.description}
               </p>
+              {connector.id === "notion" && notionWorkspace && (
+                <p className="mt-1 text-xs text-zinc-400">Workspace: {notionWorkspace}</p>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Connect / configure */}
+        {banner && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            {banner}
+          </div>
+        )}
+
         {status === "coming_soon" && (
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-            This integration is not available yet. No connect action is offered.
+            This integration is not available yet.
           </div>
         )}
 
-        {status === "unavailable" && connector.connectionMethod === "oauth" && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            Not available to connect on this deployment. OAuth is not configured end-to-end (no
-            fake Connect button).
+        {connector.id === "notion" && (
+          <div className="flex flex-wrap gap-2">
+            {status !== "connected" && notionConnectPath && (
+              <a
+                href={notionConnectPath}
+                className="inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
+              >
+                Connect Notion
+              </a>
+            )}
+            {status === "connected" && (
+              <>
+                <button
+                  type="button"
+                  disabled={notionBusy}
+                  onClick={() => void testNotion()}
+                  className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+                >
+                  {notionBusy ? "Working…" : "Test connection"}
+                </button>
+                <button
+                  type="button"
+                  disabled={notionBusy}
+                  onClick={() => void disconnectNotion()}
+                  className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600"
+                >
+                  Disconnect
+                </button>
+              </>
+            )}
+            {status === "available" && !notionConnectPath && (
+              <p className="text-sm text-amber-700">
+                {notionMsg ||
+                  "Set NOTION_CLIENT_ID and NOTION_CLIENT_SECRET, then redeploy."}
+              </p>
+            )}
+            {status === "error" && <p className="text-sm text-red-600">{notionMsg}</p>}
           </div>
-        )}
-
-        {canShowConnect && href && (
-          <a
-            href={href}
-            className="inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
-          >
-            Connect {connector.name}
-          </a>
         )}
 
         {connector.id === "local_data" && (
@@ -205,7 +292,7 @@ export default function ConnectorDetailPage() {
               <button
                 type="button"
                 disabled={testing || !comfyUrl.trim()}
-                onClick={testComfy}
+                onClick={() => void testComfy()}
                 className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white disabled:opacity-40"
               >
                 {testing ? "Testing…" : "Test connection"}
