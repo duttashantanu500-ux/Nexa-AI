@@ -50,6 +50,7 @@ export interface RuntimeConnectionConfig {
   notionToken?: string;
   githubToken?: string;
   userId?: string;
+  notionDefaultParent?: string;
 }
 
 function emptyContext(): WorkflowContext {
@@ -337,7 +338,7 @@ async function executeAction(
       return {
         ok: true,
         message: `List created with ${ctx.list.length} items`,
-        data: { count: ctx.list.length, list: ctx.list, message: `List created with ${ctx.list.length} items` },
+        data: { count: ctx.list.length, list: ctx.list },
       };
     }
     case "local_data.filter": {
@@ -351,22 +352,18 @@ async function executeAction(
       return {
         ok: true,
         message: `Filtered ${before} → ${ctx.list.length} items`,
-        data: { before, after: ctx.list.length, list: ctx.list, count: ctx.list.length },
+        data: { before, after: ctx.list.length, list: ctx.list },
       };
     }
     case "local_data.limit": {
       const n = Math.max(1, parseInt(config.count || "10", 10) || 10);
       ctx.list = ctx.list.slice(0, n);
-      return {
-        ok: true,
-        message: `Limited to ${ctx.list.length} items`,
-        data: { count: ctx.list.length, list: ctx.list },
-      };
+      return { ok: true, message: `Limited to ${ctx.list.length} items`, data: { count: ctx.list.length, list: ctx.list } };
     }
     case "local_data.template": {
       const tpl = config.template || "{{item}}";
       ctx.list = ctx.list.map((item) => tpl.replace(/\{\{\s*item\s*\}\}/gi, item));
-      return { ok: true, message: `Formatted ${ctx.list.length} items`, data: { list: ctx.list, count: ctx.list.length } };
+      return { ok: true, message: `Formatted ${ctx.list.length} items`, data: { list: ctx.list } };
     }
     case "local_data.note": {
       ctx.notes.push(config.note || "");
@@ -379,24 +376,18 @@ async function executeAction(
         "=".repeat(Math.min(title.length, 40)),
         "",
         ...(ctx.notes.length ? ["Notes:", ...ctx.notes.map((n) => `- ${n}`), ""] : []),
-        ...(ctx.imageUrl ? [`Image: ${ctx.imageUrl}`, ""] : []),
-        ...(ctx.list.length
-          ? ["Items:", ...ctx.list.map((x, i) => `${i + 1}. ${x}`)]
-          : ["(No list items)"]),
+        ...(ctx.list.length ? ["Items:", ...ctx.list.map((x, i) => `${i + 1}. ${x}`)] : ["(No list items)"]),
       ];
       ctx.report = lines.join("\n");
-      return { ok: true, message: ctx.report, data: { title, report: ctx.report, list: ctx.list, count: ctx.list.length } };
+      return { ok: true, message: ctx.report, data: { report: ctx.report } };
     }
     case "local_comfyui.test_connection": {
       if (simulate) return { ok: true, message: "[Simulated] Local engine reachable" };
       const url = connections.comfyBaseUrl || "";
-      if (!url)
-        return { ok: false, message: "Set ComfyUI URL in Connections.", error: { category: "validation" } };
+      if (!url) return { ok: false, message: "Set ComfyUI URL in Connections.", error: { category: "validation" } };
       const { testComfyConnection } = await import("./connectors/localComfy");
       const r = await testComfyConnection(url);
-      return r.ok
-        ? { ok: true, message: r.message }
-        : { ok: false, message: r.message, error: { category: "server_error" } };
+      return r.ok ? { ok: true, message: r.message } : { ok: false, message: r.message, error: { category: "server_error" } };
     }
     case "local_comfyui.generate_image": {
       if (simulate) {
@@ -404,12 +395,7 @@ async function executeAction(
         return { ok: true, message: "[Simulated] Image would be generated" };
       }
       const url = connections.comfyBaseUrl || "";
-      if (!url)
-        return {
-          ok: false,
-          message: "Local image engine is not configured.",
-          error: { category: "validation" },
-        };
+      if (!url) return { ok: false, message: "Local image engine is not configured.", error: { category: "validation" } };
       const result = await generateWithComfy({
         baseUrl: url,
         prompt: config.prompt || "",
@@ -419,23 +405,14 @@ async function executeAction(
         seed: parseInt(config.seed || "-1", 10),
       });
       if (!result.ok || !result.imageUrl) {
-        return {
-          ok: false,
-          message: result.error || "Image generation failed",
-          error: { category: "server_error" },
-        };
+        return { ok: false, message: result.error || "Image generation failed", error: { category: "server_error" } };
       }
       ctx.imageUrl = result.imageUrl;
-      ctx.sources.push({ title: "Generated image", url: result.imageUrl });
       return { ok: true, message: `Image ready: ${result.imageUrl}`, data: { url: result.imageUrl } };
     }
     case "slack.post_message": {
       if (simulate) return { ok: true, message: "[Simulated] Would post Slack message" };
-      const r = await slackPostMessage({
-        accessToken: connections.slackToken,
-        channel: config.channel || "",
-        text: config.text || "",
-      });
+      const r = await slackPostMessage({ accessToken: connections.slackToken, channel: config.channel || "", text: config.text || "" });
       return { ok: r.ok, message: r.message, data: r.data, error: r.error };
     }
     case "slack.list_channels": {
@@ -446,9 +423,7 @@ async function executeAction(
     case "notion.create_page":
     case "notion.append_blocks":
     case "notion.search": {
-      if (simulate) {
-        return { ok: true, message: `[Simulated] Would run ${actionId}` };
-      }
+      if (simulate) return { ok: true, message: `[Simulated] Would run ${actionId}` };
       if (typeof window !== "undefined" && connections.userId) {
         const res = await fetch("/api/connections/notion/execute", {
           method: "POST",
@@ -457,6 +432,7 @@ async function executeAction(
             userId: connections.userId,
             actionId,
             input: config,
+            defaultParent: connections.notionDefaultParent || "",
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -485,10 +461,7 @@ async function executeAction(
         return { ok: r.ok, message: r.message, data: r.data, error: r.error };
       }
       {
-        const r = await notionSearch({
-          accessToken: connections.notionToken,
-          query: config.query || "",
-        });
+        const r = await notionSearch({ accessToken: connections.notionToken, query: config.query || "" });
         return { ok: r.ok, message: r.message, data: r.data, error: r.error };
       }
     }
@@ -513,10 +486,6 @@ async function executeAction(
       return { ok: r.ok, message: r.message, data: r.data, error: r.error };
     }
     default:
-      return {
-        ok: false,
-        message: `Action not available: ${actionId}`,
-        error: { category: "validation" },
-      };
+      return { ok: false, message: `Action not available: ${actionId}`, error: { category: "validation" } };
   }
 }
