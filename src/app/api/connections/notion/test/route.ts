@@ -8,14 +8,14 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const userId = String(body.userId || "").trim();
     if (!userId) {
-      return NextResponse.json({ ok: false, message: "userId required" }, { status: 400 });
+      return NextResponse.json({ ok: false, message: "Please sign in first." }, { status: 400 });
     }
 
     const resolved = await resolveNotionToken(userId);
     if (!resolved) {
       return NextResponse.json({
         ok: false,
-        message: "Notion is not connected for this user.",
+        message: "Notion is not linked yet.",
       });
     }
 
@@ -26,14 +26,13 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: verify.ok,
-      message:
-        verify.ok && resolved.source === "internal"
-          ? "Internal Notion token works"
-          : verify.message,
+      message: verify.ok
+        ? "Success — Nexa can reach your Notion workspace."
+        : verify.message || "Could not reach Notion.",
       data: verify.data,
       source: resolved.source,
     });
   } catch {
-    return NextResponse.json({ ok: false, message: "Test failed" }, { status: 500 });
+    return NextResponse.json({ ok: false, message: "Test failed. Try again." }, { status: 500 });
   }
 }

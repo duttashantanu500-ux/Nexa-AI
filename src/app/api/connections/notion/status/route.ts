@@ -7,9 +7,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       configured: false,
       status: "unavailable",
-      message:
-        "Set NOTION_INTERNAL_TOKEN (simple) or NOTION_CLIENT_ID + NOTION_CLIENT_SECRET (OAuth) in Vercel.",
+      message: "Notion is not set up on this site yet.",
       connectPath: null,
+      source: null,
     });
   }
 
@@ -24,13 +24,14 @@ export async function GET(req: NextRequest) {
       configured: true,
       status: "available",
       message: canOauth
-        ? "Notion is ready to connect."
-        : "Internal token missing or invalid.",
+        ? "You can connect your Notion account."
+        : "Notion is not linked yet.",
       connectPath:
         canOauth && userId
           ? `/api/oauth/notion/start?userId=${encodeURIComponent(userId)}`
           : null,
       workspaceName: null,
+      source: null,
     });
   }
 
@@ -40,10 +41,9 @@ export async function GET(req: NextRequest) {
       configured: true,
       status: "error",
       message:
-        verify.message ||
-        (resolved.source === "internal"
-          ? "Internal Notion token is invalid. Check NOTION_INTERNAL_TOKEN."
-          : "Notion connection is invalid or revoked."),
+        resolved.source === "internal"
+          ? "The Notion key on the server is invalid. Update it in Vercel."
+          : "Notion link is broken. Try connecting again.",
       connectPath: null,
       workspaceName: resolved.meta?.workspaceName || null,
       source: resolved.source,
@@ -55,15 +55,15 @@ export async function GET(req: NextRequest) {
     status: "connected",
     message:
       resolved.source === "internal"
-        ? "Connected (internal integration token)"
-        : "Connected",
+        ? "Ready — linked with your Notion workspace key"
+        : "Ready — your Notion account is linked",
     connectPath: null,
     workspaceName:
-      resolved.meta?.workspaceName ||
-      (typeof verify.data === "object" && verify.data && "name" in verify.data
-        ? String((verify.data as { name?: string }).name || "")
-        : null),
+      resolved.source === "internal"
+        ? "Your Notion workspace"
+        : resolved.meta?.workspaceName || "Notion",
     source: resolved.source,
+    canDisconnect: resolved.source === "oauth",
     connectedAt: resolved.meta?.connectedAt,
     lastVerifiedAt: resolved.meta?.lastVerifiedAt,
   });
