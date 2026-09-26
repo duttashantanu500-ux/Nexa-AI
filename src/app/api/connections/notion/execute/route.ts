@@ -12,18 +12,15 @@ async function resolveParentId(
   input: Record<string, string>,
   defaultParent?: string
 ): Promise<{ ok: true; parentId: string } | { ok: false; message: string }> {
-  // 1. Explicit id or URL
   const direct =
     extractNotionPageId(input.parent_id || "") ||
     extractNotionPageId(input.parent_url || "") ||
-    extractNotionPageId(defaultParent || "") ||
-    extractNotionPageId(process.env.NOTION_DEFAULT_PARENT_PAGE_ID || "");
+    extractNotionPageId(defaultParent || "");
 
   if (direct) {
     return { ok: true, parentId: formatNotionPageId(direct) };
   }
 
-  // 2. Parent by name via search
   const name = (input.parent_name || input.parent || "").trim();
   if (name) {
     const search = await notionSearch({ accessToken: token, query: name });
@@ -38,14 +35,14 @@ async function resolveParentId(
     }
     return {
       ok: false,
-      message: `No Notion page found named "${name}". Share that page with Nexa, or set a default page in Connections.`,
+      message: `No page found named "${name}". Share it with Nexa in Notion, or set a default page in Connections.`,
     };
   }
 
   return {
     ok: false,
     message:
-      "No parent page set. In Connections → Notion, paste a default page link once. Or name a parent page in the agent.",
+      "Set a default page once in Connections → Notion, or name a parent page.",
   };
 }
 
@@ -59,16 +56,17 @@ export async function POST(req: NextRequest) {
 
     if (!userId || !actionId) {
       return NextResponse.json(
-        { ok: false, message: "userId and actionId required" },
+        { ok: false, message: "Sign in required." },
         { status: 400 }
       );
     }
 
+    // Only this user's Notion — never a shared admin token
     const resolved = await resolveNotionToken(userId);
     if (!resolved?.token) {
       return NextResponse.json({
         ok: false,
-        message: "Notion is not linked yet.",
+        message: "Connect your own Notion account under Connections first.",
       });
     }
 
@@ -97,8 +95,7 @@ export async function POST(req: NextRequest) {
             accessToken: resolved.token,
             query: (input.page_name || input.page || "").trim(),
           });
-          const pages =
-            (search.data as { pages?: { id: string }[] })?.pages || [];
+          const pages = (search.data as { pages?: { id: string }[] })?.pages || [];
           if (pages[0]?.id) target = pages[0].id;
         }
         result = await notionAppendBlocks({

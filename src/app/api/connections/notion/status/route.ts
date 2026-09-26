@@ -1,37 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { notionVerifyToken } from "@/lib/connectors/providers/notion";
-import { notionAdminConfigured, resolveNotionToken } from "@/lib/connectors/notionAuth";
+import { notionOAuthConfigured, resolveNotionToken } from "@/lib/connectors/notionAuth";
 
 export async function GET(req: NextRequest) {
-  if (!notionAdminConfigured()) {
+  if (!notionOAuthConfigured()) {
     return NextResponse.json({
       configured: false,
       status: "unavailable",
-      message: "Notion is not set up on this site yet.",
+      message:
+        "Notion is not set up for user sign-in yet. Admin must add NOTION_CLIENT_ID and NOTION_CLIENT_SECRET (public Notion integration).",
       connectPath: null,
       source: null,
+      canDisconnect: false,
     });
   }
 
   const userId = req.nextUrl.searchParams.get("userId")?.trim() || "";
-  const resolved = await resolveNotionToken(userId);
-
-  if (!resolved) {
-    const canOauth = Boolean(
-      process.env.NOTION_CLIENT_ID && process.env.NOTION_CLIENT_SECRET
-    );
+  if (!userId) {
     return NextResponse.json({
       configured: true,
       status: "available",
-      message: canOauth
-        ? "You can connect your Notion account."
-        : "Notion is not linked yet.",
-      connectPath:
-        canOauth && userId
-          ? `/api/oauth/notion/start?userId=${encodeURIComponent(userId)}`
-          : null,
+      message: "Sign in, then connect your own Notion account.",
+      connectPath: null,
+      source: null,
+      canDisconnect: false,
+    });
+  }
+
+  const resolved = await resolveNotionToken(userId);
+
+  if (!resolved) {
+    return NextResponse.json({
+      configured: true,
+      status: "available",
+      message: "Connect your Notion account to use it in agents.",
+      connectPath: `/api/oauth/notion/start?userId=${encodeURIComponent(userId)}`,
       workspaceName: null,
       source: null,
+      canDisconnect: false,
     });
   }
 
@@ -40,31 +46,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       configured: true,
       status: "error",
-      message:
-        resolved.source === "internal"
-          ? "The Notion key on the server is invalid. Update it in Vercel."
-          : "Notion link is broken. Try connecting again.",
-      connectPath: null,
-      workspaceName: resolved.meta?.workspaceName || null,
-      source: resolved.source,
+      message: "Your Notion link expired or was revoked. Connect again.",
+      connectPath: `/api/oauth/notion/start?userId=${encodeURIComponent(userId)}`,
+      workspaceName: resolved.meta.workspaceName || null,
+      source: "oauth",
+      canDisconnect: true,
     });
   }
 
   return NextResponse.json({
     configured: true,
     status: "connected",
-    message:
-      resolved.source === "internal"
-        ? "Ready — linked with your Notion workspace key"
-        : "Ready — your Notion account is linked",
+    message: "Your Notion account is connected",
     connectPath: null,
-    workspaceName:
-      resolved.source === "internal"
-        ? "Your Notion workspace"
-        : resolved.meta?.workspaceName || "Notion",
-    source: resolved.source,
-    canDisconnect: resolved.source === "oauth",
-    connectedAt: resolved.meta?.connectedAt,
-    lastVerifiedAt: resolved.meta?.lastVerifiedAt,
+    workspaceName: resolved.meta.workspaceName || "Notion",
+    source: "oauth",
+    canDisconnect: true,
+    connectedAt: resolved.meta.connectedAt,
+    lastVerifiedAt: resolved.meta.lastVerifiedAt,
   });
 }
