@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getConnection } from "@/lib/connectors/tokenStore";
 import {
   notionAppendBlocks,
   notionCreatePage,
   notionSearch,
 } from "@/lib/connectors/providers/notion";
+import { resolveNotionToken } from "@/lib/connectors/notionAuth";
 
-/**
- * Execute a Notion action for the authenticated Nexa user.
- * Tokens never returned to the client.
- */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -24,11 +20,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const conn = await getConnection(userId, "notion");
-    if (!conn?.accessToken) {
+    const resolved = await resolveNotionToken(userId);
+    if (!resolved?.token) {
       return NextResponse.json({
         ok: false,
-        message: "Notion is not connected. Connect it under Connections first.",
+        message:
+          "Notion is not connected. Set NOTION_INTERNAL_TOKEN in Vercel or complete OAuth.",
       });
     }
 
@@ -36,7 +33,7 @@ export async function POST(req: NextRequest) {
     switch (actionId) {
       case "notion.create_page":
         result = await notionCreatePage({
-          accessToken: conn.accessToken,
+          accessToken: resolved.token,
           parentId: input.parent_id || "",
           title: input.title || "",
           content: input.content,
@@ -44,14 +41,14 @@ export async function POST(req: NextRequest) {
         break;
       case "notion.append_blocks":
         result = await notionAppendBlocks({
-          accessToken: conn.accessToken,
+          accessToken: resolved.token,
           pageId: input.page_id || "",
           content: input.content || "",
         });
         break;
       case "notion.search":
         result = await notionSearch({
-          accessToken: conn.accessToken,
+          accessToken: resolved.token,
           query: input.query || "",
         });
         break;
