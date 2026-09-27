@@ -6,6 +6,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { ConnectorLogo } from "@/components/ConnectorLogo";
 import { loadOperatorState } from "@/lib/operatorStore";
+import { getStableUserId } from "@/lib/sessionUser";
 import {
   getConnector,
   statusBadgeClass,
@@ -44,7 +45,6 @@ function ConnectorDetailInner() {
   const [testing, setTesting] = useState(false);
   const [banner, setBanner] = useState("");
 
-  // Notion
   const [notionStatus, setNotionStatus] = useState<ConnectorUiStatus | null>(null);
   const [notionMsg, setNotionMsg] = useState("");
   const [notionWorkspace, setNotionWorkspace] = useState<string | null>(null);
@@ -53,7 +53,6 @@ function ConnectorDetailInner() {
   const [notionLoading, setNotionLoading] = useState(false);
   const [notionDefaultParent, setNotionDefaultParent] = useState("");
 
-  // Slack
   const [slackStatus, setSlackStatus] = useState<ConnectorUiStatus | null>(null);
   const [slackMsg, setSlackMsg] = useState("");
   const [slackWorkspace, setSlackWorkspace] = useState<string | null>(null);
@@ -103,24 +102,37 @@ function ConnectorDetailInner() {
 
   useEffect(() => {
     const s = loadOperatorState();
-    if (!s.user?.onboardingCompleted) {
-      router.replace("/signup");
+    const uid = getStableUserId() || s.user?.id || "";
+    if (!uid || !s.user?.onboardingCompleted) {
+      // Allow app-state-only sessions that completed onboarding
+      if (!uid) {
+        router.replace("/signup");
+        return;
+      }
+    }
+    if (s.user && !s.user.onboardingCompleted) {
+      router.replace("/onboarding");
       return;
     }
-    setUserId(s.user.id);
+
+    setUserId(uid);
     try {
       setComfyUrl(localStorage.getItem(COMFY_KEY) || "");
       setNotionDefaultParent(localStorage.getItem(NOTION_PARENT_KEY) || "");
     } catch {
       /* */
     }
-    if (id === "notion") void refreshNotion(s.user.id);
-    if (id === "slack") void refreshSlack(s.user.id);
+    if (id === "notion") void refreshNotion(uid);
+    if (id === "slack") void refreshSlack(uid);
 
     const err = search.get("error");
     const connected = search.get("connected");
     if (err) {
-      if (id === "slack") {
+      if (err === "save_failed") {
+        setBanner(
+          "We couldn't save your connection. Please try connecting again in a moment."
+        );
+      } else if (id === "slack") {
         setBanner("Slack connection did not complete. You can try again when you're ready.");
       } else {
         setBanner("Something went wrong. Please try connecting again.");
@@ -129,12 +141,12 @@ function ConnectorDetailInner() {
     if (connected) {
       if (id === "slack") {
         setBanner("Saving your Slack connection…");
-        void refreshSlack(s.user.id).then(() =>
+        void refreshSlack(uid).then(() =>
           setBanner("Your Slack workspace is connected.")
         );
       } else if (id === "notion") {
         setBanner("Saving your Notion connection…");
-        void refreshNotion(s.user.id).then(() =>
+        void refreshNotion(uid).then(() =>
           setBanner("Your Notion account is connected.")
         );
       }
