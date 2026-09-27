@@ -1,6 +1,5 @@
 /**
  * Deterministic workflow runner.
- * Notion actions call /api/connections/notion/execute (token stays server-side).
  */
 
 import { getAction } from "./actionRegistry";
@@ -89,15 +88,12 @@ export async function runWorkflow(params: {
   for (let i = start; i < ordered.length; i++) {
     if (hardFail || waitingApproval) break;
     const step = ordered[i];
-
     const def = getAction(step.actionId);
     const started = new Date().toISOString();
     const inputSent = { ...(step.config || {}) };
     const onError = step.onError || "stop";
     const maxAttempts =
-      onError === "retry"
-        ? Math.max(1, step.retryPolicy?.maxAttempts ?? 2)
-        : 1;
+      onError === "retry" ? Math.max(1, step.retryPolicy?.maxAttempts ?? 2) : 1;
 
     if (!def) {
       results.push(failResult(step, started, inputSent, "Unknown action.", simulate));
@@ -152,14 +148,9 @@ export async function runWorkflow(params: {
         String(step.inputMapping?.[f.key] ?? "").trim();
       if (f.required && !has) {
         results.push(
-          failResult(
-            step,
-            started,
-            inputSent,
-            `Please fill in: ${f.label}`,
-            simulate,
-            { category: "validation" }
-          )
+          failResult(step, started, inputSent, `Please fill in: ${f.label}`, simulate, {
+            category: "validation",
+          })
         );
         missing = true;
         break;
@@ -185,9 +176,7 @@ export async function runWorkflow(params: {
         if (!rl.ok) {
           lastError = "Please wait a moment and try again.";
           lastNorm = { category: "rate_limit" };
-          if (attempts < maxAttempts) {
-            await sleep(rl.retryAfterMs || 1000);
-          }
+          if (attempts < maxAttempts) await sleep(rl.retryAfterMs || 1000);
           continue;
         }
         const resolvedConfig = resolveConfig(
@@ -358,7 +347,11 @@ async function executeAction(
     case "local_data.limit": {
       const n = Math.max(1, parseInt(config.count || "10", 10) || 10);
       ctx.list = ctx.list.slice(0, n);
-      return { ok: true, message: `Limited to ${ctx.list.length} items`, data: { count: ctx.list.length, list: ctx.list } };
+      return {
+        ok: true,
+        message: `Limited to ${ctx.list.length} items`,
+        data: { count: ctx.list.length, list: ctx.list },
+      };
     }
     case "local_data.template": {
       const tpl = config.template || "{{item}}";
@@ -376,7 +369,9 @@ async function executeAction(
         "=".repeat(Math.min(title.length, 40)),
         "",
         ...(ctx.notes.length ? ["Notes:", ...ctx.notes.map((n) => `- ${n}`), ""] : []),
-        ...(ctx.list.length ? ["Items:", ...ctx.list.map((x, i) => `${i + 1}. ${x}`)] : ["(No list items)"]),
+        ...(ctx.list.length
+          ? ["Items:", ...ctx.list.map((x, i) => `${i + 1}. ${x}`)]
+          : ["(No list items)"]),
       ];
       ctx.report = lines.join("\n");
       return { ok: true, message: ctx.report, data: { report: ctx.report } };
@@ -384,24 +379,32 @@ async function executeAction(
     case "vault.search": {
       if (simulate) return { ok: true, message: "[Simulated] Vault search" };
       const { vaultSearchForAgent } = await import("./vaultStore");
-      const uid = connections.userId || "";
-      const msg = vaultSearchForAgent(uid, config.query || "");
+      const msg = vaultSearchForAgent(connections.userId || "", config.query || "");
       return { ok: true, message: msg, data: { query: config.query } };
     }
     case "vault.read": {
       if (simulate) return { ok: true, message: "[Simulated] Vault read" };
       const { vaultReadForAgent } = await import("./vaultStore");
-      const uid = connections.userId || "";
-      const msg = vaultReadForAgent(uid, config.name || config.query || "");
+      const msg = vaultReadForAgent(
+        connections.userId || "",
+        config.name || config.query || ""
+      );
       return { ok: true, message: msg, data: { name: config.name } };
     }
     case "local_comfyui.test_connection": {
       if (simulate) return { ok: true, message: "[Simulated] Local engine reachable" };
       const url = connections.comfyBaseUrl || "";
-      if (!url) return { ok: false, message: "Set up the local image engine in Connections first.", error: { category: "validation" } };
+      if (!url)
+        return {
+          ok: false,
+          message: "Set up the local image engine in Connections first.",
+          error: { category: "validation" },
+        };
       const { testComfyConnection } = await import("./connectors/localComfy");
       const r = await testComfyConnection(url);
-      return r.ok ? { ok: true, message: r.message } : { ok: false, message: r.message, error: { category: "server_error" } };
+      return r.ok
+        ? { ok: true, message: r.message }
+        : { ok: false, message: r.message, error: { category: "server_error" } };
     }
     case "local_comfyui.generate_image": {
       if (simulate) {
@@ -409,7 +412,12 @@ async function executeAction(
         return { ok: true, message: "[Simulated] Image would be generated" };
       }
       const url = connections.comfyBaseUrl || "";
-      if (!url) return { ok: false, message: "Local image engine is not set up yet.", error: { category: "validation" } };
+      if (!url)
+        return {
+          ok: false,
+          message: "Local image engine is not set up yet.",
+          error: { category: "validation" },
+        };
       const result = await generateWithComfy({
         baseUrl: url,
         prompt: config.prompt || "",
@@ -419,20 +427,48 @@ async function executeAction(
         seed: parseInt(config.seed || "-1", 10),
       });
       if (!result.ok || !result.imageUrl) {
-        return { ok: false, message: result.error || "Image could not be created.", error: { category: "server_error" } };
+        return {
+          ok: false,
+          message: result.error || "Image could not be created.",
+          error: { category: "server_error" },
+        };
       }
       ctx.imageUrl = result.imageUrl;
       return { ok: true, message: `Image ready: ${result.imageUrl}`, data: { url: result.imageUrl } };
     }
-    case "slack.post_message": {
-      if (simulate) return { ok: true, message: "[Simulated] Would post Slack message" };
-      const r = await slackPostMessage({ accessToken: connections.slackToken, channel: config.channel || "", text: config.text || "" });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
+    case "slack.post_message":
     case "slack.list_channels": {
-      if (simulate) return { ok: true, message: "[Simulated] Would list channels" };
-      const r = await slackListChannels({ accessToken: connections.slackToken });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      if (simulate) return { ok: true, message: `[Simulated] Would run ${actionId}` };
+      if (typeof window !== "undefined" && connections.userId) {
+        const res = await fetch("/api/connections/slack/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: connections.userId,
+            actionId,
+            input: config,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        return {
+          ok: Boolean(data.ok),
+          message: data.message || (data.ok ? "OK" : "Failed"),
+          data: data.data,
+          error: data.error,
+        };
+      }
+      if (actionId === "slack.post_message") {
+        const r = await slackPostMessage({
+          accessToken: connections.slackToken,
+          channel: config.channel || "",
+          text: config.text || "",
+        });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
+      {
+        const r = await slackListChannels({ accessToken: connections.slackToken });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
     }
     case "notion.create_page":
     case "notion.append_blocks":
@@ -475,7 +511,10 @@ async function executeAction(
         return { ok: r.ok, message: r.message, data: r.data, error: r.error };
       }
       {
-        const r = await notionSearch({ accessToken: connections.notionToken, query: config.query || "" });
+        const r = await notionSearch({
+          accessToken: connections.notionToken,
+          query: config.query || "",
+        });
         return { ok: r.ok, message: r.message, data: r.data, error: r.error };
       }
     }
@@ -500,6 +539,10 @@ async function executeAction(
       return { ok: r.ok, message: r.message, data: r.data, error: r.error };
     }
     default:
-      return { ok: false, message: "This action is not available.", error: { category: "validation" } };
+      return {
+        ok: false,
+        message: "This action is not available.",
+        error: { category: "validation" },
+      };
   }
 }
