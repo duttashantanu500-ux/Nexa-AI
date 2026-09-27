@@ -10,6 +10,7 @@ const NAV = [
   { href: "/home", label: "Home" },
   { href: "/agents", label: "Agents" },
   { href: "/connections", label: "Connections" },
+  { href: "/vault", label: "Vault" },
   { href: "/settings", label: "Settings" },
 ];
 
@@ -20,7 +21,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const s = loadOperatorState();
     setName(s.user?.name || "");
-    // Re-apply stored theme (do not force system/dark)
     applyTheme(s.theme || readStoredTheme());
   }, [pathname]);
 
