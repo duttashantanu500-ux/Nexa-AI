@@ -26,6 +26,7 @@ const SHORT: Record<string, string> = {
   gcal: "Calendar",
   local_data: "Lists & reports",
   local_comfyui: "Local images",
+  vault: "Your private files",
 };
 
 export default function ConnectionsPage() {
@@ -47,8 +48,8 @@ function ConnectionsInner() {
   const search = useSearchParams();
   const [banner, setBanner] = useState("");
   const [comfyOk, setComfyOk] = useState(false);
-  const [userId, setUserId] = useState("");
   const [notionStatus, setNotionStatus] = useState<ConnectorUiStatus | null>(null);
+  const [slackStatus, setSlackStatus] = useState<ConnectorUiStatus | null>(null);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -56,7 +57,6 @@ function ConnectionsInner() {
       router.replace("/signup");
       return;
     }
-    setUserId(s.user.id);
     try {
       setComfyOk(Boolean(localStorage.getItem(COMFY_KEY)?.trim()));
     } catch {
@@ -64,21 +64,28 @@ function ConnectionsInner() {
     }
     const err = search.get("error");
     const connected = search.get("connected");
-    if (err) setBanner(`Something went wrong: ${err.replace(/_/g, " ")}`);
+    if (err) setBanner("Something went wrong. Please try again.");
     if (connected) setBanner("Connection updated.");
 
     fetch(`/api/connections/notion/status?userId=${encodeURIComponent(s.user.id)}`)
       .then((r) => r.json())
       .then((d) => setNotionStatus((d.status as ConnectorUiStatus) || null))
       .catch(() => null);
+    fetch(`/api/connections/slack/status?userId=${encodeURIComponent(s.user.id)}`)
+      .then((r) => r.json())
+      .then((d) => setSlackStatus((d.status as ConnectorUiStatus) || null))
+      .catch(() => null);
   }, [router, search]);
 
   const resolveStatus = (c: ConnectorDefinition): ConnectorUiStatus => {
     if (c.defaultStatus === "coming_soon") return "coming_soon";
-    if (c.id === "local_data") return "connected";
+    if (c.id === "local_data" || c.id === "vault") return "connected";
     if (c.id === "local_comfyui") return comfyOk ? "connected" : "available";
     if (c.id === "notion" && notionStatus) return notionStatus;
-    // Not ready for users yet → Coming soon (not "Unavailable")
+    if (c.id === "slack" && slackStatus) return slackStatus;
+    if (c.id === "slack" || c.id === "notion") {
+      return c.defaultStatus === "available" ? "available" : c.defaultStatus;
+    }
     if (!c.executable || c.defaultStatus === "unavailable") return "coming_soon";
     return c.defaultStatus === "setup_required" ? "available" : c.defaultStatus;
   };
