@@ -112,7 +112,7 @@ export async function runWorkflow(params: {
           step,
           started,
           inputSent,
-          def.availabilityNote || "Action is not implemented.",
+          def.availabilityNote || "This action is not available yet.",
           simulate,
           { category: "not_configured" }
         )
@@ -136,7 +136,7 @@ export async function runWorkflow(params: {
         status: "awaiting_approval",
         startedAt: started,
         inputSent,
-        output: "Waiting for your approval before this write action runs.",
+        output: "Waiting for your approval before this continues.",
         simulated: false,
       });
       waitingApproval = true;
@@ -156,7 +156,7 @@ export async function runWorkflow(params: {
             step,
             started,
             inputSent,
-            `Missing required field: ${f.label}`,
+            `Please fill in: ${f.label}`,
             simulate,
             { category: "validation" }
           )
@@ -183,7 +183,7 @@ export async function runWorkflow(params: {
         const connectorId = step.connectorId || step.actionId.split(".")[0];
         const rl = takeToken(connectorId);
         if (!rl.ok) {
-          lastError = `Rate limit: wait ${Math.ceil((rl.retryAfterMs || 1000) / 1000)}s for ${connectorId}`;
+          lastError = "Please wait a moment and try again.";
           lastNorm = { category: "rate_limit" };
           if (attempts < maxAttempts) {
             await sleep(rl.retryAfterMs || 1000);
@@ -228,7 +228,7 @@ export async function runWorkflow(params: {
           }
         }
       } catch (err: unknown) {
-        lastError = err instanceof Error ? err.message : "Step failed";
+        lastError = err instanceof Error ? err.message : "Something went wrong.";
         lastNorm = { category: "unknown" };
       }
     }
@@ -243,7 +243,7 @@ export async function runWorkflow(params: {
         endedAt: new Date().toISOString(),
         inputSent,
         outputReceived: lastData,
-        error: lastError || "Step failed",
+        error: lastError || "Something went wrong.",
         normalizedError: lastNorm,
         retryCount: attempts - 1,
         simulated: simulate,
@@ -381,10 +381,24 @@ async function executeAction(
       ctx.report = lines.join("\n");
       return { ok: true, message: ctx.report, data: { report: ctx.report } };
     }
+    case "vault.search": {
+      if (simulate) return { ok: true, message: "[Simulated] Vault search" };
+      const { vaultSearchForAgent } = await import("./vaultStore");
+      const uid = connections.userId || "";
+      const msg = vaultSearchForAgent(uid, config.query || "");
+      return { ok: true, message: msg, data: { query: config.query } };
+    }
+    case "vault.read": {
+      if (simulate) return { ok: true, message: "[Simulated] Vault read" };
+      const { vaultReadForAgent } = await import("./vaultStore");
+      const uid = connections.userId || "";
+      const msg = vaultReadForAgent(uid, config.name || config.query || "");
+      return { ok: true, message: msg, data: { name: config.name } };
+    }
     case "local_comfyui.test_connection": {
       if (simulate) return { ok: true, message: "[Simulated] Local engine reachable" };
       const url = connections.comfyBaseUrl || "";
-      if (!url) return { ok: false, message: "Set ComfyUI URL in Connections.", error: { category: "validation" } };
+      if (!url) return { ok: false, message: "Set up the local image engine in Connections first.", error: { category: "validation" } };
       const { testComfyConnection } = await import("./connectors/localComfy");
       const r = await testComfyConnection(url);
       return r.ok ? { ok: true, message: r.message } : { ok: false, message: r.message, error: { category: "server_error" } };
@@ -395,7 +409,7 @@ async function executeAction(
         return { ok: true, message: "[Simulated] Image would be generated" };
       }
       const url = connections.comfyBaseUrl || "";
-      if (!url) return { ok: false, message: "Local image engine is not configured.", error: { category: "validation" } };
+      if (!url) return { ok: false, message: "Local image engine is not set up yet.", error: { category: "validation" } };
       const result = await generateWithComfy({
         baseUrl: url,
         prompt: config.prompt || "",
@@ -405,7 +419,7 @@ async function executeAction(
         seed: parseInt(config.seed || "-1", 10),
       });
       if (!result.ok || !result.imageUrl) {
-        return { ok: false, message: result.error || "Image generation failed", error: { category: "server_error" } };
+        return { ok: false, message: result.error || "Image could not be created.", error: { category: "server_error" } };
       }
       ctx.imageUrl = result.imageUrl;
       return { ok: true, message: `Image ready: ${result.imageUrl}`, data: { url: result.imageUrl } };
@@ -486,6 +500,6 @@ async function executeAction(
       return { ok: r.ok, message: r.message, data: r.data, error: r.error };
     }
     default:
-      return { ok: false, message: `Action not available: ${actionId}`, error: { category: "validation" } };
+      return { ok: false, message: "This action is not available.", error: { category: "validation" } };
   }
 }
