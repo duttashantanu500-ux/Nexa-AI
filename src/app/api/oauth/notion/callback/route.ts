@@ -52,13 +52,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(`${origin}/connections/notion?error=notion_token`);
     }
 
-    // Verify token with Notion before marking connected
     const verify = await notionVerifyToken(data.access_token);
     if (!verify.ok) {
       return NextResponse.redirect(`${origin}/connections/notion?error=notion_verify`);
     }
 
-    await saveConnection({
+    const saved = await saveConnection({
       userId,
       connectorId: "notion",
       accessToken: data.access_token,
@@ -68,6 +67,10 @@ export async function GET(req: NextRequest) {
       connectedAt: new Date().toISOString(),
       lastVerifiedAt: new Date().toISOString(),
     });
+
+    if (!saved.ok) {
+      return NextResponse.redirect(`${origin}/connections/notion?error=save_failed`);
+    }
 
     return NextResponse.redirect(`${origin}/connections/notion?connected=1`);
   } catch {

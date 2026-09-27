@@ -3,9 +3,9 @@ import {
   loadAppState,
   saveAppState,
   saveMessages,
-  loadMessages,
   createId,
 } from "./conversationStore";
+import { setUser } from "./operatorStore";
 import {
   UserProfile,
   BusinessContext,
@@ -22,7 +22,7 @@ export async function signUpWithEmail(params: {
   email: string;
   password: string;
   name: string;
-}): Promise<{ error?: string }> {
+}): Promise<{ error?: string; userId?: string }> {
   const sb = getSupabase();
   if (!sb) return { error: "Supabase is not configured." };
 
@@ -37,7 +37,6 @@ export async function signUpWithEmail(params: {
   if (error) return { error: error.message };
   if (!data.user) return { error: "Could not create account." };
 
-  // Upsert profile
   await sb.from("profiles").upsert({
     id: data.user.id,
     email: data.user.email,
@@ -54,6 +53,8 @@ export async function signUpWithEmail(params: {
     onboardingCompleted: false,
   };
 
+  // Both stores must use the same stable cloud id
+  setUser(user);
   saveAppState({
     user,
     businessContext: null,
@@ -62,7 +63,7 @@ export async function signUpWithEmail(params: {
     currentConversationId: null,
   });
 
-  return {};
+  return { userId: data.user.id };
 }
 
 export async function signInWithEmail(params: {
@@ -151,6 +152,9 @@ export async function hydrateLocalFromCloud(userId: string): Promise<void> {
     onboardingCompleted: Boolean(profile?.onboarding_completed),
   };
 
+  // Critical: Connections/agents use operatorStore — keep it in sync
+  setUser(user);
+
   const conversations: Conversation[] = (convs || []).map((c: any) => ({
     id: c.id,
     userId: c.user_id,
@@ -180,7 +184,6 @@ export async function hydrateLocalFromCloud(userId: string): Promise<void> {
     currentWorkspace: conversations[0]?.workspace || "strategy",
   });
 
-  // Load messages for each conversation (limit recent)
   for (const c of conversations.slice(0, 30)) {
     const { data: msgs } = await sb
       .from("messages")
@@ -281,7 +284,6 @@ export async function syncMemoriesToCloud(
   await sb.from("memories").upsert(rows);
 }
 
-/** After local onboarding completes */
 export async function persistOnboardingCloud(params: {
   user: UserProfile;
   businessContext: BusinessContext;

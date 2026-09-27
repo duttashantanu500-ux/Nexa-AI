@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(`${origin}/connections/slack?error=verify`);
     }
 
-    await saveConnection({
+    const saved = await saveConnection({
       userId,
       connectorId: "slack",
       accessToken: token,
@@ -64,6 +64,10 @@ export async function GET(req: NextRequest) {
       connectedAt: new Date().toISOString(),
       lastVerifiedAt: new Date().toISOString(),
     });
+
+    if (!saved.ok) {
+      return NextResponse.redirect(`${origin}/connections/slack?error=save_failed`);
+    }
 
     return NextResponse.redirect(`${origin}/connections/slack?connected=1`);
   } catch {
