@@ -1,11 +1,34 @@
 /**
  * Stable client-side user identity for connectors.
  * operatorStore and conversationStore must share the same user id.
+ *
+ * The id is also pinned under localStorage key nexa_stable_user_id so a
+ * partial store reset cannot mint a new id and orphan saved connections.
  */
 
 import { loadOperatorState, setUser } from "./operatorStore";
 import { loadAppState, saveAppState } from "./conversationStore";
 import type { UserProfile } from "@/types";
+
+const STABLE_ID_KEY = "nexa_stable_user_id";
+
+function readPinnedId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return (localStorage.getItem(STABLE_ID_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function pinId(id: string): void {
+  if (typeof window === "undefined" || !id?.trim()) return;
+  try {
+    localStorage.setItem(STABLE_ID_KEY, id.trim());
+  } catch {
+    /* */
+  }
+}
 
 /**
  * Returns the signed-in Nexa user id used for connector ownership.
@@ -17,18 +40,28 @@ export function getStableUserId(): string {
 
   const op = loadOperatorState();
   const app = loadAppState();
+  const pinned = readPinnedId();
 
   const opUser = op.user;
   const appUser = app.user;
 
-  // Prefer existing operator user (Connections / agents use this)
+  // 1) Prefer operator user, but never abandon a pinned id if it matches
   if (opUser?.id) {
-    // Keep app state in sync
-    if (!appUser?.id || appUser.id !== opUser.id) {
+    const id = opUser.id;
+    // If we already pinned a different id, keep the pinned one (source of truth for tokens)
+    const useId = pinned && pinned !== id ? pinned : id;
+    if (!pinned || pinned !== useId) pinId(useId);
+
+    if (useId !== id) {
+      // Realign operator profile to pinned id
+      setUser({ ...opUser, id: useId });
+    }
+
+    if (!appUser?.id || appUser.id !== useId) {
       saveAppState({
         user: {
           ...(appUser || opUser),
-          id: opUser.id,
+          id: useId,
           email: opUser.email || appUser?.email || "",
           name: opUser.name || appUser?.name || "",
           onboardingCompleted:
@@ -38,27 +71,36 @@ export function getStableUserId(): string {
         } as UserProfile,
       });
     }
-    return opUser.id;
+    return useId;
   }
 
-  // Fall back to app state (login/hydrate path)
+  // 2) App state
   if (appUser?.id) {
+    const useId = pinned && pinned !== appUser.id ? pinned : appUser.id;
+    pinId(useId);
     setUser({
-      id: appUser.id,
+      id: useId,
       email: appUser.email || "",
       name: appUser.name || "",
       userType: appUser.userType || "founder",
       createdAt: appUser.createdAt || new Date().toISOString(),
       onboardingCompleted: Boolean(appUser.onboardingCompleted),
     });
-    return appUser.id;
+    if (appUser.id !== useId) {
+      saveAppState({ user: { ...appUser, id: useId } });
+    }
+    return useId;
   }
+
+  // 3) Pinned only (stores empty but we still know who the user is)
+  if (pinned) return pinned;
 
   return "";
 }
 
-/** Write the same profile into both stores. */
+/** Write the same profile into both stores and pin the id. */
 export function persistUserProfile(user: UserProfile): void {
+  pinId(user.id);
   setUser(user);
   saveAppState({ user });
 }

@@ -1,6 +1,6 @@
 /**
  * Server-side OAuth token storage for connectors.
- * Tokens never go to the browser. Encrypted at rest when possible.
+ * Tokens never go to the browser. Encrypted at rest.
  *
  * When Supabase is configured, tokens MUST be written to nexa_oauth_tokens.
  * In-memory storage is only used when Supabase is not configured (local dev).
@@ -25,6 +25,7 @@ export interface StoredConnection {
 }
 
 function encryptionKey(): Buffer {
+  // Prefer a dedicated secret so rotating Notion/Slack secrets does not break decrypt.
   const secret =
     process.env.CONNECTOR_TOKEN_SECRET ||
     process.env.NOTION_CLIENT_SECRET ||
@@ -60,7 +61,7 @@ function supabaseConfigured(): boolean {
 
 function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  // Prefer service role so RLS cannot block server-side token writes/reads.
+  // Service role bypasses RLS — required for durable connector tokens.
   const key =
     process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return null;
@@ -69,11 +70,40 @@ function adminClient() {
   });
 }
 
+export function hasServiceRoleKey(): boolean {
+  return Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY?.trim());
+}
+
 /** In-memory fallback ONLY when Supabase is not configured (local/dev). */
 const memory = new Map<string, string>();
 
 function memKey(userId: string, connectorId: string) {
   return `${userId}::${connectorId}`;
+}
+
+export type StorageHealth =
+  | { ok: true; mode: "supabase" | "memory" }
+  | { ok: false; reason: "no_supabase" | "missing_table" | "rls_or_permission" | "unknown"; detail?: string };
+
+/** Probe whether connector tokens can be stored durably. */
+export async function checkTokenStorageHealth(): Promise<StorageHealth> {
+  if (!supabaseConfigured()) {
+    return { ok: true, mode: "memory" }; // local dev only
+  }
+  const sb = adminClient();
+  if (!sb) return { ok: false, reason: "no_supabase" };
+
+  const { error } = await sb.from("nexa_oauth_tokens").select("user_id").limit(1);
+  if (!error) return { ok: true, mode: "supabase" };
+
+  const msg = (error.message || "").toLowerCase();
+  if (msg.includes("does not exist") || msg.includes("schema cache")) {
+    return { ok: false, reason: "missing_table", detail: error.message };
+  }
+  if (msg.includes("permission") || msg.includes("rls") || msg.includes("policy")) {
+    return { ok: false, reason: "rls_or_permission", detail: error.message };
+  }
+  return { ok: false, reason: "unknown", detail: error.message };
 }
 
 export async function saveConnection(
@@ -110,16 +140,13 @@ export async function saveConnection(
       { onConflict: "user_id,connector_id" }
     );
     if (error) {
-      // Do NOT silently use memory in production — connection would vanish on cold start.
       console.error("[tokenStore] saveConnection failed", error.message);
       return { ok: false, error: error.message };
     }
-    // Also keep a short-lived memory copy for same-instance reads right after OAuth.
     memory.set(memKey(conn.userId, conn.connectorId), encrypted);
     return { ok: true };
   }
 
-  // Local/dev without Supabase only
   if (!supabaseConfigured()) {
     memory.set(memKey(conn.userId, conn.connectorId), encrypted);
     return { ok: true };
@@ -172,7 +199,8 @@ export async function getConnection(
       connectedAt: parsed.connectedAt,
       lastVerifiedAt: parsed.lastVerifiedAt,
     };
-  } catch {
+  } catch (e) {
+    console.error("[tokenStore] decrypt failed — check CONNECTOR_TOKEN_SECRET is stable");
     return null;
   }
 }
@@ -199,10 +227,11 @@ export async function touchVerified(userId: string, connectorId: ConnectorId): P
   await saveConnection(conn);
 }
 
-/** Sign oauth state: userId.timestamp.signature */
+/** Sign oauth state — userId may contain any characters */
 export function signOAuthState(userId: string): string {
   const ts = Date.now().toString(36);
-  const payload = `${userId}.${ts}`;
+  const uid = Buffer.from(userId, "utf8").toString("base64url");
+  const payload = `${uid}.${ts}`;
   const sig = createHash("sha256")
     .update(payload + encryptionKey().toString("hex"))
     .digest("base64url")
@@ -214,8 +243,8 @@ export function verifyOAuthState(state: string | null): string | null {
   if (!state) return null;
   const parts = state.split(".");
   if (parts.length < 3) return null;
-  const [userId, ts, sig] = parts;
-  const payload = `${userId}.${ts}`;
+  const [uidB64, ts, sig] = parts;
+  const payload = `${uidB64}.${ts}`;
   const expected = createHash("sha256")
     .update(payload + encryptionKey().toString("hex"))
     .digest("base64url")
@@ -223,5 +252,9 @@ export function verifyOAuthState(state: string | null): string | null {
   if (sig !== expected) return null;
   const age = Date.now() - parseInt(ts, 36);
   if (Number.isNaN(age) || age > 15 * 60 * 1000) return null;
-  return userId;
+  try {
+    return Buffer.from(uidB64, "base64url").toString("utf8");
+  } catch {
+    return null;
+  }
 }
