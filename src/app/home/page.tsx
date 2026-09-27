@@ -17,10 +17,10 @@ function greeting() {
 
 export default function HomePage() {
   const router = useRouter();
+  const [ready, setReady] = useState(false);
   const [name, setName] = useState("");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
-  const [oauthConfigured, setOauthConfigured] = useState<string[]>([]);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -31,18 +31,7 @@ export default function HomePage() {
     setName(s.user.name || "");
     setAgents(s.agents.filter((a) => a.userId === s.user!.id));
     setRuns(s.agentRuns.filter((r) => r.userId === s.user!.id).slice(0, 8));
-
-    fetch("/api/oauth/status")
-      .then((r) => r.json())
-      .then((d) => {
-        const list: string[] = [];
-        if (d?.providers?.slack?.configured) list.push("Slack");
-        if (d?.providers?.notion?.configured) list.push("Notion");
-        if (d?.providers?.github?.configured) list.push("GitHub");
-        if (d?.providers?.google?.configured) list.push("Google");
-        setOauthConfigured(list);
-      })
-      .catch(() => {});
+    setReady(true);
   }, [router]);
 
   const active = agents.filter((a) => a.status === "active" || a.status === "ready");
@@ -50,6 +39,14 @@ export default function HomePage() {
   const priority = CONNECTOR_REGISTRY.filter((c) =>
     ["slack", "notion", "github", "local_data"].includes(c.id)
   );
+
+  if (!ready) {
+    return (
+      <AppShell>
+        <div className="px-4 py-16 text-center text-sm text-zinc-500">Loading…</div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>
@@ -79,45 +76,27 @@ export default function HomePage() {
           </Link>
         </div>
 
-        {/* Connection overview */}
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
             Services
           </h2>
           <div className="grid gap-2 sm:grid-cols-2">
-            {priority.map((c) => {
-              const ready =
-                c.id === "local_data" ||
-                oauthConfigured.some((x) => x.toLowerCase() === c.provider);
-              return (
-                <Link
-                  key={c.id}
-                  href="/connections"
-                  className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{c.name}</span>
-                    <span
-                      className={`text-[10px] font-medium ${
-                        ready ? "text-emerald-600" : "text-amber-600"
-                      }`}
-                    >
-                      {ready ? "Ready / local" : "Setup required"}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-zinc-500 line-clamp-2">{c.description}</p>
-                </Link>
-              );
-            })}
+            {priority.map((c) => (
+              <Link
+                key={c.id}
+                href={`/connections/${c.id}`}
+                className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">{c.name}</span>
+                  <span className="text-[10px] font-medium text-zinc-500">Open</span>
+                </div>
+                <p className="mt-1 text-xs text-zinc-500 line-clamp-2">{c.description}</p>
+              </Link>
+            ))}
           </div>
-          {oauthConfigured.length === 0 && (
-            <p className="text-xs text-zinc-500">
-              Slack, Notion, and GitHub need OAuth credentials from the Nexa admin before Connect works. Local data tools work now.
-            </p>
-          )}
         </section>
 
-        {/* Agents */}
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
@@ -127,9 +106,9 @@ export default function HomePage() {
           </div>
           {agents.length === 0 ? (
             <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-700">
-              <p className="text-sm text-zinc-600">No workflow agents yet.</p>
+              <p className="text-sm text-zinc-600">No agents yet.</p>
               <Link href="/agents/new" className="mt-2 inline-block text-sm text-indigo-600">
-                Create from available connectors →
+                Create an agent →
               </Link>
             </div>
           ) : (
@@ -151,7 +130,6 @@ export default function HomePage() {
           )}
         </section>
 
-        {/* Recent runs + failures */}
         {runs.length > 0 && (
           <section className="space-y-2">
             <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
@@ -168,7 +146,10 @@ export default function HomePage() {
                 return (
                   <li key={r.id} className="px-4 py-3 text-sm">
                     <div className="flex justify-between gap-2">
-                      <Link href={`/agents/${r.agentId}`} className="font-medium hover:text-indigo-600">
+                      <Link
+                        href={`/agents/${r.agentId}`}
+                        className="font-medium hover:text-indigo-600"
+                      >
                         {agent?.name || "Agent"}
                       </Link>
                       <span
@@ -177,12 +158,10 @@ export default function HomePage() {
                         }`}
                       >
                         {r.status}
-                        {r.mode === "simulated" ? " · simulated" : ""}
                       </span>
                     </div>
                     <p className="mt-0.5 text-xs text-zinc-500">
                       {new Date(r.startedAt).toLocaleString()}
-                      {r.error ? ` · ${r.error.slice(0, 80)}` : r.summary ? ` · ${r.summary.slice(0, 80)}` : ""}
                     </p>
                   </li>
                 );

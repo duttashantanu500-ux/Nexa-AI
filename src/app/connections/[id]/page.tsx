@@ -48,10 +48,12 @@ function ConnectorDetailInner() {
   const [notionWorkspace, setNotionWorkspace] = useState<string | null>(null);
   const [notionConnectPath, setNotionConnectPath] = useState<string | null>(null);
   const [notionBusy, setNotionBusy] = useState(false);
+  const [notionLoading, setNotionLoading] = useState(false);
   const [notionDefaultParent, setNotionDefaultParent] = useState("");
 
   const refreshNotion = useCallback(async (uid: string) => {
     if (!uid) return;
+    setNotionLoading(true);
     try {
       const res = await fetch(
         `/api/connections/notion/status?userId=${encodeURIComponent(uid)}`
@@ -64,6 +66,8 @@ function ConnectorDetailInner() {
     } catch {
       setNotionStatus("error");
       setNotionMsg("Could not load status.");
+    } finally {
+      setNotionLoading(false);
     }
   }, []);
 
@@ -83,7 +87,7 @@ function ConnectorDetailInner() {
     if (id === "notion") void refreshNotion(s.user.id);
     const err = search.get("error");
     const connected = search.get("connected");
-    if (err) setBanner(`Something went wrong: ${err.replace(/_/g, " ")}`);
+    if (err) setBanner(`Something went wrong. Please try connecting again.`);
     if (connected) {
       setBanner("Saving your Notion connection…");
       void refreshNotion(s.user.id).then(() =>
@@ -105,8 +109,11 @@ function ConnectorDetailInner() {
     );
   }
 
-  const resolveStatus = (): ConnectorUiStatus => {
-    if (connector.id === "notion" && notionStatus) return notionStatus;
+  const resolveStatus = (): ConnectorUiStatus | "loading" => {
+    if (connector.id === "notion") {
+      if (notionLoading || notionStatus === null) return "loading";
+      return notionStatus;
+    }
     if (connector.defaultStatus === "coming_soon") return "coming_soon";
     if (connector.id === "local_data") return "connected";
     if (connector.id === "local_comfyui") {
@@ -117,6 +124,8 @@ function ConnectorDetailInner() {
   };
 
   const status = resolveStatus();
+  const badgeStatus: ConnectorUiStatus =
+    status === "loading" ? "available" : status;
 
   const testNotion = async () => {
     if (!userId) return;
@@ -132,7 +141,7 @@ function ConnectorDetailInner() {
       setBanner(data.message || (data.ok ? "Success" : "Failed"));
       await refreshNotion(userId);
     } catch {
-      setBanner("Test failed");
+      setBanner("Something went wrong. Please try again.");
     }
     setNotionBusy(false);
   };
@@ -172,14 +181,24 @@ function ConnectorDetailInner() {
                 <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
                   {connector.name}
                 </h1>
-                <span className={statusBadgeClass(status)}>{statusLabel(status)}</span>
+                {status === "loading" ? (
+                  <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800">
+                    Checking…
+                  </span>
+                ) : (
+                  <span className={statusBadgeClass(badgeStatus)}>
+                    {statusLabel(badgeStatus)}
+                  </span>
+                )}
               </div>
               <p className="mt-1 text-sm text-zinc-500">
                 {connector.detailDescription || connector.description}
               </p>
-              {connector.id === "notion" && notionWorkspace && status === "connected" && (
-                <p className="mt-1 text-xs text-zinc-400">{notionWorkspace}</p>
-              )}
+              {connector.id === "notion" &&
+                notionWorkspace &&
+                status === "connected" && (
+                  <p className="mt-1 text-xs text-zinc-400">{notionWorkspace}</p>
+                )}
             </div>
           </div>
         </div>
@@ -196,7 +215,11 @@ function ConnectorDetailInner() {
           </div>
         )}
 
-        {connector.id === "notion" && status !== "coming_soon" && (
+        {connector.id === "notion" && status === "loading" && (
+          <p className="text-sm text-zinc-500">Checking connection…</p>
+        )}
+
+        {connector.id === "notion" && status !== "coming_soon" && status !== "loading" && (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2">
               {status !== "connected" && notionConnectPath && (
@@ -208,8 +231,8 @@ function ConnectorDetailInner() {
                 </a>
               )}
               {status !== "connected" && !notionConnectPath && (
-                <p className="text-sm text-amber-700 dark:text-amber-300">
-                  {notionMsg || "Notion sign-in is not configured on this site yet."}
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  Connect is not available right now. Please try again in a moment.
                 </p>
               )}
               {status === "connected" && (
