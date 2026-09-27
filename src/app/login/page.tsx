@@ -8,6 +8,8 @@ import {
   signInWithGoogle,
 } from "@/lib/auth";
 import { loadAppState } from "@/lib/conversationStore";
+import { loadOperatorState } from "@/lib/operatorStore";
+import { persistUserProfile, getStableUserId } from "@/lib/sessionUser";
 import Link from "next/link";
 
 export default function LoginPage() {
@@ -17,6 +19,17 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const supabaseReady = isSupabaseConfigured();
+
+  const goAfterLogin = () => {
+    // Ensure both stores share the same user id before navigating
+    getStableUserId();
+    const op = loadOperatorState();
+    const app = loadAppState();
+    const done =
+      op.user?.onboardingCompleted || app.user?.onboardingCompleted;
+    if (!done) router.push("/onboarding");
+    else router.push("/home");
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,10 +43,20 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      const state = loadAppState();
+      // hydrateLocalFromCloud already ran; sync operatorStore
+      const app = loadAppState();
+      if (app.user?.id) {
+        persistUserProfile({
+          id: app.user.id,
+          email: app.user.email || email.toLowerCase().trim(),
+          name: app.user.name || "",
+          userType: app.user.userType || "founder",
+          createdAt: app.user.createdAt || new Date().toISOString(),
+          onboardingCompleted: Boolean(app.user.onboardingCompleted),
+        });
+      }
       setLoading(false);
-      if (!state.user?.onboardingCompleted) router.push("/onboarding");
-      else router.push("/chat");
+      goAfterLogin();
       return;
     }
 
@@ -51,10 +74,11 @@ export default function LoginPage() {
         auth.email === email.toLowerCase().trim() &&
         auth.password === password
       ) {
-        const state = loadAppState();
-        if (state.user) {
-          if (!state.user.onboardingCompleted) router.push("/onboarding");
-          else router.push("/chat");
+        getStableUserId();
+        const op = loadOperatorState();
+        const app = loadAppState();
+        if (op.user || app.user) {
+          goAfterLogin();
         } else {
           setError("Session data missing. Please sign up again.");
         }

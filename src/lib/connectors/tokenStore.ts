@@ -1,6 +1,9 @@
 /**
  * Server-side OAuth token storage for connectors.
  * Tokens never go to the browser. Encrypted at rest when possible.
+ *
+ * When Supabase is configured, tokens MUST be written to nexa_oauth_tokens.
+ * In-memory storage is only used when Supabase is not configured (local dev).
  */
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
@@ -48,8 +51,16 @@ export function decryptSecret(payload: string): string {
   return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
 }
 
+function supabaseConfigured(): boolean {
+  return Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+      (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+  );
+}
+
 function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  // Prefer service role so RLS cannot block server-side token writes/reads.
   const key =
     process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return null;
@@ -58,14 +69,20 @@ function adminClient() {
   });
 }
 
-/** In-memory fallback for local/dev when Supabase is absent (per instance). */
+/** In-memory fallback ONLY when Supabase is not configured (local/dev). */
 const memory = new Map<string, string>();
 
 function memKey(userId: string, connectorId: string) {
   return `${userId}::${connectorId}`;
 }
 
-export async function saveConnection(conn: StoredConnection): Promise<{ ok: boolean; error?: string }> {
+export async function saveConnection(
+  conn: StoredConnection
+): Promise<{ ok: boolean; error?: string }> {
+  if (!conn.userId?.trim()) {
+    return { ok: false, error: "missing_user" };
+  }
+
   const encrypted = encryptSecret(
     JSON.stringify({
       accessToken: conn.accessToken,
@@ -93,31 +110,43 @@ export async function saveConnection(conn: StoredConnection): Promise<{ ok: bool
       { onConflict: "user_id,connector_id" }
     );
     if (error) {
-      // Fall through to memory if table missing
-      memory.set(memKey(conn.userId, conn.connectorId), encrypted);
-      return { ok: true, error: `supabase_upsert_failed_using_memory: ${error.message}` };
+      // Do NOT silently use memory in production — connection would vanish on cold start.
+      console.error("[tokenStore] saveConnection failed", error.message);
+      return { ok: false, error: error.message };
     }
+    // Also keep a short-lived memory copy for same-instance reads right after OAuth.
+    memory.set(memKey(conn.userId, conn.connectorId), encrypted);
     return { ok: true };
   }
 
-  memory.set(memKey(conn.userId, conn.connectorId), encrypted);
-  return { ok: true };
+  // Local/dev without Supabase only
+  if (!supabaseConfigured()) {
+    memory.set(memKey(conn.userId, conn.connectorId), encrypted);
+    return { ok: true };
+  }
+
+  return { ok: false, error: "storage_unavailable" };
 }
 
 export async function getConnection(
   userId: string,
   connectorId: ConnectorId
 ): Promise<StoredConnection | null> {
+  if (!userId?.trim()) return null;
+
   let ciphertext: string | null = null;
 
   const sb = adminClient();
   if (sb) {
-    const { data } = await sb
+    const { data, error } = await sb
       .from("nexa_oauth_tokens")
       .select("ciphertext")
       .eq("user_id", userId)
       .eq("connector_id", connectorId)
       .maybeSingle();
+    if (error) {
+      console.error("[tokenStore] getConnection failed", error.message);
+    }
     if (data?.ciphertext) ciphertext = data.ciphertext;
   }
 

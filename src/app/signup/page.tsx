@@ -6,12 +6,13 @@ import {
   isSupabaseConfigured,
   signUpWithEmail,
   signInWithGoogle,
+  getSessionUserId,
 } from "@/lib/auth";
-import { setUser } from "@/lib/operatorStore";
+import { persistUserProfile } from "@/lib/sessionUser";
 import { UserProfile } from "@/types";
 import Link from "next/link";
 
-function uid() {
+function localUid() {
   return `u_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
@@ -41,6 +42,8 @@ export default function SignupPage() {
       return;
     }
 
+    let stableId = "";
+
     if (supabaseReady) {
       const result = await signUpWithEmail({ email, password, name });
       if (result.error) {
@@ -48,16 +51,24 @@ export default function SignupPage() {
         setLoading(false);
         return;
       }
+      // Always use the cloud account id so connector tokens survive restarts
+      stableId = (await getSessionUserId()) || "";
+    }
+
+    if (!stableId) {
+      // Local-only mode (no Supabase)
+      stableId = localUid();
     }
 
     const user: UserProfile = {
-      id: uid(),
+      id: stableId,
       email: email.toLowerCase().trim(),
       name: name.trim(),
       createdAt: new Date().toISOString(),
       onboardingCompleted: false,
     };
-    setUser(user);
+    persistUserProfile(user);
+
     try {
       localStorage.setItem(
         "nexa_auth",
