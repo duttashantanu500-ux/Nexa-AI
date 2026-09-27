@@ -312,6 +312,38 @@ interface ActionExecResult {
   error?: WorkflowStepResult["normalizedError"];
 }
 
+async function resolveSlackAccessToken(
+  connections: RuntimeConnectionConfig
+): Promise<string | undefined> {
+  if (connections.slackToken) return connections.slackToken;
+  if (connections.userId && typeof window === "undefined") {
+    try {
+      const { resolveSlackToken } = await import("./connectors/slackAuth");
+      const resolved = await resolveSlackToken(connections.userId);
+      return resolved?.token;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+async function resolveNotionAccessToken(
+  connections: RuntimeConnectionConfig
+): Promise<string | undefined> {
+  if (connections.notionToken) return connections.notionToken;
+  if (connections.userId && typeof window === "undefined") {
+    try {
+      const { resolveNotionToken } = await import("./connectors/notionAuth");
+      const resolved = await resolveNotionToken(connections.userId);
+      return resolved?.token;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 async function executeAction(
   actionId: string,
   config: Record<string, string>,
@@ -439,6 +471,7 @@ async function executeAction(
     case "slack.post_message":
     case "slack.list_channels": {
       if (simulate) return { ok: true, message: `[Simulated] Would run ${actionId}` };
+      // Browser: call API so tokens stay server-side
       if (typeof window !== "undefined" && connections.userId) {
         const res = await fetch("/api/connections/slack/execute", {
           method: "POST",
@@ -457,16 +490,25 @@ async function executeAction(
           error: data.error,
         };
       }
+      // Server: resolve this user's Slack connection
+      const token = await resolveSlackAccessToken(connections);
+      if (!token) {
+        return {
+          ok: false,
+          message: "Connect your Slack workspace under Connections first.",
+          error: { category: "not_configured" },
+        };
+      }
       if (actionId === "slack.post_message") {
         const r = await slackPostMessage({
-          accessToken: connections.slackToken,
+          accessToken: token,
           channel: config.channel || "",
           text: config.text || "",
         });
         return { ok: r.ok, message: r.message, data: r.data, error: r.error };
       }
       {
-        const r = await slackListChannels({ accessToken: connections.slackToken });
+        const r = await slackListChannels({ accessToken: token });
         return { ok: r.ok, message: r.message, data: r.data, error: r.error };
       }
     }
@@ -493,9 +535,17 @@ async function executeAction(
           error: data.error,
         };
       }
+      const notionToken = await resolveNotionAccessToken(connections);
+      if (!notionToken) {
+        return {
+          ok: false,
+          message: "Connect your Notion account under Connections first.",
+          error: { category: "not_configured" },
+        };
+      }
       if (actionId === "notion.create_page") {
         const r = await notionCreatePage({
-          accessToken: connections.notionToken,
+          accessToken: notionToken,
           parentId: config.parent_id || "",
           title: config.title || "",
           content: config.content,
@@ -504,7 +554,7 @@ async function executeAction(
       }
       if (actionId === "notion.append_blocks") {
         const r = await notionAppendBlocks({
-          accessToken: connections.notionToken,
+          accessToken: notionToken,
           pageId: config.page_id || "",
           content: config.content || "",
         });
@@ -512,7 +562,7 @@ async function executeAction(
       }
       {
         const r = await notionSearch({
-          accessToken: connections.notionToken,
+          accessToken: notionToken,
           query: config.query || "",
         });
         return { ok: r.ok, message: r.message, data: r.data, error: r.error };

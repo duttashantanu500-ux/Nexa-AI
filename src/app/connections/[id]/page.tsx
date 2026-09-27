@@ -43,6 +43,8 @@ function ConnectorDetailInner() {
   const [comfyMsg, setComfyMsg] = useState("");
   const [testing, setTesting] = useState(false);
   const [banner, setBanner] = useState("");
+
+  // Notion
   const [notionStatus, setNotionStatus] = useState<ConnectorUiStatus | null>(null);
   const [notionMsg, setNotionMsg] = useState("");
   const [notionWorkspace, setNotionWorkspace] = useState<string | null>(null);
@@ -50,6 +52,14 @@ function ConnectorDetailInner() {
   const [notionBusy, setNotionBusy] = useState(false);
   const [notionLoading, setNotionLoading] = useState(false);
   const [notionDefaultParent, setNotionDefaultParent] = useState("");
+
+  // Slack
+  const [slackStatus, setSlackStatus] = useState<ConnectorUiStatus | null>(null);
+  const [slackMsg, setSlackMsg] = useState("");
+  const [slackWorkspace, setSlackWorkspace] = useState<string | null>(null);
+  const [slackConnectPath, setSlackConnectPath] = useState<string | null>(null);
+  const [slackBusy, setSlackBusy] = useState(false);
+  const [slackLoading, setSlackLoading] = useState(false);
 
   const refreshNotion = useCallback(async (uid: string) => {
     if (!uid) return;
@@ -71,6 +81,26 @@ function ConnectorDetailInner() {
     }
   }, []);
 
+  const refreshSlack = useCallback(async (uid: string) => {
+    if (!uid) return;
+    setSlackLoading(true);
+    try {
+      const res = await fetch(
+        `/api/connections/slack/status?userId=${encodeURIComponent(uid)}`
+      );
+      const data = await res.json();
+      setSlackStatus((data.status as ConnectorUiStatus) || "available");
+      setSlackMsg(data.message || "");
+      setSlackWorkspace(data.workspaceName || null);
+      setSlackConnectPath(data.connectPath || null);
+    } catch {
+      setSlackStatus("error");
+      setSlackMsg("Could not load status.");
+    } finally {
+      setSlackLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const s = loadOperatorState();
     if (!s.user?.onboardingCompleted) {
@@ -85,16 +115,31 @@ function ConnectorDetailInner() {
       /* */
     }
     if (id === "notion") void refreshNotion(s.user.id);
+    if (id === "slack") void refreshSlack(s.user.id);
+
     const err = search.get("error");
     const connected = search.get("connected");
-    if (err) setBanner(`Something went wrong. Please try connecting again.`);
-    if (connected) {
-      setBanner("Saving your Notion connection…");
-      void refreshNotion(s.user.id).then(() =>
-        setBanner("Your Notion account is connected.")
-      );
+    if (err) {
+      if (id === "slack") {
+        setBanner("Slack connection did not complete. You can try again when you're ready.");
+      } else {
+        setBanner("Something went wrong. Please try connecting again.");
+      }
     }
-  }, [router, id, search, refreshNotion]);
+    if (connected) {
+      if (id === "slack") {
+        setBanner("Saving your Slack connection…");
+        void refreshSlack(s.user.id).then(() =>
+          setBanner("Your Slack workspace is connected.")
+        );
+      } else if (id === "notion") {
+        setBanner("Saving your Notion connection…");
+        void refreshNotion(s.user.id).then(() =>
+          setBanner("Your Notion account is connected.")
+        );
+      }
+    }
+  }, [router, id, search, refreshNotion, refreshSlack]);
 
   if (!connector) {
     return (
@@ -114,8 +159,12 @@ function ConnectorDetailInner() {
       if (notionLoading || notionStatus === null) return "loading";
       return notionStatus;
     }
+    if (connector.id === "slack") {
+      if (slackLoading || slackStatus === null) return "loading";
+      return slackStatus;
+    }
     if (connector.defaultStatus === "coming_soon") return "coming_soon";
-    if (connector.id === "local_data") return "connected";
+    if (connector.id === "local_data" || connector.id === "vault") return "connected";
     if (connector.id === "local_comfyui") {
       return comfyStatus === "ok" || comfyUrl.trim() ? "connected" : "available";
     }
@@ -165,6 +214,44 @@ function ConnectorDetailInner() {
     setNotionBusy(false);
   };
 
+  const testSlack = async () => {
+    if (!userId) return;
+    setSlackBusy(true);
+    setBanner("");
+    try {
+      const res = await fetch("/api/connections/slack/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      setBanner(data.message || (data.ok ? "Success" : "Failed"));
+      await refreshSlack(userId);
+    } catch {
+      setBanner("Something went wrong. Please try again.");
+    }
+    setSlackBusy(false);
+  };
+
+  const disconnectSlack = async () => {
+    if (!userId) return;
+    if (!confirm("Disconnect your Slack workspace from Nexa?")) return;
+    setSlackBusy(true);
+    try {
+      const res = await fetch("/api/connections/slack/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      setBanner(data.message || "Disconnected.");
+      await refreshSlack(userId);
+    } catch {
+      setBanner("Could not disconnect.");
+    }
+    setSlackBusy(false);
+  };
+
   return (
     <AppShell>
       <div className="mx-auto max-w-2xl space-y-6 px-4 py-8">
@@ -199,6 +286,11 @@ function ConnectorDetailInner() {
                 status === "connected" && (
                   <p className="mt-1 text-xs text-zinc-400">{notionWorkspace}</p>
                 )}
+              {connector.id === "slack" &&
+                slackWorkspace &&
+                status === "connected" && (
+                  <p className="mt-1 text-xs text-zinc-400">{slackWorkspace}</p>
+                )}
             </div>
           </div>
         </div>
@@ -216,6 +308,10 @@ function ConnectorDetailInner() {
         )}
 
         {connector.id === "notion" && status === "loading" && (
+          <p className="text-sm text-zinc-500">Checking connection…</p>
+        )}
+
+        {connector.id === "slack" && status === "loading" && (
           <p className="text-sm text-zinc-500">Checking connection…</p>
         )}
 
@@ -289,6 +385,51 @@ function ConnectorDetailInner() {
           </div>
         )}
 
+        {connector.id === "slack" && status !== "coming_soon" && status !== "loading" && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {status !== "connected" && slackConnectPath && (
+                <a
+                  href={slackConnectPath}
+                  className="inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
+                >
+                  Connect your Slack
+                </a>
+              )}
+              {status !== "connected" && !slackConnectPath && (
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  {slackMsg ||
+                    "Connect is not available right now. Please try again in a moment."}
+                </p>
+              )}
+              {status === "connected" && (
+                <>
+                  <button
+                    type="button"
+                    disabled={slackBusy}
+                    onClick={() => void testSlack()}
+                    className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+                  >
+                    {slackBusy ? "Checking…" : "Test connection"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={slackBusy}
+                    onClick={() => void disconnectSlack()}
+                    className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600"
+                  >
+                    Disconnect
+                  </button>
+                </>
+              )}
+            </div>
+            {status === "error" && <p className="text-sm text-red-600">{slackMsg}</p>}
+            {status === "available" && slackMsg && (
+              <p className="text-sm text-zinc-500">{slackMsg}</p>
+            )}
+          </div>
+        )}
+
         {connector.id === "local_comfyui" && (
           <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
             <h2 className="text-sm font-semibold">Local image engine</h2>
@@ -319,22 +460,35 @@ function ConnectorDetailInner() {
 
         <section className="space-y-2">
           <h2 className="text-sm font-semibold">What it can do</h2>
-          {connector.actions.length === 0 ? (
+          {connector.actions.filter((a) => a.implemented && a.available).length === 0 ? (
             <p className="text-sm text-zinc-500">No actions yet.</p>
           ) : (
             <ul className="space-y-2">
-              {connector.actions.map((a) => (
-                <li
-                  key={a.id}
-                  className="rounded-lg border border-zinc-100 px-3 py-2 text-sm dark:border-zinc-800"
-                >
-                  <div className="font-medium">{a.name}</div>
-                  <p className="text-xs text-zinc-500">{a.description}</p>
-                </li>
-              ))}
+              {connector.actions
+                .filter((a) => a.implemented && a.available)
+                .map((a) => (
+                  <li
+                    key={a.id}
+                    className="rounded-lg border border-zinc-100 px-3 py-2 text-sm dark:border-zinc-800"
+                  >
+                    <div className="font-medium">{a.name}</div>
+                    <p className="text-xs text-zinc-500">{a.description}</p>
+                  </li>
+                ))}
             </ul>
           )}
         </section>
+
+        {connector.scopes && connector.scopes.length > 0 && (
+          <section className="space-y-2">
+            <h2 className="text-sm font-semibold">Permissions</h2>
+            <ul className="list-inside list-disc text-sm text-zinc-600 dark:text-zinc-400">
+              {connector.scopes.map((s) => (
+                <li key={s}>{s}</li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
     </AppShell>
   );
