@@ -48,6 +48,7 @@ function ConnectionsInner() {
   const router = useRouter();
   const search = useSearchParams();
   const [banner, setBanner] = useState("");
+  const [storageWarning, setStorageWarning] = useState("");
   const [comfyOk, setComfyOk] = useState(false);
   const [notionStatus, setNotionStatus] = useState<ConnectorUiStatus | null>(null);
   const [slackStatus, setSlackStatus] = useState<ConnectorUiStatus | null>(null);
@@ -72,6 +73,13 @@ function ConnectionsInner() {
     const connected = search.get("connected");
     if (err) setBanner("Something went wrong. Please try again.");
     if (connected) setBanner("Connection updated.");
+
+    fetch("/api/connections/storage-health")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && d.ok === false && d.message) setStorageWarning(d.message);
+      })
+      .catch(() => null);
 
     fetch(`/api/connections/notion/status?userId=${encodeURIComponent(uid)}`)
       .then((r) => r.json())
@@ -133,6 +141,12 @@ function ConnectionsInner() {
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Connections</h1>
           <p className="mt-1 text-sm text-zinc-500">Connect the tools your agents use.</p>
         </div>
+
+        {storageWarning && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            {storageWarning}
+          </div>
+        )}
 
         {banner && (
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
