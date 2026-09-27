@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { ConnectorLogo } from "@/components/ConnectorLogo";
 import { loadOperatorState } from "@/lib/operatorStore";
+import { getStableUserId } from "@/lib/sessionUser";
 import {
   CONNECTOR_REGISTRY,
   statusBadgeClass,
@@ -53,8 +54,13 @@ function ConnectionsInner() {
 
   useEffect(() => {
     const s = loadOperatorState();
-    if (!s.user?.onboardingCompleted) {
+    const uid = getStableUserId() || s.user?.id || "";
+    if (!uid) {
       router.replace("/signup");
+      return;
+    }
+    if (s.user && !s.user.onboardingCompleted) {
+      router.replace("/onboarding");
       return;
     }
     try {
@@ -67,11 +73,11 @@ function ConnectionsInner() {
     if (err) setBanner("Something went wrong. Please try again.");
     if (connected) setBanner("Connection updated.");
 
-    fetch(`/api/connections/notion/status?userId=${encodeURIComponent(s.user.id)}`)
+    fetch(`/api/connections/notion/status?userId=${encodeURIComponent(uid)}`)
       .then((r) => r.json())
       .then((d) => setNotionStatus((d.status as ConnectorUiStatus) || null))
       .catch(() => null);
-    fetch(`/api/connections/slack/status?userId=${encodeURIComponent(s.user.id)}`)
+    fetch(`/api/connections/slack/status?userId=${encodeURIComponent(uid)}`)
       .then((r) => r.json())
       .then((d) => setSlackStatus((d.status as ConnectorUiStatus) || null))
       .catch(() => null);
