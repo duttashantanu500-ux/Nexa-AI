@@ -14,6 +14,7 @@ export const CONNECTOR_LIMITS: Record<
   github: { requestsPerMinute: 30, burst: 5 },
   local_data: { requestsPerMinute: 120, burst: 20 },
   local_comfyui: { requestsPerMinute: 10, burst: 2 },
+  ideogram: { requestsPerMinute: 10, burst: 2 },
 };
 
 export function takeToken(connectorId: string): { ok: boolean; retryAfterMs?: number } {
