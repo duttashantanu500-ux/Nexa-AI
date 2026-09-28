@@ -28,6 +28,7 @@ const SHORT: Record<string, string> = {
   local_data: "Lists & reports",
   local_comfyui: "Local images",
   vault: "Your private files",
+  buffer: "Social scheduling",
 };
 
 export default function ConnectionsPage() {
@@ -52,6 +53,7 @@ function ConnectionsInner() {
   const [comfyOk, setComfyOk] = useState(false);
   const [notionStatus, setNotionStatus] = useState<ConnectorUiStatus | null>(null);
   const [slackStatus, setSlackStatus] = useState<ConnectorUiStatus | null>(null);
+  const [bufferStatus, setBufferStatus] = useState<ConnectorUiStatus | null>(null);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -89,6 +91,10 @@ function ConnectionsInner() {
       .then((r) => r.json())
       .then((d) => setSlackStatus((d.status as ConnectorUiStatus) || null))
       .catch(() => null);
+    fetch(`/api/connections/buffer/status?userId=${encodeURIComponent(uid)}`)
+      .then((r) => r.json())
+      .then((d) => setBufferStatus((d.status as ConnectorUiStatus) || null))
+      .catch(() => null);
   }, [router, search]);
 
   const resolveStatus = (c: ConnectorDefinition): ConnectorUiStatus => {
@@ -97,7 +103,8 @@ function ConnectionsInner() {
     if (c.id === "local_comfyui") return comfyOk ? "connected" : "available";
     if (c.id === "notion" && notionStatus) return notionStatus;
     if (c.id === "slack" && slackStatus) return slackStatus;
-    if (c.id === "slack" || c.id === "notion") {
+    if (c.id === "buffer" && bufferStatus) return bufferStatus;
+    if (c.id === "slack" || c.id === "notion" || c.id === "buffer") {
       return c.defaultStatus === "available" ? "available" : c.defaultStatus;
     }
     if (!c.executable || c.defaultStatus === "unavailable") return "coming_soon";
