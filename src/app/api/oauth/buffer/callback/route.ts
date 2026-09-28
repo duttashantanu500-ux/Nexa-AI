@@ -25,25 +25,30 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${origin}/connections/buffer?error=session`);
   }
 
-  const clientId = process.env.BUFFER_CLIENT_ID;
-  const clientSecret = process.env.BUFFER_CLIENT_SECRET;
-  if (!clientId || !clientSecret || !code) {
+  const clientId = process.env.BUFFER_CLIENT_ID?.trim();
+  if (!clientId || !code) {
     return NextResponse.redirect(`${origin}/connections/buffer?error=setup`);
   }
 
   try {
     const redirectUri = `${origin}/api/oauth/buffer/callback`;
+    const body: Record<string, string> = {
+      client_id: clientId,
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+      code_verifier: verified.codeVerifier,
+    };
+    // Confidential clients only — public clients must omit client_secret
+    const clientSecret = process.env.BUFFER_CLIENT_SECRET?.trim();
+    if (clientSecret) {
+      body.client_secret = clientSecret;
+    }
+
     const res = await fetch("https://auth.buffer.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: redirectUri,
-        code_verifier: verified.codeVerifier,
-      }),
+      body: new URLSearchParams(body),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.access_token) {

@@ -7,10 +7,9 @@ import {
 
 const TOKEN_URL = "https://auth.buffer.com/token";
 
+/** Public clients only need client_id; confidential clients may also set client_secret. */
 export function bufferOAuthConfigured(): boolean {
-  return Boolean(
-    process.env.BUFFER_CLIENT_ID?.trim() && process.env.BUFFER_CLIENT_SECRET?.trim()
-  );
+  return Boolean(process.env.BUFFER_CLIENT_ID?.trim());
 }
 
 export function generatePkcePair(): { verifier: string; challenge: string } {
@@ -19,16 +18,22 @@ export function generatePkcePair(): { verifier: string; challenge: string } {
   return { verifier, challenge };
 }
 
+function stateSigningSecret(): string {
+  return (
+    process.env.CONNECTOR_TOKEN_SECRET ||
+    process.env.BUFFER_CLIENT_SECRET ||
+    process.env.BUFFER_CLIENT_ID ||
+    "nexa-dev-only-change-me"
+  );
+}
+
 /** State embeds userId + PKCE verifier (signed). */
 export function signBufferOAuthState(userId: string, codeVerifier: string): string {
   const ts = Date.now().toString(36);
   const uid = Buffer.from(userId, "utf8").toString("base64url");
   const ver = Buffer.from(codeVerifier, "utf8").toString("base64url");
   const payload = `${uid}.${ts}.${ver}`;
-  const secret =
-    process.env.CONNECTOR_TOKEN_SECRET ||
-    process.env.BUFFER_CLIENT_SECRET ||
-    "nexa-dev-only-change-me";
+  const secret = stateSigningSecret();
   const sig = createHash("sha256")
     .update(payload + createHash("sha256").update(secret).digest("hex"))
     .digest("base64url")
@@ -44,10 +49,7 @@ export function verifyBufferOAuthState(
   if (parts.length < 4) return null;
   const [uidB64, ts, verB64, sig] = parts;
   const payload = `${uidB64}.${ts}.${verB64}`;
-  const secret =
-    process.env.CONNECTOR_TOKEN_SECRET ||
-    process.env.BUFFER_CLIENT_SECRET ||
-    "nexa-dev-only-change-me";
+  const secret = stateSigningSecret();
   const expected = createHash("sha256")
     .update(payload + createHash("sha256").update(secret).digest("hex"))
     .digest("base64url")
@@ -69,20 +71,25 @@ async function refreshAccessToken(
   conn: StoredConnection
 ): Promise<StoredConnection | null> {
   if (!conn.refreshToken) return null;
-  const clientId = process.env.BUFFER_CLIENT_ID;
-  const clientSecret = process.env.BUFFER_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return null;
+  const clientId = process.env.BUFFER_CLIENT_ID?.trim();
+  if (!clientId) return null;
+
+  const body: Record<string, string> = {
+    client_id: clientId,
+    grant_type: "refresh_token",
+    refresh_token: conn.refreshToken,
+  };
+  // Confidential clients only — public clients must omit client_secret
+  const clientSecret = process.env.BUFFER_CLIENT_SECRET?.trim();
+  if (clientSecret) {
+    body.client_secret = clientSecret;
+  }
 
   try {
     const res = await fetch(TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        grant_type: "refresh_token",
-        refresh_token: conn.refreshToken,
-      }),
+      body: new URLSearchParams(body),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.access_token) return null;
