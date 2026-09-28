@@ -9,7 +9,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
-export type ConnectorId = "notion" | "slack" | "github";
+export type ConnectorId = "notion" | "slack" | "github" | "buffer";
 
 export interface StoredConnection {
   userId: string;
@@ -29,6 +29,7 @@ function encryptionKey(): Buffer {
     process.env.CONNECTOR_TOKEN_SECRET ||
     process.env.NOTION_CLIENT_SECRET ||
     process.env.SLACK_CLIENT_SECRET ||
+    process.env.BUFFER_CLIENT_SECRET ||
     "nexa-dev-only-change-me";
   return createHash("sha256").update(secret).digest();
 }
