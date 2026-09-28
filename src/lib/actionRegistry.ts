@@ -29,7 +29,7 @@ export interface ActionDefinition {
 }
 
 function categoryFor(a: ConnectorAction): ActionDefinition["category"] {
-  if (a.connectorId === "local_comfyui") return "image";
+  if (a.connectorId === "local_comfyui" || a.connectorId === "ideogram") return "image";
   if (a.connectorId === "slack" || a.connectorId === "buffer") return "messaging";
   if (a.connectorId === "notion") return "docs";
   if (a.connectorId === "github") return "code";
