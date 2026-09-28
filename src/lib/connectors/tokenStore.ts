@@ -51,15 +51,44 @@ export function decryptSecret(payload: string): string {
   return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
 }
 
+/** Strip trailing slash / path and validate Project URL shape. */
+function normalizeSupabaseUrl(raw: string | undefined): string | null {
+  if (!raw?.trim()) return null;
+  let u = raw.trim().replace(/\/+$/, "");
+  // Reject common mistakes: dashboard URL, rest path, postgres URI
+  if (u.includes("supabase.com/dashboard")) return null;
+  if (u.includes("/rest/v1")) u = u.split("/rest/v1")[0].replace(/\/+$/, "");
+  if (u.startsWith("postgres://") || u.startsWith("postgresql://")) return null;
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol !== "https:") return null;
+    // Accept both *.supabase.co and custom domains
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return null;
+  }
+}
+
+export function getSupabaseUrlHint(): string | null {
+  const raw = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!raw?.trim()) return null;
+  try {
+    const u = new URL(raw.trim());
+    return u.host || null;
+  } catch {
+    return raw.trim().slice(0, 40);
+  }
+}
+
 function supabaseConfigured(): boolean {
   return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
       (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
   );
 }
 
 function adminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const url = normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const key =
     process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return null;
@@ -95,7 +124,7 @@ function classifyStorageError(message: string, code?: string): StorageHealth {
     msg.includes("does not exist") ||
     msg.includes("schema cache") ||
     msg.includes("could not find the table") ||
-    msg.includes("relation") && msg.includes("does not exist")
+    (msg.includes("relation") && msg.includes("does not exist"))
   ) {
     return { ok: false, reason: "missing_table", detail: message };
   }
@@ -113,6 +142,9 @@ function classifyStorageError(message: string, code?: string): StorageHealth {
     msg.includes("jwt") ||
     msg.includes("invalid_api_key") ||
     msg.includes("failed to parse") ||
+    msg.includes("invalid path") ||
+    msg.includes("invalid url") ||
+    msg.includes("fetch failed") ||
     c === "pgrst301"
   ) {
     return { ok: false, reason: "bad_config", detail: message };
@@ -122,9 +154,25 @@ function classifyStorageError(message: string, code?: string): StorageHealth {
 
 /** Probe whether connector tokens can be stored durably. */
 export async function checkTokenStorageHealth(): Promise<StorageHealth> {
-  if (!supabaseConfigured()) {
+  const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!rawUrl?.trim()) {
     return { ok: true, mode: "memory" };
   }
+
+  const url = normalizeSupabaseUrl(rawUrl);
+  if (!url) {
+    return {
+      ok: false,
+      reason: "bad_config",
+      detail:
+        "NEXT_PUBLIC_SUPABASE_URL must be https://YOUR_PROJECT.supabase.co (Project URL from Supabase → Settings → API). Not the dashboard link, not postgres://, not /rest/v1.",
+    };
+  }
+
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    return { ok: false, reason: "no_supabase" };
+  }
+
   const sb = adminClient();
   if (!sb) return { ok: false, reason: "no_supabase" };
 
