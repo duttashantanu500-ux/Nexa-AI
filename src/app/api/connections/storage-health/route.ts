@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   checkTokenStorageHealth,
   hasServiceRoleKey,
+  getSupabaseUrlHint,
 } from "@/lib/connectors/tokenStore";
 
 /**
@@ -11,9 +12,10 @@ import {
 export async function GET() {
   const health = await checkTokenStorageHealth();
   const serviceRole = hasServiceRoleKey();
+  const urlHint = getSupabaseUrlHint();
   const detail =
     !health.ok && health.detail
-      ? String(health.detail).slice(0, 200)
+      ? String(health.detail).slice(0, 240)
       : undefined;
 
   if (health.ok && health.mode === "supabase") {
@@ -23,6 +25,7 @@ export async function GET() {
         ? "Connection storage is ready."
         : "Connection storage works, but add SUPABASE_SERVICE_ROLE_KEY in Vercel for reliable saves.",
       serviceRole,
+      urlHint,
     });
   }
 
@@ -32,6 +35,7 @@ export async function GET() {
       message:
         "Database is not set up. Connections will not stay after you leave the site. Add Supabase keys and create the connections table.",
       serviceRole,
+      urlHint,
     });
   }
 
@@ -50,7 +54,7 @@ export async function GET() {
       "Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Vercel.";
   } else if (reason === "bad_config") {
     message =
-      "Supabase URL or key looks wrong. In Vercel, check NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY match the same Supabase project.";
+      "Supabase URL or key looks wrong. In Vercel, set NEXT_PUBLIC_SUPABASE_URL to Project URL only: https://YOUR_REF.supabase.co (from Supabase → Settings → API). Same project as the service_role key.";
   }
 
   return NextResponse.json({
@@ -58,6 +62,7 @@ export async function GET() {
     reason,
     message,
     serviceRole,
+    urlHint,
     detail,
   });
 }
