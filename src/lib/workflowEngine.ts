@@ -119,7 +119,7 @@ export async function runWorkflow(params: {
     }
 
     if (
-      def.requiresApproval &&
+      (step.requiresApproval || def.requiresApproval) &&
       !simulate &&
       params.approvalGrantedForStepId !== step.id
     ) {
@@ -141,19 +141,35 @@ export async function runWorkflow(params: {
     }
 
     let lastError = "";
+    let lastNorm: { category?: string } | undefined;
     let succeeded = false;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (attempt > 1) await sleep((step.retryPolicy?.backoffSeconds ?? 1) * 500);
+    const connectorId = def.connectionId || step.connectorId || "local_data";
+
+    for (let attempts = 1; attempts <= maxAttempts; attempts++) {
       try {
-        const resolved = resolveConfig(step.config || {}, ctx);
-        const out = await executeAction(
+        const rl = takeToken(connectorId);
+        if (!rl.ok) {
+          lastError = "Please wait a moment and try again.";
+          lastNorm = { category: "rate_limit" };
+          if (attempts < maxAttempts) await sleep(rl.retryAfterMs || 1000);
+          continue;
+        }
+        const resolvedConfig = resolveConfig(
+          step.config || {},
+          step.inputMapping,
+          ctx.stepOutputs
+        );
+        const detail = await executeAction(
           step.actionId,
-          resolved,
+          resolvedConfig,
           ctx,
           simulate,
           params.connections || {}
         );
-        if (out.ok) {
+        if (detail.ok) {
+          succeeded = true;
+          const key = step.outputKey || step.id;
+          ctx.stepOutputs[key] = detail.data ?? detail.message;
           results.push({
             stepId: step.id,
             actionId: step.actionId,
@@ -161,29 +177,36 @@ export async function runWorkflow(params: {
             status: "succeeded",
             startedAt: started,
             endedAt: new Date().toISOString(),
-            inputSent: redactStepResult(resolved as Record<string, unknown>) as Record<
+            inputSent: redactStepResult(resolvedConfig as Record<string, unknown>) as Record<
               string,
               unknown
             >,
-            output: out.message,
-            outputReceived: out.data,
+            output: detail.message,
+            outputReceived: detail.data,
             simulated: simulate,
+            retryCount: attempts - 1,
           });
-          if (out.data !== undefined) {
-            ctx.stepOutputs[step.id] = out.data;
-          }
-          succeeded = true;
           break;
         }
-        lastError = out.message || "Step failed.";
+        lastError = detail.message || "Step failed.";
+        lastNorm = detail.error;
+        if (attempts < maxAttempts) await sleep(500);
       } catch (e) {
         lastError = e instanceof Error ? e.message : "Step failed.";
+        if (attempts < maxAttempts) await sleep(500);
       }
     }
 
     if (!succeeded) {
       results.push(
-        failResult(step, started, inputSent, lastError || "Something went wrong.", simulate)
+        failResult(
+          step,
+          started,
+          inputSent,
+          lastError || "Something went wrong.",
+          simulate,
+          lastNorm
+        )
       );
       if (onError === "continue") softFail = true;
       else hardFail = true;
