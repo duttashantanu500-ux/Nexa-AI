@@ -29,6 +29,7 @@ const SHORT: Record<string, string> = {
   local_comfyui: "Local images",
   vault: "Your private files",
   buffer: "Social scheduling",
+  ideogram: "AI images",
 };
 
 export default function ConnectionsPage() {
@@ -54,6 +55,7 @@ function ConnectionsInner() {
   const [notionStatus, setNotionStatus] = useState<ConnectorUiStatus | null>(null);
   const [slackStatus, setSlackStatus] = useState<ConnectorUiStatus | null>(null);
   const [bufferStatus, setBufferStatus] = useState<ConnectorUiStatus | null>(null);
+  const [ideogramStatus, setIdeogramStatus] = useState<ConnectorUiStatus | null>(null);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -79,7 +81,11 @@ function ConnectionsInner() {
     fetch("/api/connections/storage-health")
       .then((r) => r.json())
       .then((d) => {
-        if (d && d.ok === false && d.message) setStorageWarning(d.message);
+        if (d && d.ok === false) {
+          setStorageWarning(
+            "Connections may not save correctly right now. Try again in a moment."
+          );
+        }
       })
       .catch(() => null);
 
@@ -95,27 +101,31 @@ function ConnectionsInner() {
       .then((r) => r.json())
       .then((d) => setBufferStatus((d.status as ConnectorUiStatus) || null))
       .catch(() => null);
+    fetch(`/api/connections/ideogram/status?userId=${encodeURIComponent(uid)}`)
+      .then((r) => r.json())
+      .then((d) => setIdeogramStatus((d.status as ConnectorUiStatus) || null))
+      .catch(() => null);
   }, [router, search]);
 
   const resolveStatus = (c: ConnectorDefinition): ConnectorUiStatus => {
-    if (c.defaultStatus === "coming_soon") return "coming_soon";
     if (c.id === "local_data" || c.id === "vault") return "connected";
     if (c.id === "local_comfyui") return comfyOk ? "connected" : "available";
     if (c.id === "notion" && notionStatus) return notionStatus;
     if (c.id === "slack" && slackStatus) return slackStatus;
     if (c.id === "buffer" && bufferStatus) return bufferStatus;
-    if (c.id === "slack" || c.id === "notion" || c.id === "buffer") {
+    if (c.id === "ideogram" && ideogramStatus) return ideogramStatus;
+    if (c.id === "slack" || c.id === "notion" || c.id === "buffer" || c.id === "ideogram") {
       return c.defaultStatus === "available" ? "available" : c.defaultStatus;
     }
     if (!c.executable || c.defaultStatus === "unavailable") return "coming_soon";
-    return c.defaultStatus === "setup_required" ? "available" : c.defaultStatus;
+    return c.defaultStatus;
   };
 
   const services = CONNECTOR_REGISTRY.filter(
-    (c) => c.provider !== "builtin" && c.provider !== "comfyui"
+    (c) => !["local_data", "local_comfyui", "vault"].includes(c.id)
   );
-  const local = CONNECTOR_REGISTRY.filter(
-    (c) => c.provider === "builtin" || c.provider === "comfyui"
+  const local = CONNECTOR_REGISTRY.filter((c) =>
+    ["local_data", "local_comfyui", "vault"].includes(c.id)
   );
 
   const Card = ({ c }: { c: ConnectorDefinition }) => {
