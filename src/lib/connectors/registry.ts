@@ -20,6 +20,14 @@ function impl() {
   return { implemented: true, available: true } as const;
 }
 
+function soon() {
+  return {
+    implemented: false,
+    available: false,
+    unavailableReason: "Coming soon",
+  } as const;
+}
+
 export type ConnectorAction = {
   id: string;
   connectorId: string;
@@ -259,7 +267,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
             label: "Prompt",
             type: "textarea",
             required: true,
-            placeholder: "Describe the image you want…",
+            placeholder: "Describe the image you want\u2026",
           },
           {
             key: "aspect_ratio",
@@ -298,7 +306,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
             label: "Avoid (optional)",
             type: "textarea",
             required: false,
-            placeholder: "Things to leave out of the image…",
+            placeholder: "Things to leave out of the image\u2026",
           },
           {
             key: "seed",
@@ -311,6 +319,113 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         ...impl(),
       },
     ],
+  },
+  {
+    id: "github",
+    name: "GitHub",
+    provider: "github",
+    icon: "G",
+    description: "Code & issues",
+    detailDescription: "Connect GitHub so agents can list and create issues.",
+    connectionMethod: "oauth",
+    costLabel: "user_paid",
+    costNote: "Uses your GitHub account.",
+    configurable: true,
+    executable: false,
+    defaultStatus: "coming_soon",
+    scopes: ["List issues", "Create issues"],
+    actions: [
+      {
+        id: "github.list_issues",
+        connectorId: "github",
+        name: "List issues",
+        description: "List issues in a repository.",
+        readOnly: true,
+        requiresApproval: false,
+        riskTier: "low",
+        fields: [
+          { key: "owner", label: "Owner", type: "text", required: true },
+          { key: "repo", label: "Repo", type: "text", required: true },
+        ],
+        ...soon(),
+      },
+      {
+        id: "github.create_issue",
+        connectorId: "github",
+        name: "Create issue",
+        description: "Create an issue in a repository.",
+        readOnly: false,
+        requiresApproval: true,
+        riskTier: "medium",
+        fields: [
+          { key: "owner", label: "Owner", type: "text", required: true },
+          { key: "repo", label: "Repo", type: "text", required: true },
+          { key: "title", label: "Title", type: "text", required: true },
+          { key: "body", label: "Body", type: "textarea", required: false },
+        ],
+        ...soon(),
+      },
+    ],
+  },
+  {
+    id: "gmail",
+    name: "Gmail",
+    provider: "google",
+    icon: "M",
+    description: "Email",
+    detailDescription: "Connect Gmail so agents can read and send email on your behalf.",
+    connectionMethod: "oauth",
+    costLabel: "user_paid",
+    configurable: true,
+    executable: false,
+    defaultStatus: "coming_soon",
+    scopes: ["Read email", "Send email"],
+    actions: [],
+  },
+  {
+    id: "gdrive",
+    name: "Google Drive",
+    provider: "google",
+    icon: "D",
+    description: "Files",
+    detailDescription: "Connect Google Drive so agents can search and read your files.",
+    connectionMethod: "oauth",
+    costLabel: "user_paid",
+    configurable: true,
+    executable: false,
+    defaultStatus: "coming_soon",
+    scopes: ["Search files", "Read files"],
+    actions: [],
+  },
+  {
+    id: "gsheets",
+    name: "Google Sheets",
+    provider: "google",
+    icon: "H",
+    description: "Spreadsheets",
+    detailDescription: "Connect Google Sheets so agents can read and update spreadsheets.",
+    connectionMethod: "oauth",
+    costLabel: "user_paid",
+    configurable: true,
+    executable: false,
+    defaultStatus: "coming_soon",
+    scopes: ["Read sheets", "Update sheets"],
+    actions: [],
+  },
+  {
+    id: "gcal",
+    name: "Google Calendar",
+    provider: "google",
+    icon: "C",
+    description: "Calendar",
+    detailDescription: "Connect Google Calendar so agents can view and create events.",
+    connectionMethod: "oauth",
+    costLabel: "user_paid",
+    configurable: true,
+    executable: false,
+    defaultStatus: "coming_soon",
+    scopes: ["View events", "Create events"],
+    actions: [],
   },
   {
     id: "local_data",
@@ -449,7 +564,7 @@ export function statusLabel(s: ConnectorUiStatus): string {
     unavailable: "Unavailable",
     coming_soon: "Coming soon",
     error: "Needs attention",
-    loading: "Checking…",
+    loading: "Checking\u2026",
   };
   return map[s] || s;
 }
