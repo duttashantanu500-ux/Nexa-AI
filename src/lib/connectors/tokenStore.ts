@@ -9,7 +9,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
-export type ConnectorId = "notion" | "slack" | "github" | "buffer";
+export type ConnectorId = "notion" | "slack" | "github" | "buffer" | "ideogram";
 
 export interface StoredConnection {
   userId: string;
@@ -56,50 +56,41 @@ export function decryptSecret(payload: string): string {
 function normalizeSupabaseUrl(raw: string | undefined): string | null {
   if (!raw?.trim()) return null;
   let u = raw.trim().replace(/\/+$/, "");
-  // Reject common mistakes: dashboard URL, rest path, postgres URI
   if (u.includes("supabase.com/dashboard")) return null;
   if (u.includes("/rest/v1")) u = u.split("/rest/v1")[0].replace(/\/+$/, "");
   if (u.startsWith("postgres://") || u.startsWith("postgresql://")) return null;
   try {
     const parsed = new URL(u);
     if (parsed.protocol !== "https:") return null;
-    // Accept both *.supabase.co and custom domains
     return `${parsed.protocol}//${parsed.host}`;
   } catch {
     return null;
   }
 }
 
-export function getSupabaseUrlHint(): string | null {
-  const raw = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!raw?.trim()) return null;
-  try {
-    const u = new URL(raw.trim());
-    return u.host || null;
-  } catch {
-    return raw.trim().slice(0, 40);
-  }
-}
-
-function supabaseConfigured(): boolean {
-  return Boolean(
-    normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
-      (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
-  );
-}
-
-function adminClient() {
-  const url = normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
+function supabaseAdmin() {
+  const url =
+    normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL) ||
+    normalizeSupabaseUrl(process.env.NEXT_SUPABASE_URL);
   const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!url || !key) return null;
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
-export function hasServiceRoleKey(): boolean {
-  return Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY?.trim());
+export function getSupabaseUrlHint(): string | null {
+  const url =
+    normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL) ||
+    normalizeSupabaseUrl(process.env.NEXT_SUPABASE_URL);
+  if (!url) return null;
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
 }
 
 const memory = new Map<string, string>();
@@ -118,82 +109,34 @@ export type StorageHealth =
 
 function classifyStorageError(message: string, code?: string): StorageHealth {
   const msg = (message || "").toLowerCase();
-  const c = (code || "").toLowerCase();
-
-  if (
-    c === "42p01" ||
-    msg.includes("does not exist") ||
-    msg.includes("schema cache") ||
-    msg.includes("could not find the table") ||
-    (msg.includes("relation") && msg.includes("does not exist"))
-  ) {
+  if (code === "42P01" || msg.includes("does not exist") || msg.includes("schema cache")) {
     return { ok: false, reason: "missing_table", detail: message };
   }
-  if (
-    c === "42501" ||
-    msg.includes("permission") ||
-    msg.includes("rls") ||
-    msg.includes("policy") ||
-    msg.includes("row-level security")
-  ) {
+  if (code === "42501" || msg.includes("permission") || msg.includes("rls") || msg.includes("policy")) {
     return { ok: false, reason: "rls_or_permission", detail: message };
   }
-  if (
-    msg.includes("invalid api key") ||
-    msg.includes("jwt") ||
-    msg.includes("invalid_api_key") ||
-    msg.includes("failed to parse") ||
-    msg.includes("invalid path") ||
-    msg.includes("invalid url") ||
-    msg.includes("fetch failed") ||
-    c === "pgrst301"
-  ) {
+  if (msg.includes("invalid") || msg.includes("url") || msg.includes("fetch failed")) {
     return { ok: false, reason: "bad_config", detail: message };
   }
   return { ok: false, reason: "unknown", detail: message };
 }
 
-/** Probe whether connector tokens can be stored durably. */
-export async function checkTokenStorageHealth(): Promise<StorageHealth> {
-  const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!rawUrl?.trim()) {
+export async function checkStorageHealth(): Promise<StorageHealth> {
+  const admin = supabaseAdmin();
+  if (!admin) {
     return { ok: true, mode: "memory" };
   }
-
-  const url = normalizeSupabaseUrl(rawUrl);
-  if (!url) {
-    return {
-      ok: false,
-      reason: "bad_config",
-      detail:
-        "NEXT_PUBLIC_SUPABASE_URL must be https://YOUR_PROJECT.supabase.co (Project URL from Supabase → Settings → API). Not the dashboard link, not postgres://, not /rest/v1.",
-    };
-  }
-
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    return { ok: false, reason: "no_supabase" };
-  }
-
-  const sb = adminClient();
-  if (!sb) return { ok: false, reason: "no_supabase" };
-
   try {
-    const { error } = await sb.from("nexa_oauth_tokens").select("user_id").limit(1);
-    if (!error) return { ok: true, mode: "supabase" };
-    return classifyStorageError(error.message, (error as { code?: string }).code);
+    const { error } = await admin.from("nexa_oauth_tokens").select("user_id").limit(1);
+    if (error) return classifyStorageError(error.message, (error as { code?: string }).code);
+    return { ok: true, mode: "supabase" };
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return classifyStorageError(message);
+    return classifyStorageError(e instanceof Error ? e.message : "unknown");
   }
 }
 
-export async function saveConnection(
-  conn: StoredConnection
-): Promise<{ ok: boolean; error?: string }> {
-  if (!conn.userId?.trim()) {
-    return { ok: false, error: "missing_user" };
-  }
-
+export async function saveConnection(conn: StoredConnection): Promise<void> {
+  const admin = supabaseAdmin();
   const encrypted = encryptSecret(
     JSON.stringify({
       accessToken: conn.accessToken,
@@ -207,64 +150,53 @@ export async function saveConnection(
     })
   );
 
-  const sb = adminClient();
-  if (sb) {
-    const { error } = await sb.from("nexa_oauth_tokens").upsert(
+  if (admin) {
+    const { error } = await admin.from("nexa_oauth_tokens").upsert(
       {
         user_id: conn.userId,
         connector_id: conn.connectorId,
         ciphertext: encrypted,
-        workspace_name: conn.workspaceName || null,
-        workspace_id: conn.workspaceId || null,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id,connector_id" }
     );
     if (error) {
       console.error("[tokenStore] saveConnection failed", error.message);
-      return { ok: false, error: error.message };
+      throw new Error(error.message);
     }
     memory.set(memKey(conn.userId, conn.connectorId), encrypted);
-    return { ok: true };
+    return;
   }
 
-  if (!supabaseConfigured()) {
-    memory.set(memKey(conn.userId, conn.connectorId), encrypted);
-    return { ok: true };
-  }
-
-  return { ok: false, error: "storage_unavailable" };
+  memory.set(memKey(conn.userId, conn.connectorId), encrypted);
 }
 
-export async function getConnection(
+export async function loadConnection(
   userId: string,
   connectorId: ConnectorId
 ): Promise<StoredConnection | null> {
-  if (!userId?.trim()) return null;
+  const admin = supabaseAdmin();
+  let encrypted: string | undefined;
 
-  let ciphertext: string | null = null;
-
-  const sb = adminClient();
-  if (sb) {
-    const { data, error } = await sb
+  if (admin) {
+    const { data, error } = await admin
       .from("nexa_oauth_tokens")
       .select("ciphertext")
       .eq("user_id", userId)
       .eq("connector_id", connectorId)
       .maybeSingle();
     if (error) {
-      console.error("[tokenStore] getConnection failed", error.message);
+      console.error("[tokenStore] loadConnection failed", error.message);
+    } else if (data?.ciphertext) {
+      encrypted = data.ciphertext as string;
     }
-    if (data?.ciphertext) ciphertext = data.ciphertext;
   }
 
-  if (!ciphertext) {
-    ciphertext = memory.get(memKey(userId, connectorId)) || null;
-  }
-  if (!ciphertext) return null;
+  if (!encrypted) encrypted = memory.get(memKey(userId, connectorId));
+  if (!encrypted) return null;
 
   try {
-    const parsed = JSON.parse(decryptSecret(ciphertext)) as Omit<
+    const parsed = JSON.parse(decryptSecret(encrypted)) as Omit<
       StoredConnection,
       "userId" | "connectorId"
     >;
@@ -281,7 +213,6 @@ export async function getConnection(
       lastVerifiedAt: parsed.lastVerifiedAt,
     };
   } catch {
-    console.error("[tokenStore] decrypt failed — check CONNECTOR_TOKEN_SECRET is stable");
     return null;
   }
 }
@@ -291,50 +222,18 @@ export async function deleteConnection(
   connectorId: ConnectorId
 ): Promise<void> {
   memory.delete(memKey(userId, connectorId));
-  const sb = adminClient();
-  if (sb) {
-    await sb
-      .from("nexa_oauth_tokens")
-      .delete()
-      .eq("user_id", userId)
-      .eq("connector_id", connectorId);
-  }
+  const admin = supabaseAdmin();
+  if (!admin) return;
+  await admin
+    .from("nexa_oauth_tokens")
+    .delete()
+    .eq("user_id", userId)
+    .eq("connector_id", connectorId);
 }
 
 export async function touchVerified(userId: string, connectorId: ConnectorId): Promise<void> {
-  const conn = await getConnection(userId, connectorId);
+  const conn = await loadConnection(userId, connectorId);
   if (!conn) return;
   conn.lastVerifiedAt = new Date().toISOString();
   await saveConnection(conn);
-}
-
-export function signOAuthState(userId: string): string {
-  const ts = Date.now().toString(36);
-  const uid = Buffer.from(userId, "utf8").toString("base64url");
-  const payload = `${uid}.${ts}`;
-  const sig = createHash("sha256")
-    .update(payload + encryptionKey().toString("hex"))
-    .digest("base64url")
-    .slice(0, 16);
-  return `${payload}.${sig}`;
-}
-
-export function verifyOAuthState(state: string | null): string | null {
-  if (!state) return null;
-  const parts = state.split(".");
-  if (parts.length < 3) return null;
-  const [uidB64, ts, sig] = parts;
-  const payload = `${uidB64}.${ts}`;
-  const expected = createHash("sha256")
-    .update(payload + encryptionKey().toString("hex"))
-    .digest("base64url")
-    .slice(0, 16);
-  if (sig !== expected) return null;
-  const age = Date.now() - parseInt(ts, 36);
-  if (Number.isNaN(age) || age > 15 * 60 * 1000) return null;
-  try {
-    return Buffer.from(uidB64, "base64url").toString("utf8");
-  } catch {
-    return null;
-  }
 }
