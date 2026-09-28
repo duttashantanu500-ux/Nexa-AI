@@ -29,19 +29,34 @@ export function ConnectorLogo({
         </svg>
       );
     case "buffer":
+      /* Official Buffer mark: stacked layers (black) */
       return (
-        <svg {...common} viewBox="0 0 24 24" fill="#168EEA">
-          <path d="M13.904 13.568h-8.232c-1.728 0-2.568-.864-2.568-2.28 0-1.44.864-2.304 2.568-2.304h8.232c1.728 0 2.568.864 2.568 2.304 0 1.416-.84 2.28-2.568 2.28zm-8.232-7.632h8.232c1.728 0 2.568-.864 2.568-2.28 0-1.44-.84-2.304-2.568-2.304h-8.232c-1.728 0-2.568.864-2.568 2.304 0 1.416.84 2.28 2.568 2.28zm0 10.128c-1.584 0-2.856.48-3.624 1.248-.648.648-.984 1.512-.984 2.448 0 .936.336 1.8.984 2.448.768.768 2.04 1.248 3.624 1.248h8.232c1.584 0 2.856-.48 3.624-1.248.648-.648.984-1.512.984-2.448 0-.936-.336-1.8-.984-2.448-.768-.768-2.04-1.248-3.624-1.248h-8.232z" />
+        <svg {...common} viewBox="0 0 24 24" fill="#0D0D0D">
+          <path d="M12 2.4L3.6 6.3c-.4.2-.4.6 0 .8L12 11l8.4-3.9c.4-.2.4-.6 0-.8L12 2.4z" />
+          <path d="M3.6 11.1c-.4.2-.4.6 0 .8L12 15.8l8.4-3.9c.4-.2.4-.6 0-.8L12 14.1 3.6 11.1z" opacity="0.85" />
+          <path d="M3.6 15.9c-.4.2-.4.6 0 .8L12 20.6l8.4-3.9c.4-.2.4-.6 0-.8L12 18.9 3.6 15.9z" opacity="0.7" />
         </svg>
       );
     case "ideogram":
+      /* Ideogram mark: brain with speed lines */
       return (
         <svg {...common} viewBox="0 0 24 24" fill="none">
-          <rect width="24" height="24" rx="6" fill="#0B0B0F" />
-          <path
-            fill="#F5F5F5"
-            d="M7.5 16.5V7.5h2.2l2.1 5.4 2.1-5.4h2.2v9h-1.7v-5.9l-2.1 5.2h-1.1l-2.1-5.2v5.9H7.5z"
-          />
+          <g fill="#0D0D0D" stroke="#0D0D0D" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+            {/* speed lines */}
+            <path d="M2.5 8.5h3.5" fill="none" />
+            <path d="M2 12h4" fill="none" />
+            <path d="M2.5 15.5h3.5" fill="none" />
+            {/* brain outline */}
+            <path
+              fill="#0D0D0D"
+              stroke="none"
+              d="M14.2 4.2c-1.1 0-2.1.4-2.85 1.05A3.9 3.9 0 0 0 9.2 4.5c-2.1 0-3.8 1.7-3.8 3.8 0 .5.1 1 .28 1.45A3.3 3.3 0 0 0 4.2 12.5c0 1.7 1.25 3.1 2.9 3.4v1.9c0 .6.5 1.1 1.1 1.1h.9c.6 0 1.1-.5 1.1-1.1v-.7h1.6v.7c0 .6.5 1.1 1.1 1.1h.9c.6 0 1.1-.5 1.1-1.1v-1.85c1.75-.4 3-1.9 3-3.7 0-1.1-.45-2.05-1.2-2.75.15-.45.25-.95.25-1.45 0-2.2-1.8-4-4.05-4z"
+            />
+            {/* inner fold lines for brain texture */}
+            <path d="M9.8 9.2c.6-.5 1.3-.7 2.1-.7" fill="none" stroke="#fff" strokeWidth="1.1" />
+            <path d="M9.5 12.2c.8-.3 1.6-.3 2.4 0" fill="none" stroke="#fff" strokeWidth="1.1" />
+            <path d="M13.8 9.5c.5.4.8 1 .8 1.7" fill="none" stroke="#fff" strokeWidth="1.1" />
+          </g>
         </svg>
       );
     case "github":
@@ -67,10 +82,17 @@ export function ConnectorLogo({
         </svg>
       );
     case "vault":
+      /* Nexa Vault: purple hexagon with keyhole */
       return (
-        <svg {...common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-          <rect x="5" y="11" width="14" height="10" rx="2" />
-          <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+        <svg {...common} viewBox="0 0 24 24" fill="none">
+          <path
+            fill="#5B5CF0"
+            d="M12 1.8L3.8 6.3v11.4L12 22.2l8.2-4.5V6.3L12 1.8z"
+          />
+          <path
+            fill="#fff"
+            d="M12 8.2c-1.45 0-2.6 1.15-2.6 2.6 0 .9.45 1.7 1.2 2.15v3.35c0 .45.35.8.8.8h1.2c.45 0 .8-.35.8-.8v-3.35c.75-.45 1.2-1.25 1.2-2.15 0-1.45-1.15-2.6-2.6-2.6zm0 1.5c.6 0 1.1.5 1.1 1.1S12.6 11.9 12 11.9s-1.1-.5-1.1-1.1.5-1.1 1.1-1.1z"
+          />
         </svg>
       );
     default:
