@@ -93,6 +93,13 @@ export function getSupabaseUrlHint(): string | null {
   }
 }
 
+export function hasServiceRoleKey(): boolean {
+  return Boolean(
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
+      process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY?.trim()
+  );
+}
+
 const memory = new Map<string, string>();
 
 function memKey(userId: string, connectorId: string) {
@@ -134,6 +141,9 @@ export async function checkStorageHealth(): Promise<StorageHealth> {
     return classifyStorageError(e instanceof Error ? e.message : "unknown");
   }
 }
+
+/** Alias used by storage-health route */
+export const checkTokenStorageHealth = checkStorageHealth;
 
 export async function saveConnection(conn: StoredConnection): Promise<void> {
   const admin = supabaseAdmin();
@@ -216,6 +226,9 @@ export async function loadConnection(
     return null;
   }
 }
+
+/** Alias used by notionAuth / slackAuth / bufferAuth */
+export const getConnection = loadConnection;
 
 export async function deleteConnection(
   userId: string,
