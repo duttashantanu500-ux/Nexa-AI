@@ -11,11 +11,6 @@ import {
   notionSearch,
 } from "./connectors/providers/notion";
 import { githubCreateIssue, githubListIssues } from "./connectors/providers/github";
-import {
-  bufferCreatePost,
-  bufferListChannels,
-  bufferListPosts,
-} from "./connectors/providers/buffer";
 import type { WorkflowStep, WorkflowStepResult } from "@/types";
 import { resolveConfig } from "./mapping";
 import { takeToken } from "./rateLimit";
@@ -73,15 +68,14 @@ export async function runWorkflow(params: {
   const ctx: WorkflowContext = {
     ...emptyContext(),
     ...(params.priorContext || {}),
-    list: [...(params.priorContext?.list || [])],
-    notes: [...(params.priorContext?.notes || [])],
-    vars: { ...(params.priorContext?.vars || {}) },
-    sources: [...(params.priorContext?.sources || [])],
-    stepOutputs: { ...(params.priorContext?.stepOutputs || {}) },
+    list: params.priorContext?.list || [],
+    notes: params.priorContext?.notes || [],
+    vars: params.priorContext?.vars || {},
+    sources: params.priorContext?.sources || [],
+    stepOutputs: params.priorContext?.stepOutputs || {},
   };
   const results: WorkflowStepResult[] = [...(params.priorResults || [])];
   const simulate = Boolean(params.simulate);
-  const connections = params.connections || {};
   let hardFail = false;
   let softFail = false;
   let waitingApproval = false;
@@ -102,9 +96,7 @@ export async function runWorkflow(params: {
       onError === "retry" ? Math.max(1, step.retryPolicy?.maxAttempts ?? 2) : 1;
 
     if (!def) {
-      results.push(
-        failResult(step, started, inputSent, "Unknown action.", simulate)
-      );
+      results.push(failResult(step, started, inputSent, "Unknown action.", simulate));
       if (onError === "continue") softFail = true;
       else hardFail = true;
       continue;
@@ -126,9 +118,8 @@ export async function runWorkflow(params: {
       continue;
     }
 
-    const needsApproval = Boolean(step.requiresApproval || def.requiresApproval);
     if (
-      needsApproval &&
+      def.requiresApproval &&
       !simulate &&
       params.approvalGrantedForStepId !== step.id
     ) {
@@ -138,7 +129,7 @@ export async function runWorkflow(params: {
       results.push({
         stepId: step.id,
         actionId: step.actionId,
-        name: step.name || def.name || step.actionId,
+        name: step.name,
         status: "awaiting_approval",
         startedAt: started,
         endedAt: new Date().toISOString(),
@@ -152,30 +143,21 @@ export async function runWorkflow(params: {
     let lastError = "";
     let succeeded = false;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (attempt > 1) {
-        await sleep((step.retryPolicy?.backoffSeconds ?? 1) * 500);
-      }
+      if (attempt > 1) await sleep((step.retryPolicy?.backoffSeconds ?? 1) * 500);
       try {
-        if (def.rateLimit) {
-          const ok = takeToken(def.rateLimit.key, def.rateLimit.maxPerMinute);
-          if (!ok) {
-            lastError = "Too many requests. Please try again in a moment.";
-            continue;
-          }
-        }
         const resolved = resolveConfig(step.config || {}, ctx);
         const out = await executeAction(
           step.actionId,
           resolved,
           ctx,
           simulate,
-          connections
+          params.connections || {}
         );
         if (out.ok) {
           results.push({
             stepId: step.id,
             actionId: step.actionId,
-            name: step.name || def.name || step.actionId,
+            name: step.name,
             status: "succeeded",
             startedAt: started,
             endedAt: new Date().toISOString(),
@@ -186,7 +168,6 @@ export async function runWorkflow(params: {
             output: out.message,
             outputReceived: out.data,
             simulated: simulate,
-            retryCount: attempt - 1,
           });
           if (out.data !== undefined) {
             ctx.stepOutputs[step.id] = out.data;
@@ -202,13 +183,7 @@ export async function runWorkflow(params: {
 
     if (!succeeded) {
       results.push(
-        failResult(
-          step,
-          started,
-          inputSent,
-          lastError || "Something went wrong.",
-          simulate
-        )
+        failResult(step, started, inputSent, lastError || "Something went wrong.", simulate)
       );
       if (onError === "continue") softFail = true;
       else hardFail = true;
@@ -233,9 +208,7 @@ export async function runWorkflow(params: {
     mode: simulate ? "simulated" : "real",
     steps: results,
     output: String(redactStepResult({ output } as Record<string, unknown>).output || output),
-    error: hardFail
-      ? results.filter((r) => r.status === "failed").at(-1)?.output
-      : undefined,
+    error: hardFail ? results.filter((r) => r.status === "failed").at(-1)?.output : undefined,
     context: ctx,
     pendingStepIndex,
     pendingStepId,
@@ -253,7 +226,7 @@ function failResult(
   return {
     stepId: step.id,
     actionId: step.actionId,
-    name: step.name || step.actionId,
+    name: step.name,
     status: "failed",
     startedAt: started,
     endedAt: new Date().toISOString(),
@@ -300,21 +273,6 @@ async function resolveNotionAccessToken(
     try {
       const { resolveNotionToken } = await import("./connectors/notionAuth");
       const resolved = await resolveNotionToken(connections.userId);
-      return resolved?.token;
-    } catch {
-      return undefined;
-    }
-  }
-  return undefined;
-}
-
-async function resolveBufferAccessToken(
-  connections: RuntimeConnectionConfig
-): Promise<string | undefined> {
-  if (connections.userId && typeof window === "undefined") {
-    try {
-      const { resolveBufferToken } = await import("./connectors/bufferAuth");
-      const resolved = await resolveBufferToken(connections.userId);
       return resolved?.token;
     } catch {
       return undefined;
@@ -530,57 +488,6 @@ async function executeAction(
           accessToken: notionToken,
           query: config.query || "",
         });
-        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-      }
-    }
-    case "buffer.list_channels":
-    case "buffer.list_posts":
-    case "buffer.create_post": {
-      if (simulate) return { ok: true, message: `[Simulated] Would run ${actionId}` };
-      if (typeof window !== "undefined" && connections.userId) {
-        const res = await fetch("/api/connections/buffer/execute", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: connections.userId,
-            actionId,
-            input: config,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        return {
-          ok: Boolean(data.ok),
-          message: data.message || (data.ok ? "OK" : "Failed"),
-          data: data.data,
-          error: data.error,
-        };
-      }
-      const bufferToken = await resolveBufferAccessToken(connections);
-      if (!bufferToken) {
-        return {
-          ok: false,
-          message: "Connect your Buffer account under Connections first.",
-          error: { category: "not_configured" },
-        };
-      }
-      if (actionId === "buffer.create_post") {
-        const r = await bufferCreatePost({
-          accessToken: bufferToken,
-          channel: config.channel || "",
-          text: config.text || "",
-          scheduledAt: config.scheduled_at || config.scheduledAt || "",
-        });
-        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-      }
-      if (actionId === "buffer.list_posts") {
-        const r = await bufferListPosts({
-          accessToken: bufferToken,
-          channel: config.channel || "",
-        });
-        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-      }
-      {
-        const r = await bufferListChannels({ accessToken: bufferToken });
         return { ok: r.ok, message: r.message, data: r.data, error: r.error };
       }
     }
