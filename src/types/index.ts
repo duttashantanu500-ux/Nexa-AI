@@ -135,6 +135,73 @@ export interface Conversation {
   updatedAt: string;
 }
 
+export type ConnectionStatus =
+  | "connected"
+  | "disconnected"
+  | "error"
+  | "pending"
+  | "expired";
+
+export interface Connection {
+  id: string;
+  provider: string;
+  status: ConnectionStatus;
+  label?: string;
+  connectedAt?: string;
+  meta?: Record<string, unknown>;
+}
+
+export type ScheduleFrequency = "once" | "daily" | "weekly" | "monthly";
+
+export interface AgentSchedule {
+  frequency: ScheduleFrequency;
+  timeOfDay?: string;
+  dayOfWeek?: number;
+  dayOfMonth?: number;
+  timezone?: string;
+  enabled?: boolean;
+}
+
+export type AgentRunStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "waiting_for_approval";
+
+export interface Agent {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  status: "idle" | "active" | "paused" | "error";
+  steps: WorkflowStep[];
+  schedule?: AgentSchedule;
+  createdAt: string;
+  updatedAt: string;
+  lastRunAt?: string;
+}
+
+export interface ActivityEvent {
+  id: string;
+  type: string;
+  text: string;
+  at: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface AppState {
+  user: UserProfile | null;
+  business: BusinessContext;
+  conversations: Conversation[];
+  missions: Mission[];
+  memory: MemoryItem[];
+  agents: Agent[];
+  connections: Connection[];
+  activity: ActivityEvent[];
+}
+
 export type PermissionMode = "read" | "write" | "approval_required";
 
 export interface AgentPermissions {
@@ -226,6 +293,4 @@ export interface ApprovalRequest {
   resolvedAt?: string;
 }
 
-export type {
-  WorkflowContextSnapshot,
-};
+export type { WorkflowContextSnapshot };
