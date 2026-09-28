@@ -11,6 +11,11 @@ import {
   notionSearch,
 } from "./connectors/providers/notion";
 import { githubCreateIssue, githubListIssues } from "./connectors/providers/github";
+import {
+  bufferCreatePost,
+  bufferListChannels,
+  bufferListPosts,
+} from "./connectors/providers/buffer";
 import type { WorkflowStep, WorkflowStepResult, NormalizedProviderError } from "@/types";
 import { resolveConfig } from "./mapping";
 import { takeToken } from "./rateLimit";
@@ -304,6 +309,36 @@ async function resolveNotionAccessToken(
   return undefined;
 }
 
+async function resolveBufferAccessToken(
+  connections: RuntimeConnectionConfig
+): Promise<string | undefined> {
+  if (connections.userId && typeof window === "undefined") {
+    try {
+      const { resolveBufferToken } = await import("./connectors/bufferAuth");
+      const resolved = await resolveBufferToken(connections.userId);
+      return resolved?.token;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+async function resolveIdeogramAccessToken(
+  connections: RuntimeConnectionConfig
+): Promise<string | undefined> {
+  if (connections.userId && typeof window === "undefined") {
+    try {
+      const { resolveIdeogramToken } = await import("./connectors/ideogramAuth");
+      const resolved = await resolveIdeogramToken(connections.userId);
+      return resolved?.token;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 async function executeAction(
   actionId: string,
   config: Record<string, string>,
@@ -514,6 +549,57 @@ async function executeAction(
         return { ok: r.ok, message: r.message, data: r.data, error: r.error };
       }
     }
+    case "buffer.list_channels":
+    case "buffer.list_posts":
+    case "buffer.create_post": {
+      if (simulate) return { ok: true, message: `[Simulated] Would run ${actionId}` };
+      if (typeof window !== "undefined" && connections.userId) {
+        const res = await fetch("/api/connections/buffer/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: connections.userId,
+            actionId,
+            input: config,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        return {
+          ok: Boolean(data.ok),
+          message: data.message || (data.ok ? "OK" : "Failed"),
+          data: data.data,
+          error: data.error,
+        };
+      }
+      const bufferToken = await resolveBufferAccessToken(connections);
+      if (!bufferToken) {
+        return {
+          ok: false,
+          message: "Connect your Buffer account under Connections first.",
+          error: { category: "not_configured" },
+        };
+      }
+      if (actionId === "buffer.create_post") {
+        const r = await bufferCreatePost({
+          accessToken: bufferToken,
+          channel: config.channel || "",
+          text: config.text || "",
+          scheduledAt: config.scheduled_at || config.scheduledAt || "",
+        });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
+      if (actionId === "buffer.list_posts") {
+        const r = await bufferListPosts({
+          accessToken: bufferToken,
+          channel: config.channel || "",
+        });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
+      {
+        const r = await bufferListChannels({ accessToken: bufferToken });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
+    }
     case "github.create_issue": {
       if (simulate) return { ok: true, message: "[Simulated] Would create issue" };
       const r = await githubCreateIssue({
@@ -533,6 +619,65 @@ async function executeAction(
         repo: config.repo || "",
       });
       return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    }
+    case "ideogram.generate_image": {
+      if (simulate) {
+        ctx.imageUrl = "[Simulated image]";
+        return { ok: true, message: "[Simulated] Image would be generated" };
+      }
+      if (typeof window !== "undefined" && connections.userId) {
+        const res = await fetch("/api/connections/ideogram/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: connections.userId,
+            actionId,
+            input: config,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.ok && data.data?.imageUrl) {
+          ctx.imageUrl = String(data.data.imageUrl);
+        } else if (data.ok && data.data?.images?.[0]?.url) {
+          ctx.imageUrl = String(data.data.images[0].url);
+        }
+        return {
+          ok: Boolean(data.ok),
+          message: data.message || (data.ok ? "OK" : "Failed"),
+          data: data.data,
+          error: data.error,
+        };
+      }
+      const ideogramToken = await resolveIdeogramAccessToken(connections);
+      if (!ideogramToken) {
+        return {
+          ok: false,
+          message: "Connect your Ideogram account under Connections first.",
+          error: { category: "not_configured" },
+        };
+      }
+      {
+        const { ideogramGenerateImage } = await import("./connectors/providers/ideogram");
+        const seedRaw = (config.seed || "").trim();
+        const seed = seedRaw ? parseInt(seedRaw, 10) : undefined;
+        const numRaw = config.num_images || config.numImages;
+        const numImages = numRaw ? parseInt(String(numRaw), 10) : 1;
+        const r = await ideogramGenerateImage({
+          apiKey: ideogramToken,
+          prompt: config.prompt || "",
+          aspectRatio: config.aspect_ratio || config.aspectRatio || "",
+          renderingSpeed: config.rendering_speed || config.renderingSpeed || config.quality || "",
+          numImages: Number.isFinite(numImages) ? numImages : 1,
+          negativePrompt: config.negative_prompt || config.negativePrompt || "",
+          seed: Number.isFinite(seed as number) ? seed : undefined,
+        });
+        if (r.ok && r.data && typeof r.data === "object") {
+          const d = r.data as { imageUrl?: string; images?: { url?: string }[] };
+          if (d.imageUrl) ctx.imageUrl = d.imageUrl;
+          else if (d.images?.[0]?.url) ctx.imageUrl = d.images[0].url;
+        }
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
     }
     default:
       return {
