@@ -11,7 +11,7 @@ import {
   notionSearch,
 } from "./connectors/providers/notion";
 import { githubCreateIssue, githubListIssues } from "./connectors/providers/github";
-import type { WorkflowStep, WorkflowStepResult } from "@/types";
+import type { WorkflowStep, WorkflowStepResult, NormalizedProviderError } from "@/types";
 import { resolveConfig } from "./mapping";
 import { takeToken } from "./rateLimit";
 import { redactStepResult } from "./redact";
@@ -141,7 +141,7 @@ export async function runWorkflow(params: {
     }
 
     let lastError = "";
-    let lastNorm: { category?: string } | undefined;
+    let lastNorm: NormalizedProviderError | undefined;
     let succeeded = false;
     const connectorId = def.connectionId || step.connectorId || "local_data";
 
@@ -244,7 +244,7 @@ function failResult(
   inputSent: Record<string, unknown>,
   error: string,
   simulate: boolean,
-  errMeta?: { category?: string }
+  errMeta?: NormalizedProviderError
 ): WorkflowStepResult {
   return {
     stepId: step.id,
@@ -269,7 +269,7 @@ type ActionExecResult = {
   ok: boolean;
   message: string;
   data?: unknown;
-  error?: { category?: string };
+  error?: NormalizedProviderError;
 };
 
 async function resolveSlackAccessToken(

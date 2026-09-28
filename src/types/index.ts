@@ -119,62 +119,20 @@ export interface Message {
 
 export interface Attachment {
   id: string;
-  type: "image" | "file";
   name: string;
-  url: string;
-  mimeType?: string;
+  type: string;
+  size: number;
+  url?: string;
 }
 
 export interface Conversation {
   id: string;
   userId: string;
-  workspace: WorkspaceId;
+  workspaceId: WorkspaceId;
   title: string;
+  messages: Message[];
   createdAt: string;
   updatedAt: string;
-  messageCount: number;
-}
-
-export interface ActivityEvent {
-  id: string;
-  userId: string;
-  text: string;
-  at: string;
-  category?: "mission" | "agent" | "connection" | "approval" | "system";
-  refId?: string;
-}
-
-export interface ApprovalRequest {
-  id: string;
-  userId: string;
-  title: string;
-  summary: string;
-  status: "pending" | "approved" | "rejected";
-  missionId?: string;
-  actionId?: string;
-  runId?: string;
-  runStepId?: string;
-  createdAt: string;
-}
-
-export type ScheduleFrequency =
-  | "once"
-  | "daily"
-  | "weekly"
-  | "monthly"
-  | "yearly";
-
-export interface AgentSchedule {
-  frequency: ScheduleFrequency;
-  time: string;
-  timezone: string;
-  dayOfWeek?: number;
-  dayOfMonth?: number;
-  enabled: boolean;
-  nextRunAt?: string | null;
-  lastRunAt?: string | null;
-  lastRunStatus?: string | null;
-  consecutiveFailures?: number;
 }
 
 export type PermissionMode = "read" | "write" | "approval_required";
@@ -192,6 +150,7 @@ export type {
   ConnectionRecord,
   AgentRunStatusExtended,
   RunStepStatus,
+  NormalizedProviderError,
 } from "./workflow";
 
 import type {
@@ -209,217 +168,64 @@ export type AgentStatus =
   | "error"
   | WorkflowAgentStatus;
 
-export interface Agent {
+export interface AgentDefinition {
   id: string;
   userId: string;
   name: string;
-  description: string;
-  purpose: string;
-  instructions: string;
-  expectedOutput?: string;
-  constraints?: string;
-  templateType?: string;
+  description?: string;
   status: AgentStatus;
-  version: number;
-  tools: string[];
   steps: WorkflowStep[];
-  permissions: AgentPermissions;
-  schedule: AgentSchedule;
-  lastRunAt?: string | null;
-  lastRunStatus?: AgentRunStatus | null;
+  permissions?: AgentPermissions;
+  schedule?: AgentScheduleRecordLike;
   createdAt: string;
   updatedAt: string;
+  lastRunAt?: string;
+  connectionIds?: string[];
 }
 
-export type AgentRunStatus =
-  | "queued"
-  | "running"
-  | "waiting_approval"
-  | "waiting_for_approval"
-  | "completed"
-  | "succeeded"
-  | "succeeded_with_errors"
-  | "partial"
-  | "failed"
-  | "cancelled";
+export interface AgentScheduleRecordLike {
+  id?: string;
+  agentId?: string;
+  type: "once" | "one_time" | "daily" | "weekly" | "monthly" | "yearly";
+  timezone: string;
+  timeOfDay: string;
+  dayOfWeek?: number;
+  dayOfMonth?: number;
+  runAt?: string | null;
+  enabled: boolean;
+  nextRunAt?: string | null;
+  lastRunAt?: string | null;
+  lastRunStatus?: string | null;
+  consecutiveFailures?: number;
+}
 
 export interface AgentRun {
   id: string;
   agentId: string;
   userId: string;
-  agentVersion?: number;
-  trigger: "manual" | "schedule" | "test";
-  triggerSource?: string;
-  status: AgentRunStatus;
-  isTest?: boolean;
+  status: AgentRunStatusExtended;
   startedAt: string;
-  endedAt?: string | null;
-  durationMs?: number | null;
-  summary?: string;
+  endedAt?: string;
+  steps?: WorkflowStepResult[];
+  stepResults?: WorkflowStepResult[];
   output?: string;
   error?: string;
-  sources?: { title?: string; url: string }[];
-  stepResults?: WorkflowStepResult[];
-  mode?: "real" | "simulated";
-  /** Phase 4 approval */
-  pendingStepId?: string;
-  pendingStepIndex?: number;
-  contextSnapshot?: WorkflowContextSnapshot;
+  context?: WorkflowContextSnapshot;
+  simulated?: boolean;
 }
 
-export type ConnectionStatus =
-  | "connected"
-  | "not_connected"
-  | "available"
-  | "setup_required"
-  | "not_supported"
-  | "connecting"
-  | "failed"
-  | "disconnected"
-  | "expired"
-  | "revoked"
-  | "error";
-
-export interface Connection {
+export interface ApprovalRequest {
   id: string;
-  name: string;
-  provider: string;
-  status: ConnectionStatus;
-  description?: string;
-  tools?: string[];
-  mcpUrl?: string;
-  mcpTools?: string[];
+  agentId: string;
+  runId: string;
+  stepId: string;
+  userId: string;
+  summary: string;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+  resolvedAt?: string;
 }
 
-export interface AppState {
-  user: UserProfile | null;
-  businessContext: BusinessContext | null;
-  theme: "light" | "dark" | "system";
-  agents: Agent[];
-  agentRuns: AgentRun[];
-  connections: Connection[];
-  connectionRecords?: ConnectionRecord[];
-  memories?: MemoryItem[];
-  conversations?: Conversation[];
-  currentWorkspace?: WorkspaceId;
-  currentConversationId?: string | null;
-  missions?: Mission[];
-  activity?: ActivityEvent[];
-  approvals?: ApprovalRequest[];
-}
-
-export const BUILTIN_TOOLS = [
-  {
-    id: "web_search",
-    name: "Web Search",
-    description: "Search the public web",
-    connector: "Built-in",
-    available: false,
-    permission: "read" as const,
-  },
-];
-
-export const DEFAULT_CONNECTIONS: Connection[] = [
-  {
-    id: "local_data",
-    name: "Local data tools",
-    provider: "builtin",
-    status: "connected",
-    description: "Deterministic local actions",
-    tools: ["local_data.list_from_text", "local_data.filter", "local_data.report"],
-  },
-  {
-    id: "slack",
-    name: "Slack",
-    provider: "slack",
-    status: "setup_required",
-    description: "OAuth setup required",
-    tools: [],
-  },
-  {
-    id: "notion",
-    name: "Notion",
-    provider: "notion",
-    status: "setup_required",
-    description: "OAuth setup required",
-    tools: [],
-  },
-  {
-    id: "github",
-    name: "GitHub",
-    provider: "github",
-    status: "setup_required",
-    description: "OAuth setup required",
-    tools: [],
-  },
-];
-
-export const AGENT_TEMPLATES: {
-  id: string;
-  name: string;
-  description: string;
-  purpose: string;
-  instructions: string;
-  tools: string[];
-  executable: boolean;
-}[] = [];
-
-export function defaultSchedule(): AgentSchedule {
-  const tz =
-    typeof Intl !== "undefined"
-      ? Intl.DateTimeFormat().resolvedOptions().timeZone
-      : "UTC";
-  return {
-    frequency: "once",
-    time: "09:00",
-    timezone: tz,
-    enabled: false,
-    nextRunAt: null,
-    consecutiveFailures: 0,
-  };
-}
-
-export function defaultPermissions(): AgentPermissions {
-  return { mode: "read", allowDestructive: false };
-}
-
-export function computeNextRun(schedule: AgentSchedule): string | null {
-  if (!schedule.enabled || schedule.frequency === "once") return null;
-  const now = new Date();
-  const [hh, mm] = schedule.time.split(":").map((x) => parseInt(x, 10) || 0);
-  const next = new Date(now);
-  next.setSeconds(0, 0);
-  next.setHours(hh, mm, 0, 0);
-  if (schedule.frequency === "daily") {
-    if (next <= now) next.setDate(next.getDate() + 1);
-    return next.toISOString();
-  }
-  if (schedule.frequency === "weekly") {
-    const target = schedule.dayOfWeek ?? 1;
-    while (next.getDay() !== target || next <= now) next.setDate(next.getDate() + 1);
-    return next.toISOString();
-  }
-  if (schedule.frequency === "monthly") {
-    const day = Math.min(schedule.dayOfMonth || 1, 28);
-    next.setDate(day);
-    if (next <= now) next.setMonth(next.getMonth() + 1);
-    return next.toISOString();
-  }
-  if (schedule.frequency === "yearly") {
-    if (next <= now) next.setFullYear(next.getFullYear() + 1);
-    return next.toISOString();
-  }
-  return null;
-}
-
-export function deriveAgentStatus(agent: {
-  status?: string;
-  steps?: WorkflowStep[];
-}): AgentStatus {
-  if (agent.status === "paused") return "paused";
-  if (agent.status === "archived") return "archived";
-  if (agent.status === "failed" || agent.status === "error") return "failed";
-  if (!agent.steps?.length) return "draft";
-  if (agent.status === "active" || agent.status === "ready") return agent.status as AgentStatus;
-  return "ready";
-}
+export type {
+  WorkflowContextSnapshot,
+};
