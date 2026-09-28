@@ -25,7 +25,6 @@ export interface StoredConnection {
 }
 
 function encryptionKey(): Buffer {
-  // Prefer a dedicated secret so rotating Notion/Slack secrets does not break decrypt.
   const secret =
     process.env.CONNECTOR_TOKEN_SECRET ||
     process.env.NOTION_CLIENT_SECRET ||
@@ -61,7 +60,6 @@ function supabaseConfigured(): boolean {
 
 function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  // Service role bypasses RLS — required for durable connector tokens.
   const key =
     process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return null;
@@ -74,7 +72,6 @@ export function hasServiceRoleKey(): boolean {
   return Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY?.trim());
 }
 
-/** In-memory fallback ONLY when Supabase is not configured (local/dev). */
 const memory = new Map<string, string>();
 
 function memKey(userId: string, connectorId: string) {
@@ -83,27 +80,62 @@ function memKey(userId: string, connectorId: string) {
 
 export type StorageHealth =
   | { ok: true; mode: "supabase" | "memory" }
-  | { ok: false; reason: "no_supabase" | "missing_table" | "rls_or_permission" | "unknown"; detail?: string };
+  | {
+      ok: false;
+      reason: "no_supabase" | "missing_table" | "rls_or_permission" | "bad_config" | "unknown";
+      detail?: string;
+    };
+
+function classifyStorageError(message: string, code?: string): StorageHealth {
+  const msg = (message || "").toLowerCase();
+  const c = (code || "").toLowerCase();
+
+  if (
+    c === "42p01" ||
+    msg.includes("does not exist") ||
+    msg.includes("schema cache") ||
+    msg.includes("could not find the table") ||
+    msg.includes("relation") && msg.includes("does not exist")
+  ) {
+    return { ok: false, reason: "missing_table", detail: message };
+  }
+  if (
+    c === "42501" ||
+    msg.includes("permission") ||
+    msg.includes("rls") ||
+    msg.includes("policy") ||
+    msg.includes("row-level security")
+  ) {
+    return { ok: false, reason: "rls_or_permission", detail: message };
+  }
+  if (
+    msg.includes("invalid api key") ||
+    msg.includes("jwt") ||
+    msg.includes("invalid_api_key") ||
+    msg.includes("failed to parse") ||
+    c === "pgrst301"
+  ) {
+    return { ok: false, reason: "bad_config", detail: message };
+  }
+  return { ok: false, reason: "unknown", detail: message };
+}
 
 /** Probe whether connector tokens can be stored durably. */
 export async function checkTokenStorageHealth(): Promise<StorageHealth> {
   if (!supabaseConfigured()) {
-    return { ok: true, mode: "memory" }; // local dev only
+    return { ok: true, mode: "memory" };
   }
   const sb = adminClient();
   if (!sb) return { ok: false, reason: "no_supabase" };
 
-  const { error } = await sb.from("nexa_oauth_tokens").select("user_id").limit(1);
-  if (!error) return { ok: true, mode: "supabase" };
-
-  const msg = (error.message || "").toLowerCase();
-  if (msg.includes("does not exist") || msg.includes("schema cache")) {
-    return { ok: false, reason: "missing_table", detail: error.message };
+  try {
+    const { error } = await sb.from("nexa_oauth_tokens").select("user_id").limit(1);
+    if (!error) return { ok: true, mode: "supabase" };
+    return classifyStorageError(error.message, (error as { code?: string }).code);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return classifyStorageError(message);
   }
-  if (msg.includes("permission") || msg.includes("rls") || msg.includes("policy")) {
-    return { ok: false, reason: "rls_or_permission", detail: error.message };
-  }
-  return { ok: false, reason: "unknown", detail: error.message };
 }
 
 export async function saveConnection(
@@ -199,7 +231,7 @@ export async function getConnection(
       connectedAt: parsed.connectedAt,
       lastVerifiedAt: parsed.lastVerifiedAt,
     };
-  } catch (e) {
+  } catch {
     console.error("[tokenStore] decrypt failed — check CONNECTOR_TOKEN_SECRET is stable");
     return null;
   }
@@ -227,7 +259,6 @@ export async function touchVerified(userId: string, connectorId: ConnectorId): P
   await saveConnection(conn);
 }
 
-/** Sign oauth state — userId may contain any characters */
 export function signOAuthState(userId: string): string {
   const ts = Date.now().toString(36);
   const uid = Buffer.from(userId, "utf8").toString("base64url");

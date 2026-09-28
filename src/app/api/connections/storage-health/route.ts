@@ -11,6 +11,10 @@ import {
 export async function GET() {
   const health = await checkTokenStorageHealth();
   const serviceRole = hasServiceRoleKey();
+  const detail =
+    !health.ok && health.detail
+      ? String(health.detail).slice(0, 200)
+      : undefined;
 
   if (health.ok && health.mode === "supabase") {
     return NextResponse.json({
@@ -37,13 +41,16 @@ export async function GET() {
 
   if (reason === "missing_table") {
     message =
-      "The connections table is missing in Supabase. Open Supabase → SQL and run the schema_oauth_tokens.sql file from the project.";
+      "The connections table is missing in Supabase. Open Supabase → SQL Editor and run the create table script for nexa_oauth_tokens.";
   } else if (reason === "rls_or_permission") {
     message =
-      "The database blocked connection storage. Add SUPABASE_SERVICE_ROLE_KEY in Vercel (Project Settings → Environment Variables), then redeploy.";
+      "The database blocked connection storage. Confirm SUPABASE_SERVICE_ROLE_KEY is the service_role key (not the anon key), then redeploy.";
   } else if (reason === "no_supabase") {
     message =
       "Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Vercel.";
+  } else if (reason === "bad_config") {
+    message =
+      "Supabase URL or key looks wrong. In Vercel, check NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY match the same Supabase project.";
   }
 
   return NextResponse.json({
@@ -51,5 +58,6 @@ export async function GET() {
     reason,
     message,
     serviceRole,
+    detail,
   });
 }
