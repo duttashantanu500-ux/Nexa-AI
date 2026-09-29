@@ -267,7 +267,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
             label: "Prompt",
             type: "textarea",
             required: true,
-            placeholder: "Describe the image you want\u2026",
+            placeholder: "Describe the image you want…",
           },
           {
             key: "aspect_ratio",
@@ -306,7 +306,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
             label: "Avoid (optional)",
             type: "textarea",
             required: false,
-            placeholder: "Things to leave out of the image\u2026",
+            placeholder: "Things to leave out of the image…",
           },
           {
             key: "seed",
@@ -314,6 +314,51 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
             type: "text",
             required: false,
             placeholder: "For reproducible results",
+          },
+        ],
+        ...impl(),
+      },
+    ],
+  },
+  {
+    id: "mcp",
+    name: "Add your own MCP",
+    provider: "mcp",
+    icon: "MCP",
+    description: "Custom tools",
+    detailDescription:
+      "Connect your own MCP server. Discover tools, approve the ones agents may use, and run them in workflows.",
+    connectionMethod: "custom",
+    costLabel: "user_paid",
+    costNote: "Uses your MCP server.",
+    configurable: true,
+    executable: true,
+    defaultStatus: "available",
+    scopes: ["Discover tools", "Run approved tools"],
+    actions: [
+      {
+        id: "mcp.call_tool",
+        connectorId: "mcp",
+        name: "Run MCP tool",
+        description: "Run an approved tool from your connected MCP server.",
+        readOnly: false,
+        requiresApproval: true,
+        riskTier: "medium",
+        fields: [
+          {
+            key: "tool_name",
+            label: "Tool name",
+            type: "text",
+            required: true,
+            placeholder: "Exact tool name from your server",
+          },
+          {
+            key: "arguments_json",
+            label: "Arguments (JSON)",
+            type: "textarea",
+            required: false,
+            placeholder: '{}',
+            help: "Optional JSON object passed to the tool.",
           },
         ],
         ...impl(),
@@ -564,7 +609,7 @@ export function statusLabel(s: ConnectorUiStatus): string {
     unavailable: "Unavailable",
     coming_soon: "Coming soon",
     error: "Needs attention",
-    loading: "Checking\u2026",
+    loading: "Checking…",
   };
   return map[s] || s;
 }
