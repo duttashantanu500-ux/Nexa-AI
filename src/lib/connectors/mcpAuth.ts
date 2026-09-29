@@ -12,8 +12,6 @@ import {
 } from "./tokenStore";
 import { discoverMcpTools, callMcpTool, type McpTool } from "@/lib/mcp/client";
 
-export type McpConnectorId = "mcp";
-
 export interface McpConnectionMeta {
   endpoint: string;
   authHeader?: string;
@@ -25,7 +23,6 @@ export interface McpConnectionMeta {
 
 function parseMeta(conn: StoredConnection): McpConnectionMeta | null {
   try {
-    // accessToken holds JSON payload for MCP
     const data = JSON.parse(conn.accessToken) as McpConnectionMeta;
     if (!data?.endpoint) return null;
     return {
@@ -43,7 +40,7 @@ function parseMeta(conn: StoredConnection): McpConnectionMeta | null {
 
 export async function getMcpConnection(userId: string): Promise<McpConnectionMeta | null> {
   if (!userId) return null;
-  const conn = await loadConnection(userId, "mcp" as "notion");
+  const conn = await loadConnection(userId, "mcp");
   if (!conn) return null;
   return parseMeta(conn);
 }
@@ -62,7 +59,7 @@ export async function saveMcpConnection(
   };
   await saveConnection({
     userId,
-    connectorId: "mcp" as "notion",
+    connectorId: "mcp",
     accessToken: JSON.stringify(payload),
     workspaceName: payload.label,
     scopes: payload.approvedTools,
@@ -72,7 +69,7 @@ export async function saveMcpConnection(
 }
 
 export async function deleteMcpConnection(userId: string): Promise<void> {
-  await deleteConnection(userId, "mcp" as "notion");
+  await deleteConnection(userId, "mcp");
 }
 
 export async function connectAndDiscover(params: {
@@ -151,7 +148,6 @@ export async function testMcpConnection(
   await saveMcpConnection(userId, {
     ...existing,
     discoveredTools: tools,
-    // Keep only approvals that still exist
     approvedTools: existing.approvedTools.filter((n) =>
       tools.some((t) => t.name === n)
     ),
