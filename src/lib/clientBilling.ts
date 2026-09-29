@@ -33,6 +33,8 @@ const cache: { state: ClientBillingState | null; at: number } = {
   at: 0,
 };
 
+const EXTERNAL_PROVIDERS = ["notion", "slack", "buffer", "ideogram"] as const;
+
 function freeState(): ClientBillingState {
   return {
     planId: "free",
@@ -159,6 +161,56 @@ export async function startProCheckout(): Promise<
       ok: false,
       message: "We couldn't start checkout. Please try again.",
     };
+  }
+}
+
+/** Count connected external (non-builtin) services for Free plan limits */
+export async function getConnectedExternalCount(userId: string): Promise<number> {
+  if (!userId) return 0;
+  let n = 0;
+  await Promise.all(
+    EXTERNAL_PROVIDERS.map(async (p) => {
+      try {
+        const res = await fetch(
+          `/api/connections/${p}/status?userId=${encodeURIComponent(userId)}`
+        );
+        const data = await res.json();
+        if (data?.status === "connected") n += 1;
+      } catch {
+        /* ignore */
+      }
+    })
+  );
+  return n;
+}
+
+/** Record one real agent run against the monthly allowance */
+export async function recordAgentRun(): Promise<
+  { ok: true; runsUsedThisPeriod: number } | { ok: false; message: string; limitReached?: boolean }
+> {
+  const sb = getSupabase();
+  if (!sb) return { ok: false, message: "Please sign in." };
+  const { data: sessionData } = await sb.auth.getSession();
+  const token = sessionData.session?.access_token;
+  if (!token) return { ok: false, message: "Please sign in." };
+
+  try {
+    const res = await fetch("/api/billing/record-run", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      return {
+        ok: false,
+        message: data.message || LIMIT_MESSAGES.runs,
+        limitReached: Boolean(data.limitReached),
+      };
+    }
+    clearBillingCache();
+    return { ok: true, runsUsedThisPeriod: data.runsUsedThisPeriod || 0 };
+  } catch {
+    return { ok: false, message: "Could not record run." };
   }
 }
 
