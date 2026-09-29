@@ -14,8 +14,10 @@ import {
   fetchBillingStatus,
   startProCheckout,
   clearBillingCache,
+  getConnectedExternalCount,
   type ClientBillingState,
 } from "@/lib/clientBilling";
+import { totalVaultBytes, formatSize } from "@/lib/vaultStore";
 import { PLAN_FREE, PLAN_PRO } from "@/lib/plans";
 
 export default function SettingsPage() {
@@ -28,6 +30,11 @@ export default function SettingsPage() {
   const [billing, setBilling] = useState<ClientBillingState | null>(null);
   const [billingBusy, setBillingBusy] = useState(false);
   const [billingMsg, setBillingMsg] = useState("");
+  const [usage, setUsage] = useState({
+    agents: 0,
+    connections: 0,
+    vaultBytes: 0,
+  });
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -42,7 +49,16 @@ export default function SettingsPage() {
     setThemeLocal(t);
     applyTheme(t);
 
-    void fetchBillingStatus(true).then(setBilling);
+    const agents = s.agents.filter((a) => a.userId === s.user!.id).length;
+    const vaultBytes = totalVaultBytes(s.user.id);
+    setUsage((u) => ({ ...u, agents, vaultBytes }));
+
+    void (async () => {
+      const b = await fetchBillingStatus(true);
+      setBilling(b);
+      const connections = await getConnectedExternalCount(s.user!.id);
+      setUsage((u) => ({ ...u, connections }));
+    })();
   }, [router]);
 
   useEffect(() => {
@@ -55,7 +71,7 @@ export default function SettingsPage() {
         setBillingMsg(
           b.planId === "pro"
             ? "You're on Pro. Enjoy the extra capacity."
-            : "Payment received. Your plan will update in a moment."
+            : "We're confirming your Pro access. This usually takes a moment — refresh if it doesn't update."
         );
       });
     }
@@ -97,8 +113,26 @@ export default function SettingsPage() {
     window.location.href = result.checkoutUrl;
   };
 
+  const refreshPlan = async () => {
+    setBillingBusy(true);
+    clearBillingCache();
+    const b = await fetchBillingStatus(true);
+    setBilling(b);
+    setBillingBusy(false);
+    setBillingMsg(
+      b.planId === "pro"
+        ? "You're on Pro."
+        : "Still on Free. If you just paid, wait a moment and try again."
+    );
+  };
+
   const planId = billing?.planId || "free";
   const isPro = planId === "pro";
+  const maxAgents = billing?.limits.maxAgents ?? PLAN_FREE.limits.maxAgents;
+  const maxConn = billing?.limits.maxConnections ?? PLAN_FREE.limits.maxConnections;
+  const maxRuns = billing?.limits.maxRunsPerMonth ?? PLAN_FREE.limits.maxRunsPerMonth;
+  const vaultLimit = billing?.limits.vaultBytes ?? PLAN_FREE.limits.vaultBytes;
+  const runsUsed = billing?.runsUsedThisPeriod ?? 0;
 
   return (
     <AppShell>
@@ -153,14 +187,12 @@ export default function SettingsPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-                  Current plan: {isPro ? "Pro" : "Free"}
+                  Nexa {isPro ? "Pro" : "Free"}
                 </p>
                 <p className="mt-0.5 text-xs text-zinc-500">
                   {isPro ? PLAN_PRO.priceLabel : PLAN_FREE.priceLabel}
                   {billing?.cancelAtPeriodEnd && billing.periodEnd
-                    ? ` · Access continues until ${new Date(
-                        billing.periodEnd
-                      ).toLocaleDateString()}`
+                    ? ` · Ends ${new Date(billing.periodEnd).toLocaleDateString()}`
                     : ""}
                 </p>
               </div>
@@ -175,27 +207,26 @@ export default function SettingsPage() {
               </span>
             </div>
 
-            {billing && (
-              <ul className="mt-3 space-y-1 text-xs text-zinc-600 dark:text-zinc-400">
-                <li>Agents: up to {billing.limits.maxAgents}</li>
-                <li>
-                  Connections:{" "}
-                  {billing.limits.maxConnections === Number.POSITIVE_INFINITY
-                    ? "Unlimited"
-                    : `up to ${billing.limits.maxConnections}`}
-                </li>
-                <li>
-                  Runs this period: {billing.runsUsedThisPeriod} /{" "}
-                  {billing.limits.maxRunsPerMonth}
-                </li>
-                <li>
-                  Vault:{" "}
-                  {billing.limits.vaultBytes >= 1024 * 1024 * 1024
-                    ? `${(billing.limits.vaultBytes / (1024 * 1024 * 1024)).toFixed(0)} GB`
-                    : `${(billing.limits.vaultBytes / (1024 * 1024)).toFixed(0)} MB`}
-                </li>
-              </ul>
-            )}
+            <ul className="mt-3 space-y-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+              <li>
+                Agents: {usage.agents} / {maxAgents}
+              </li>
+              <li>
+                Connections:{" "}
+                {maxConn === Number.POSITIVE_INFINITY
+                  ? `${usage.connections} · Unlimited`
+                  : `${usage.connections} / ${maxConn}`}
+              </li>
+              <li>
+                Agent runs: {runsUsed} / {maxRuns}
+              </li>
+              <li>
+                Vault: {formatSize(usage.vaultBytes)} /{" "}
+                {vaultLimit >= 1024 * 1024 * 1024
+                  ? `${(vaultLimit / (1024 * 1024 * 1024)).toFixed(0)} GB`
+                  : `${(vaultLimit / (1024 * 1024)).toFixed(0)} MB`}
+              </li>
+            </ul>
 
             {!isPro && (
               <div className="mt-4 space-y-2">
@@ -216,11 +247,19 @@ export default function SettingsPage() {
 
             {isPro && (
               <p className="mt-3 text-xs text-zinc-500">
-                To change or cancel your subscription, use the payment receipt
-                email from checkout, or contact support. Pro stays active until
-                the end of the billing period if you cancel.
+                To change or cancel, use the receipt from checkout. Pro stays
+                active until the end of the billing period if you cancel.
               </p>
             )}
+
+            <button
+              type="button"
+              disabled={billingBusy}
+              onClick={() => void refreshPlan()}
+              className="mt-3 text-xs text-indigo-600 hover:underline disabled:opacity-50"
+            >
+              Refresh plan status
+            </button>
 
             {billingMsg && (
               <p className="mt-3 text-xs text-indigo-600 dark:text-indigo-400">
