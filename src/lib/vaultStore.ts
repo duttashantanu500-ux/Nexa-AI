@@ -3,6 +3,8 @@
  * Content is scoped to the signed-in user id.
  */
 
+import { fetchBillingStatus, canAddVaultBytes } from "./clientBilling";
+
 export type VaultFileKind = "pdf" | "doc" | "text" | "markdown" | "image" | "other";
 
 export interface VaultFile {
@@ -134,6 +136,17 @@ export async function addVaultFile(
     };
   }
 
+  const used = totalVaultBytes(userId);
+  try {
+    const billing = await fetchBillingStatus(true);
+    const room = canAddVaultBytes(used, file.size, billing);
+    if (!room.ok) {
+      return { ok: false, message: room.message };
+    }
+  } catch {
+    /* allow upload if billing status unavailable */
+  }
+
   const kind = detectKind(file.name, file.type);
   let textContent: string | undefined;
   let previewDataUrl: string | undefined;
@@ -148,7 +161,6 @@ export async function addVaultFile(
       previewDataUrl = await readAsDataUrl(file);
       textContent = file.name;
     } else {
-      // PDF/DOC: store name only for search in this version
       textContent = file.name;
     }
   } catch {
