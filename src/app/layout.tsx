@@ -1,7 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/react";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
+
+const SITE_URL = "https://www.nexaiintelligence.online";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,9 +17,77 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nexa — Connect · Orchestrate",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: "Nexa — AI Agent Operating System",
+    template: "%s · Nexa",
+  },
   description:
-    "Connect your services and build workflows. Nexa bridges the gap between your tools.",
+    "Nexa is an AI agent operating system. Connect your tools, build agents, and let them run the work — with Vault, scheduling, and run history.",
+  keywords: [
+    "Nexa",
+    "AI agents",
+    "agent operating system",
+    "workflow automation",
+    "AI automation",
+    "connect tools",
+    "Notion Slack Buffer",
+    "agent builder",
+  ],
+  authors: [{ name: "Nexa" }],
+  creator: "Nexa",
+  applicationName: "Nexa",
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    locale: "en_US",
+    url: SITE_URL,
+    siteName: "Nexa",
+    title: "Nexa — AI Agent Operating System",
+    description:
+      "Connect your tools. Build agents. Let them handle the work. Nexa is the operating system for AI agents.",
+    images: [
+      {
+        url: "/og.png",
+        width: 1200,
+        height: 630,
+        alt: "Nexa — AI Agent Operating System",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Nexa — AI Agent Operating System",
+    description:
+      "Connect your tools. Build agents. Let them handle the work.",
+    images: ["/og.png"],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
+  icons: {
+    icon: [{ url: "/favicon.ico" }, { url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/apple-touch-icon.png" }],
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fafafa" },
+    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+  ],
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -30,6 +101,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} min-h-full antialiased bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50`}
       >
         <ThemeProvider>{children}</ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );
