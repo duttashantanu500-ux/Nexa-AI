@@ -8,7 +8,6 @@ import {
   addAgentRun,
   createRunId,
   deleteAgent,
-  duplicateAgent,
   getAgent,
   listAgentRuns,
   loadOperatorState,
@@ -21,6 +20,12 @@ import {
   runStatusLabel,
   statusBadgeClass,
 } from "@/lib/runLifecycle";
+import {
+  canRunAgent,
+  fetchBillingStatus,
+  recordAgentRun,
+  startProCheckout,
+} from "@/lib/clientBilling";
 import { Agent, AgentRun } from "@/types";
 
 const COMFY_KEY = "nexa_comfy_base_url";
@@ -33,6 +38,8 @@ export default function AgentDetailPage() {
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  const [limitMessage, setLimitMessage] = useState("");
+  const [upgrading, setUpgrading] = useState(false);
 
   const refresh = useCallback(() => {
     const a = getAgent(id);
@@ -71,6 +78,17 @@ export default function AgentDetailPage() {
     notionDefaultParent: getNotionParent(),
   });
 
+  const onUpgrade = async () => {
+    setUpgrading(true);
+    const r = await startProCheckout();
+    if (r.ok) {
+      window.location.href = r.checkoutUrl;
+      return;
+    }
+    setError(r.message);
+    setUpgrading(false);
+  };
+
   const execute = async (simulate: boolean) => {
     if (!agent || running) return;
     if (agent.status === "paused") {
@@ -82,8 +100,25 @@ export default function AgentDetailPage() {
       return;
     }
 
-    setRunning(true);
+    setLimitMessage("");
     setError("");
+
+    // Real runs consume monthly allowance; Preview does not.
+    if (!simulate) {
+      const billing = await fetchBillingStatus(true);
+      const check = canRunAgent(billing);
+      if (!check.ok) {
+        setLimitMessage(check.message);
+        return;
+      }
+      const recorded = await recordAgentRun();
+      if (!recorded.ok) {
+        setLimitMessage(recorded.message);
+        return;
+      }
+    }
+
+    setRunning(true);
     const runId = createRunId();
     const startedAt = new Date().toISOString();
 
@@ -319,6 +354,20 @@ export default function AgentDetailPage() {
             Delete
           </button>
         </div>
+
+        {limitMessage && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            <p>{limitMessage}</p>
+            <button
+              type="button"
+              disabled={upgrading}
+              onClick={() => void onUpgrade()}
+              className="mt-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            >
+              {upgrading ? "Opening…" : "Upgrade to Pro"}
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
