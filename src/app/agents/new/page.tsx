@@ -7,6 +7,11 @@ import { AppShell } from "@/components/AppShell";
 import { createAgent, loadOperatorState, stepId } from "@/lib/operatorStore";
 import { getAction } from "@/lib/actionRegistry";
 import {
+  canCreateAgent,
+  fetchBillingStatus,
+  startProCheckout,
+} from "@/lib/clientBilling";
+import {
   defaultPermissions,
   defaultSchedule,
   type ScheduleFrequency,
@@ -34,7 +39,9 @@ export default function NewAgentPage() {
   const [loading, setLoading] = useState(false);
   const [validated, setValidated] = useState<ValidatedProposal | null>(null);
   const [error, setError] = useState("");
+  const [limitMessage, setLimitMessage] = useState("");
   const [creating, setCreating] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,6 +58,7 @@ export default function NewAgentPage() {
     if (!text || loading) return;
     setInput("");
     setError("");
+    setLimitMessage("");
     setValidated(null);
 
     const userLine: ChatLine = {
@@ -117,7 +125,7 @@ export default function NewAgentPage() {
     }
   };
 
-  const createFromProposal = (asDraft: boolean) => {
+  const createFromProposal = async (asDraft: boolean) => {
     if (!validated) return;
     const s = loadOperatorState();
     if (!s.user) return;
@@ -132,46 +140,73 @@ export default function NewAgentPage() {
     }
 
     setCreating(true);
-    const p = validated.proposal;
-    const steps: WorkflowStep[] = p.steps.map((st, i) => {
-      const def = getAction(st.actionId);
-      return {
-        id: stepId(),
-        order: i,
-        type: "action",
-        actionId: st.actionId,
-        name: def?.name || st.name || st.actionId,
-        connectorId: def?.connectionId || undefined,
-        config: { ...(st.config || {}) },
-        onError: st.onError || "stop",
-        requiresApproval: def?.requiresApproval || st.requiresApproval,
-      };
-    });
+    setError("");
+    setLimitMessage("");
 
-    const frequency = p.schedule.frequency as ScheduleFrequency;
-    const agent = createAgent({
-      userId: s.user.id,
-      name: p.name.trim(),
-      description: p.description || "",
-      purpose: p.purpose || p.description || "",
-      instructions: p.purpose || p.description || "",
-      steps,
-      tools: [...new Set(steps.map((st) => st.actionId))],
-      permissions: defaultPermissions(),
-      schedule: {
-        ...defaultSchedule(),
-        frequency,
-        time: p.schedule.time || "09:00",
-        timezone:
-          p.schedule.timezone ||
-          (typeof Intl !== "undefined"
-            ? Intl.DateTimeFormat().resolvedOptions().timeZone
-            : "UTC"),
-        enabled: frequency !== "once",
-      },
-      status: asDraft ? "draft" : validated.canActivate ? "active" : "ready",
-    });
-    router.push(`/agents/${agent.id}`);
+    try {
+      const billing = await fetchBillingStatus(true);
+      const check = canCreateAgent(s.agents.length, billing);
+      if (!check.ok) {
+        setLimitMessage(check.message);
+        setCreating(false);
+        return;
+      }
+
+      const p = validated.proposal;
+      const steps: WorkflowStep[] = p.steps.map((st, i) => {
+        const def = getAction(st.actionId);
+        return {
+          id: stepId(),
+          order: i,
+          type: "action",
+          actionId: st.actionId,
+          name: def?.name || st.name || st.actionId,
+          connectorId: def?.connectionId || undefined,
+          config: { ...(st.config || {}) },
+          onError: st.onError || "stop",
+          requiresApproval: def?.requiresApproval || st.requiresApproval,
+        };
+      });
+
+      const frequency = p.schedule.frequency as ScheduleFrequency;
+      const agent = createAgent({
+        userId: s.user.id,
+        name: p.name.trim(),
+        description: p.description || "",
+        purpose: p.purpose || p.description || "",
+        instructions: p.purpose || p.description || "",
+        steps,
+        tools: [...new Set(steps.map((st) => st.actionId))],
+        permissions: defaultPermissions(),
+        schedule: {
+          ...defaultSchedule(),
+          frequency,
+          time: p.schedule.time || "09:00",
+          timezone:
+            p.schedule.timezone ||
+            (typeof Intl !== "undefined"
+              ? Intl.DateTimeFormat().resolvedOptions().timeZone
+              : "UTC"),
+          enabled: frequency !== "once",
+        },
+        status: asDraft ? "draft" : validated.canActivate ? "active" : "ready",
+      });
+      router.push(`/agents/${agent.id}`);
+    } catch {
+      setError("Could not create agent. Please try again.");
+      setCreating(false);
+    }
+  };
+
+  const onUpgrade = async () => {
+    setUpgrading(true);
+    const r = await startProCheckout();
+    if (r.ok) {
+      window.location.href = r.checkoutUrl;
+      return;
+    }
+    setError(r.message);
+    setUpgrading(false);
   };
 
   return (
@@ -299,7 +334,7 @@ export default function NewAgentPage() {
                 <button
                   type="button"
                   disabled={creating || !validated.canActivate}
-                  onClick={() => createFromProposal(false)}
+                  onClick={() => void createFromProposal(false)}
                   className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white disabled:opacity-40"
                 >
                   {creating ? "Creating…" : "Create agent"}
@@ -307,7 +342,7 @@ export default function NewAgentPage() {
                 <button
                   type="button"
                   disabled={creating || !validated.canDraft}
-                  onClick={() => createFromProposal(true)}
+                  onClick={() => void createFromProposal(true)}
                   className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
                 >
                   Save draft
@@ -323,6 +358,20 @@ export default function NewAgentPage() {
                   Edit in chat
                 </button>
               </div>
+            </div>
+          )}
+
+          {limitMessage && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              <p>{limitMessage}</p>
+              <button
+                type="button"
+                disabled={upgrading}
+                onClick={() => void onUpgrade()}
+                className="mt-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+              >
+                {upgrading ? "Opening…" : "Upgrade to Pro"}
+              </button>
             </div>
           )}
 
