@@ -33,7 +33,7 @@ const cache: { state: ClientBillingState | null; at: number } = {
   at: 0,
 };
 
-const EXTERNAL_PROVIDERS = ["notion", "slack", "buffer", "ideogram"] as const;
+const EXTERNAL_PROVIDERS = ["notion", "slack", "buffer", "ideogram", "mcp"] as const;
 
 function freeState(): ClientBillingState {
   return {
