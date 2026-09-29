@@ -50,6 +50,55 @@ function freeState(): ClientBillingState {
   };
 }
 
+/**
+ * Resolve a valid access token for the currently signed-in Nexa user.
+ * Recovers from expired/missing browser sessions when possible.
+ */
+async function resolveAccessToken(): Promise<string | null> {
+  const sb = getSupabase();
+  if (!sb) return null;
+
+  try {
+    const { data } = await sb.auth.getSession();
+    if (data.session?.access_token) return data.session.access_token;
+  } catch {
+    /* continue */
+  }
+
+  try {
+    const { data } = await sb.auth.refreshSession();
+    if (data.session?.access_token) return data.session.access_token;
+  } catch {
+    /* continue */
+  }
+
+  // Recover using locally stored email/password from Nexa login/signup
+  // (same account — does not create a new user).
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem("nexa_auth");
+      if (raw) {
+        const parsed = JSON.parse(raw) as { email?: string; password?: string };
+        const email = (parsed.email || "").trim().toLowerCase();
+        const password = parsed.password || "";
+        if (email && password) {
+          const { data, error } = await sb.auth.signInWithPassword({
+            email,
+            password,
+          });
+          if (!error && data.session?.access_token) {
+            return data.session.access_token;
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return null;
+}
+
 export async function fetchBillingStatus(
   force = false
 ): Promise<ClientBillingState> {
@@ -66,8 +115,7 @@ export async function fetchBillingStatus(
     return s;
   }
 
-  const { data: sessionData } = await sb.auth.getSession();
-  const token = sessionData.session?.access_token;
+  const token = await resolveAccessToken();
   if (!token) {
     const s = freeState();
     s.loaded = true;
@@ -131,10 +179,21 @@ export async function startProCheckout(): Promise<
   { ok: true; checkoutUrl: string } | { ok: false; message: string }
 > {
   const sb = getSupabase();
-  if (!sb) return { ok: false, message: "Please sign in to upgrade." };
-  const { data: sessionData } = await sb.auth.getSession();
-  const token = sessionData.session?.access_token;
-  if (!token) return { ok: false, message: "Please sign in to upgrade." };
+  if (!sb) {
+    return {
+      ok: false,
+      message: "Billing is not available right now. Please try again later.",
+    };
+  }
+
+  const token = await resolveAccessToken();
+  if (!token) {
+    return {
+      ok: false,
+      message:
+        "Your session expired. Please log out and log in again, then try Upgrade.",
+    };
+  }
 
   try {
     const res = await fetch("/api/billing/checkout", {
@@ -200,10 +259,7 @@ export async function assertCanConnect(
 export async function recordAgentRun(): Promise<
   { ok: true; runsUsedThisPeriod: number } | { ok: false; message: string; limitReached?: boolean }
 > {
-  const sb = getSupabase();
-  if (!sb) return { ok: false, message: "Please sign in." };
-  const { data: sessionData } = await sb.auth.getSession();
-  const token = sessionData.session?.access_token;
+  const token = await resolveAccessToken();
   if (!token) return { ok: false, message: "Please sign in." };
 
   try {
