@@ -97,6 +97,10 @@ export function listVaultFiles(userId: string): VaultFile[] {
     .sort((a, b) => (a.addedAt < b.addedAt ? 1 : -1));
 }
 
+export function totalVaultBytes(userId: string): number {
+  return listVaultFiles(userId).reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
+}
+
 export function getVaultFile(userId: string, id: string): VaultFile | null {
   return listVaultFiles(userId).find((f) => f.id === id) || null;
 }
