@@ -184,6 +184,18 @@ export async function getConnectedExternalCount(userId: string): Promise<number>
   return n;
 }
 
+/**
+ * Check whether the user may connect another external service.
+ * Only counts services that are already connected.
+ */
+export async function assertCanConnect(
+  userId: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const billing = await fetchBillingStatus(true);
+  const count = await getConnectedExternalCount(userId);
+  return canConnectService(count, billing);
+}
+
 /** Record one real agent run against the monthly allowance */
 export async function recordAgentRun(): Promise<
   { ok: true; runsUsedThisPeriod: number } | { ok: false; message: string; limitReached?: boolean }
