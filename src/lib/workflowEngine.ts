@@ -584,7 +584,7 @@ async function executeAction(
           accessToken: bufferToken,
           channel: config.channel || "",
           text: config.text || "",
-          scheduledAt: config.scheduled_at || config.scheduledAt || "",
+          scheduledAt: config.scheduled_at || undefined,
         });
         return { ok: r.ok, message: r.message, data: r.data, error: r.error };
       }
@@ -677,6 +677,72 @@ async function executeAction(
           else if (d.images?.[0]?.url) ctx.imageUrl = d.images[0].url;
         }
         return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
+    }
+    case "mcp.call_tool": {
+      if (simulate) {
+        return { ok: true, message: "[Simulated] Would run custom tool" };
+      }
+      const toolName = String(config.tool_name || config.toolName || "").trim();
+      if (!toolName) {
+        return {
+          ok: false,
+          message: "Choose a tool name from your connected server.",
+          error: { category: "validation" },
+        };
+      }
+      let args: Record<string, unknown> = {};
+      const rawArgs = config.arguments_json || config.arguments || config.args;
+      if (typeof rawArgs === "string" && rawArgs.trim()) {
+        try {
+          args = JSON.parse(rawArgs);
+        } catch {
+          return {
+            ok: false,
+            message: "Tool inputs must be valid JSON.",
+            error: { category: "validation" },
+          };
+        }
+      } else if (rawArgs && typeof rawArgs === "object") {
+        args = rawArgs as Record<string, unknown>;
+      }
+      if (typeof window !== "undefined" && connections.userId) {
+        const res = await fetch("/api/connections/mcp/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: connections.userId,
+            toolName,
+            args,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        return {
+          ok: Boolean(data.ok),
+          message: data.message || (data.ok ? "Done" : "Tool failed"),
+          data: data.data,
+          error: data.ok ? undefined : { category: "provider" },
+        };
+      }
+      try {
+        const { executeApprovedMcpTool } = await import("./connectors/mcpAuth");
+        const r = await executeApprovedMcpTool({
+          userId: connections.userId || "",
+          toolName,
+          args,
+        });
+        return {
+          ok: r.ok,
+          message: r.message,
+          data: r.data,
+          error: r.ok ? undefined : { category: "provider" },
+        };
+      } catch {
+        return {
+          ok: false,
+          message: "Could not run this tool.",
+          error: { category: "provider" },
+        };
       }
     }
     default:
