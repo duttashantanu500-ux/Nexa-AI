@@ -9,7 +9,13 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
-export type ConnectorId = "notion" | "slack" | "github" | "buffer" | "ideogram";
+export type ConnectorId =
+  | "notion"
+  | "slack"
+  | "github"
+  | "buffer"
+  | "ideogram"
+  | "mcp";
 
 export interface StoredConnection {
   userId: string;
