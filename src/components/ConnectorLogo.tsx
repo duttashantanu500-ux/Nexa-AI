@@ -42,17 +42,14 @@ export function ConnectorLogo({
       return (
         <svg {...common} viewBox="0 0 24 24" fill="none">
           <g fill="#0D0D0D" stroke="#0D0D0D" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
-            {/* speed lines */}
             <path d="M2.5 8.5h3.5" fill="none" />
             <path d="M2 12h4" fill="none" />
             <path d="M2.5 15.5h3.5" fill="none" />
-            {/* brain outline */}
             <path
               fill="#0D0D0D"
               stroke="none"
               d="M14.2 4.2c-1.1 0-2.1.4-2.85 1.05A3.9 3.9 0 0 0 9.2 4.5c-2.1 0-3.8 1.7-3.8 3.8 0 .5.1 1 .28 1.45A3.3 3.3 0 0 0 4.2 12.5c0 1.7 1.25 3.1 2.9 3.4v1.9c0 .6.5 1.1 1.1 1.1h.9c.6 0 1.1-.5 1.1-1.1v-.7h1.6v.7c0 .6.5 1.1 1.1 1.1h.9c.6 0 1.1-.5 1.1-1.1v-1.85c1.75-.4 3-1.9 3-3.7 0-1.1-.45-2.05-1.2-2.75.15-.45.25-.95.25-1.45 0-2.2-1.8-4-4.05-4z"
             />
-            {/* inner fold lines for brain texture */}
             <path d="M9.8 9.2c.6-.5 1.3-.7 2.1-.7" fill="none" stroke="#fff" strokeWidth="1.1" />
             <path d="M9.5 12.2c.8-.3 1.6-.3 2.4 0" fill="none" stroke="#fff" strokeWidth="1.1" />
             <path d="M13.8 9.5c.5.4.8 1 .8 1.7" fill="none" stroke="#fff" strokeWidth="1.1" />
@@ -63,6 +60,59 @@ export function ConnectorLogo({
       return (
         <svg {...common} viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.17 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.167 22 16.418 22 12c0-5.523-4.477-10-10-10z" />
+        </svg>
+      );
+    /* Official Gmail product mark (Google brand colors) */
+    case "gmail":
+      return (
+        <svg {...common} viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M22 6.5v11c0 1.1-.9 2-2 2h-2V8.3l-6 4.5-6-4.5V19.5H4c-1.1 0-2-.9-2-2v-11c0-.55.22-1.05.59-1.41L12 11.5l9.41-6.41c.37.36.59.86.59 1.41z" />
+          <path fill="#EA4335" d="M2.59 5.09C2.22 5.45 2 5.95 2 6.5v.37l8.5 6.37L2.59 5.09z" />
+          <path fill="#FBBC04" d="M22 6.87V6.5c0-.55-.22-1.05-.59-1.41L12 12.24l1.5 1.12L22 6.87z" />
+          <path fill="#34A853" d="M2 6.87v11.13c0 1.1.9 2 2 2h2V8.3L2 6.87z" />
+          <path fill="#C5221F" d="M20 19.5h-2V8.3l-6 4.5V20h8c1.1 0 2-.9 2-2v-.5h-2z" />
+        </svg>
+      );
+    /* Official Google Drive product mark */
+    case "gdrive":
+      return (
+        <svg {...common} viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M4.433 22l3.52-6.087L15.482 2H8.045L.962 14.304 4.433 22z" />
+          <path fill="#0066DA" d="M8.045 2L15.482 2 22.55 14.087 15.118 14.087z" />
+          <path fill="#00AC47" d="M4.433 22H19.55l-3.52-6.087H.913z" />
+          <path fill="#00832D" d="M8.045 2L4.433 8.174 15.118 14.087 18.73 7.913z" />
+          <path fill="#FFBA00" d="M15.118 14.087L19.55 22H4.433l3.52-6.087z" />
+          <path fill="#FFBB00" d="M22.55 14.087L19.55 22l-4.432-7.913z" />
+        </svg>
+      );
+    /* Official Google Calendar product mark */
+    case "gcal":
+      return (
+        <svg {...common} viewBox="0 0 24 24">
+          <path fill="#FFFFFF" d="M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" />
+          <path fill="#1A73E8" d="M19 3h-1V2h-2v1H8V2H6v1H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z" />
+          <path fill="#EA4335" d="M5 3h14c1.1 0 2 .9 2 2v2H3V5c0-1.1.9-2 2-2z" />
+          <text
+            x="12"
+            y="16.2"
+            textAnchor="middle"
+            fontSize="8"
+            fontWeight="700"
+            fontFamily="Arial, Helvetica, sans-serif"
+            fill="#1A73E8"
+          >
+            31
+          </text>
+        </svg>
+      );
+    /* Official Google Sheets product mark */
+    case "gsheets":
+      return (
+        <svg {...common} viewBox="0 0 24 24">
+          <path fill="#0F9D58" d="M14.5 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V7.5L14.5 2z" />
+          <path fill="#87CEAC" d="M14 2v5h5l-5-5z" />
+          <path fill="#FFFFFF" d="M7.5 11h9v1.5h-9V11zm0 3h9v1.5h-9V14zm0 3h6V18.5h-6V17z" />
+          <path fill="#FFFFFF" fillOpacity="0.9" d="M7.5 11h1.5v8.5H7.5V11zm4 0h1.5v8.5H11.5V11z" />
         </svg>
       );
     case "local_data":
