@@ -10,6 +10,13 @@ import {
   setUser,
 } from "@/lib/operatorStore";
 import { applyTheme, type ThemeChoice } from "@/lib/theme";
+import {
+  fetchBillingStatus,
+  startProCheckout,
+  clearBillingCache,
+  type ClientBillingState,
+} from "@/lib/clientBilling";
+import { PLAN_FREE, PLAN_PRO } from "@/lib/plans";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -18,6 +25,9 @@ export default function SettingsPage() {
   const [age, setAge] = useState("");
   const [theme, setThemeLocal] = useState<ThemeChoice>("light");
   const [saved, setSaved] = useState(false);
+  const [billing, setBilling] = useState<ClientBillingState | null>(null);
+  const [billingBusy, setBillingBusy] = useState(false);
+  const [billingMsg, setBillingMsg] = useState("");
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -31,7 +41,25 @@ export default function SettingsPage() {
     const t = (s.theme || "light") as ThemeChoice;
     setThemeLocal(t);
     applyTheme(t);
+
+    void fetchBillingStatus(true).then(setBilling);
   }, [router]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("billing") === "success") {
+      clearBillingCache();
+      void fetchBillingStatus(true).then((b) => {
+        setBilling(b);
+        setBillingMsg(
+          b.planId === "pro"
+            ? "You're on Pro. Enjoy the extra capacity."
+            : "Payment received. Your plan will update in a moment."
+        );
+      });
+    }
+  }, []);
 
   const saveProfile = () => {
     const s = loadOperatorState();
@@ -53,16 +81,36 @@ export default function SettingsPage() {
 
   const logout = () => {
     clearSession();
+    clearBillingCache();
     router.replace("/login");
   };
+
+  const upgrade = async () => {
+    setBillingBusy(true);
+    setBillingMsg("");
+    const result = await startProCheckout();
+    setBillingBusy(false);
+    if (!result.ok) {
+      setBillingMsg(result.message);
+      return;
+    }
+    window.location.href = result.checkoutUrl;
+  };
+
+  const planId = billing?.planId || "free";
+  const isPro = planId === "pro";
 
   return (
     <AppShell>
       <div className="mx-auto max-w-lg space-y-8 px-4 py-8">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Settings</h1>
+        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+          Settings
+        </h1>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Profile</h2>
+          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+            Profile
+          </h2>
           <label className="block space-y-1">
             <span className="text-xs text-zinc-500 dark:text-zinc-400">Name</span>
             <input
@@ -98,7 +146,131 @@ export default function SettingsPage() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Theme</h2>
+          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+            Plan
+          </h2>
+          <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                  Current plan: {isPro ? "Pro" : "Free"}
+                </p>
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  {isPro ? PLAN_PRO.priceLabel : PLAN_FREE.priceLabel}
+                  {billing?.cancelAtPeriodEnd && billing.periodEnd
+                    ? ` · Access continues until ${new Date(
+                        billing.periodEnd
+                      ).toLocaleDateString()}`
+                    : ""}
+                </p>
+              </div>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                  isPro
+                    ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
+                    : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                }`}
+              >
+                {isPro ? "Pro" : "Free"}
+              </span>
+            </div>
+
+            {billing && (
+              <ul className="mt-3 space-y-1 text-xs text-zinc-600 dark:text-zinc-400">
+                <li>Agents: up to {billing.limits.maxAgents}</li>
+                <li>
+                  Connections:{" "}
+                  {billing.limits.maxConnections === Number.POSITIVE_INFINITY
+                    ? "Unlimited"
+                    : `up to ${billing.limits.maxConnections}`}
+                </li>
+                <li>
+                  Runs this period: {billing.runsUsedThisPeriod} /{" "}
+                  {billing.limits.maxRunsPerMonth}
+                </li>
+                <li>
+                  Vault:{" "}
+                  {billing.limits.vaultBytes >= 1024 * 1024 * 1024
+                    ? `${(billing.limits.vaultBytes / (1024 * 1024 * 1024)).toFixed(0)} GB`
+                    : `${(billing.limits.vaultBytes / (1024 * 1024)).toFixed(0)} MB`}
+                </li>
+              </ul>
+            )}
+
+            {!isPro && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs text-zinc-500">
+                  Upgrade to Pro for more agents, unlimited connections, 1,000
+                  runs/month, 5 GB Vault, and advanced workflow options.
+                </p>
+                <button
+                  type="button"
+                  disabled={billingBusy}
+                  onClick={() => void upgrade()}
+                  className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white disabled:opacity-50"
+                >
+                  {billingBusy ? "Opening checkout…" : "Upgrade to Pro — $9/month"}
+                </button>
+              </div>
+            )}
+
+            {isPro && (
+              <p className="mt-3 text-xs text-zinc-500">
+                To change or cancel your subscription, use the payment receipt
+                email from checkout, or contact support. Pro stays active until
+                the end of the billing period if you cancel.
+              </p>
+            )}
+
+            {billingMsg && (
+              <p className="mt-3 text-xs text-indigo-600 dark:text-indigo-400">
+                {billingMsg}
+              </p>
+            )}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div
+              className={`rounded-xl border p-3 ${
+                !isPro
+                  ? "border-indigo-300 bg-indigo-50/50 dark:border-indigo-800 dark:bg-indigo-950/30"
+                  : "border-zinc-200 dark:border-zinc-800"
+              }`}
+            >
+              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                Free
+              </div>
+              <div className="text-xs text-zinc-500">$0/month</div>
+              <ul className="mt-2 space-y-0.5 text-[11px] text-zinc-600 dark:text-zinc-400">
+                {PLAN_FREE.features.slice(0, 5).map((f) => (
+                  <li key={f}>· {f}</li>
+                ))}
+              </ul>
+            </div>
+            <div
+              className={`rounded-xl border p-3 ${
+                isPro
+                  ? "border-indigo-300 bg-indigo-50/50 dark:border-indigo-800 dark:bg-indigo-950/30"
+                  : "border-zinc-200 dark:border-zinc-800"
+              }`}
+            >
+              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                Pro
+              </div>
+              <div className="text-xs text-zinc-500">$9/month</div>
+              <ul className="mt-2 space-y-0.5 text-[11px] text-zinc-600 dark:text-zinc-400">
+                {PLAN_PRO.features.slice(0, 6).map((f) => (
+                  <li key={f}>· {f}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+            Theme
+          </h2>
           <div className="flex gap-2">
             {(["light", "dark", "system"] as const).map((t) => (
               <button
@@ -116,7 +288,8 @@ export default function SettingsPage() {
             ))}
           </div>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Light forces a bright background and dark text. Dark forces dark UI. System follows your device.
+            Light forces a bright background and dark text. Dark forces dark UI.
+            System follows your device.
           </p>
         </section>
 
