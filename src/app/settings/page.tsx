@@ -35,6 +35,12 @@ export default function SettingsPage() {
     connections: 0,
     vaultBytes: 0,
   });
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [supportSubject, setSupportSubject] = useState("");
+  const [supportDesc, setSupportDesc] = useState("");
+  const [supportBusy, setSupportBusy] = useState(false);
+  const [supportMsg, setSupportMsg] = useState("");
+  const [supportErr, setSupportErr] = useState(false);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -124,6 +130,45 @@ export default function SettingsPage() {
         ? "You're on Pro."
         : "Still on Free. If you just paid, wait a moment and try again."
     );
+  };
+
+  const submitSupport = async () => {
+    setSupportBusy(true);
+    setSupportMsg("");
+    setSupportErr(false);
+    const s = loadOperatorState();
+    try {
+      const res = await fetch("/api/support", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: supportSubject,
+          description: supportDesc,
+          userEmail: s.user?.email || email,
+          userName: s.user?.name || name,
+          userId: s.user?.id || "",
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setSupportErr(true);
+        setSupportMsg(data.message || "Could not send. Please try again.");
+        setSupportBusy(false);
+        return;
+      }
+      if (data.mailto) {
+        window.location.href = data.mailto;
+      }
+      setSupportMsg(
+        "Your email app should open with the message ready. Send it to finish."
+      );
+      setSupportSubject("");
+      setSupportDesc("");
+    } catch {
+      setSupportErr(true);
+      setSupportMsg("Could not send. Please try again.");
+    }
+    setSupportBusy(false);
   };
 
   const planId = billing?.planId || "free";
@@ -330,6 +375,85 @@ export default function SettingsPage() {
             Light forces a bright background and dark text. Dark forces dark UI.
             System follows your device.
           </p>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+            Support
+          </h2>
+          {!supportOpen ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSupportOpen(true);
+                setSupportMsg("");
+                setSupportErr(false);
+              }}
+              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-200"
+            >
+              Contact Support
+            </button>
+          ) : (
+            <div className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+              <p className="text-xs text-zinc-500">
+                Messages go to{" "}
+                <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                  nexa.com.intelligence@gmail.com
+                </span>
+                . Include enough detail so we can help.
+              </p>
+              <label className="block space-y-1">
+                <span className="text-xs text-zinc-500">Subject</span>
+                <input
+                  value={supportSubject}
+                  onChange={(e) => setSupportSubject(e.target.value)}
+                  placeholder="Brief summary"
+                  className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs text-zinc-500">Description</span>
+                <textarea
+                  value={supportDesc}
+                  onChange={(e) => setSupportDesc(e.target.value)}
+                  rows={5}
+                  placeholder="What happened? What were you trying to do?"
+                  className="w-full resize-y rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={supportBusy}
+                  onClick={() => void submitSupport()}
+                  className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white disabled:opacity-50"
+                >
+                  {supportBusy ? "Preparing…" : "Submit request"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSupportOpen(false);
+                    setSupportMsg("");
+                  }}
+                  className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+                >
+                  Cancel
+                </button>
+              </div>
+              {supportMsg && (
+                <p
+                  className={`text-xs ${
+                    supportErr
+                      ? "text-red-600 dark:text-red-400"
+                      : "text-indigo-600 dark:text-indigo-400"
+                  }`}
+                >
+                  {supportMsg}
+                </p>
+              )}
+            </div>
+          )}
         </section>
 
         <section>
