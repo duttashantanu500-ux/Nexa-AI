@@ -30,6 +30,7 @@ const SHORT: Record<string, string> = {
   vault: "Your private files",
   buffer: "Social scheduling",
   ideogram: "AI images",
+  mcp: "Your own MCP tools",
 };
 
 export default function ConnectionsPage() {
@@ -56,6 +57,7 @@ function ConnectionsInner() {
   const [slackStatus, setSlackStatus] = useState<ConnectorUiStatus | null>(null);
   const [bufferStatus, setBufferStatus] = useState<ConnectorUiStatus | null>(null);
   const [ideogramStatus, setIdeogramStatus] = useState<ConnectorUiStatus | null>(null);
+  const [mcpStatus, setMcpStatus] = useState<ConnectorUiStatus | null>(null);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -105,6 +107,10 @@ function ConnectionsInner() {
       .then((r) => r.json())
       .then((d) => setIdeogramStatus((d.status as ConnectorUiStatus) || null))
       .catch(() => null);
+    fetch(`/api/connections/mcp/status?userId=${encodeURIComponent(uid)}`)
+      .then((r) => r.json())
+      .then((d) => setMcpStatus((d.status as ConnectorUiStatus) || null))
+      .catch(() => null);
   }, [router, search]);
 
   const resolveStatus = (c: ConnectorDefinition): ConnectorUiStatus => {
@@ -114,7 +120,14 @@ function ConnectionsInner() {
     if (c.id === "slack" && slackStatus) return slackStatus;
     if (c.id === "buffer" && bufferStatus) return bufferStatus;
     if (c.id === "ideogram" && ideogramStatus) return ideogramStatus;
-    if (c.id === "slack" || c.id === "notion" || c.id === "buffer" || c.id === "ideogram") {
+    if (c.id === "mcp" && mcpStatus) return mcpStatus;
+    if (
+      c.id === "slack" ||
+      c.id === "notion" ||
+      c.id === "buffer" ||
+      c.id === "ideogram" ||
+      c.id === "mcp"
+    ) {
       return c.defaultStatus === "available" ? "available" : c.defaultStatus;
     }
     if (!c.executable || c.defaultStatus === "unavailable") return "coming_soon";
