@@ -6,7 +6,6 @@
 import { getSupabase } from "./supabase";
 import {
   PLAN_FREE,
-  PLAN_PRO,
   type PlanId,
   type PlanLimits,
   type SubscriptionStatus,
@@ -50,21 +49,28 @@ function freeState(): ClientBillingState {
   };
 }
 
+function tokenLooksPresent(token: string | undefined | null): token is string {
+  return Boolean(token && token.length > 20);
+}
+
 /**
  * Resolve a valid access token for the currently signed-in Nexa user.
- * Tries getSession → refresh → getUser → password recovery from nexa_auth.
+ * Does not discard a session merely because a network validation failed.
  */
 async function resolveAccessToken(): Promise<string | null> {
   const sb = getSupabase();
   if (!sb) return null;
 
-  // 1) Existing session
+  // 1) Prefer existing session access token (do not drop it on transient getUser errors)
   try {
     const { data } = await sb.auth.getSession();
-    if (data.session?.access_token) {
-      // Validate token is still accepted
-      const { error } = await sb.auth.getUser(data.session.access_token);
-      if (!error) return data.session.access_token;
+    const token = data.session?.access_token;
+    if (tokenLooksPresent(token)) {
+      const expiresAt = data.session?.expires_at;
+      const stillFresh =
+        !expiresAt || expiresAt * 1000 > Date.now() + 30_000;
+      if (stillFresh) return token;
+      // Near expiry — refresh below
     }
   } catch {
     /* continue */
@@ -73,23 +79,27 @@ async function resolveAccessToken(): Promise<string | null> {
   // 2) Refresh
   try {
     const { data, error } = await sb.auth.refreshSession();
-    if (!error && data.session?.access_token) return data.session.access_token;
-  } catch {
-    /* continue */
-  }
-
-  // 3) getUser may refresh internally when cookies exist
-  try {
-    const { data } = await sb.auth.getUser();
-    if (data.user) {
-      const { data: sess } = await sb.auth.getSession();
-      if (sess.session?.access_token) return sess.session.access_token;
+    if (!error && tokenLooksPresent(data.session?.access_token)) {
+      return data.session!.access_token;
     }
   } catch {
     /* continue */
   }
 
-  // 4) Email/password recovery for same account (not a new user)
+  // 3) getUser (may rehydrate)
+  try {
+    const { data, error } = await sb.auth.getUser();
+    if (!error && data.user) {
+      const { data: sess } = await sb.auth.getSession();
+      if (tokenLooksPresent(sess.session?.access_token)) {
+        return sess.session!.access_token;
+      }
+    }
+  } catch {
+    /* continue */
+  }
+
+  // 4) Same-account email/password restore (not a new user)
   if (typeof window !== "undefined") {
     try {
       const raw = localStorage.getItem("nexa_auth");
@@ -102,8 +112,8 @@ async function resolveAccessToken(): Promise<string | null> {
             email,
             password,
           });
-          if (!error && data.session?.access_token) {
-            return data.session.access_token;
+          if (!error && tokenLooksPresent(data.session?.access_token)) {
+            return data.session!.access_token;
           }
         }
       }
@@ -274,7 +284,8 @@ export async function assertCanConnect(
 }
 
 export async function recordAgentRun(): Promise<
-  { ok: true; runsUsedThisPeriod: number } | { ok: false; message: string; limitReached?: boolean }
+  | { ok: true; runsUsedThisPeriod: number }
+  | { ok: false; message: string; limitReached?: boolean }
 > {
   const token = await resolveAccessToken();
   if (!token) return { ok: false, message: "Please sign in." };
@@ -352,4 +363,4 @@ export function canAddVaultBytes(
   return { ok: true };
 }
 
-export { PLAN_FREE, PLAN_PRO, hasProAccess, LIMIT_MESSAGES };
+export { PLAN_FREE, hasProAccess, LIMIT_MESSAGES };
