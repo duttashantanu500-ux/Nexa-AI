@@ -13,46 +13,67 @@ export default function AuthCallbackPage() {
     const run = async () => {
       const sb = getSupabase();
       if (!sb) {
-        setError("Supabase is not configured.");
+        setError("Something went wrong. Please try signing in again.");
         return;
       }
 
       try {
-        // Exchange code / pick up session from URL
-        const { data, error: sessErr } = await sb.auth.getSession();
-        if (sessErr) {
-          setError(sessErr.message);
-          return;
-        }
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get("code");
+        const tokenHash = url.searchParams.get("token_hash");
+        const type = url.searchParams.get("type");
 
-        let userId = data.session?.user?.id;
-
-        if (!userId) {
-          // Some flows need explicit exchange from hash/query
-          const { data: userData } = await sb.auth.getUser();
-          userId = userData.user?.id;
-        }
-
-        if (!userId) {
-          setError("Could not complete sign-in.");
-          return;
-        }
-
-        // Ensure profile row exists
-        const user = (await sb.auth.getUser()).data.user;
-        if (user) {
-          await sb.from("profiles").upsert({
-            id: user.id,
-            email: user.email,
-            name:
-              user.user_metadata?.name ||
-              user.user_metadata?.full_name ||
-              user.email?.split("@")[0] ||
-              "User",
+        // PKCE / OAuth / email confirmation: exchange code for session
+        if (code) {
+          const { error: exchErr } = await sb.auth.exchangeCodeForSession(code);
+          if (exchErr) {
+            setError(
+              exchErr.message?.includes("expired")
+                ? "This link has expired. Please try again."
+                : "Could not complete sign-in. Please try again."
+            );
+            return;
+          }
+        } else if (tokenHash && type) {
+          const { error: otpErr } = await sb.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: type as "signup" | "recovery" | "email",
           });
+          if (otpErr) {
+            setError("This link is invalid or expired. Please try again.");
+            return;
+          }
+        } else {
+          // Hash-based implicit flow fallback
+          await sb.auth.getSession();
         }
+
+        const { data: userData, error: userErr } = await sb.auth.getUser();
+        if (userErr || !userData.user) {
+          setError("Could not complete sign-in. Please try again.");
+          return;
+        }
+
+        const user = userData.user;
+        const userId = user.id;
+
+        await sb.from("profiles").upsert({
+          id: userId,
+          email: user.email,
+          name:
+            user.user_metadata?.name ||
+            user.user_metadata?.full_name ||
+            user.email?.split("@")[0] ||
+            "User",
+        });
 
         await hydrateLocalFromCloud(userId);
+
+        // Password recovery lands here with type=recovery
+        if (type === "recovery" || url.searchParams.get("next") === "reset") {
+          router.replace("/auth/reset-password");
+          return;
+        }
 
         const { data: profile } = await sb
           .from("profiles")
@@ -61,26 +82,31 @@ export default function AuthCallbackPage() {
           .maybeSingle();
 
         if (profile?.onboarding_completed) {
-          router.replace("/chat");
+          router.replace("/home");
         } else {
           router.replace("/onboarding");
         }
-      } catch (e: any) {
-        setError(e?.message || "Sign-in failed.");
+      } catch {
+        setError("Sign-in failed. Please try again.");
       }
     };
 
-    run();
+    void run();
   }, [router]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="text-center space-y-3">
-        <div className="text-2xl font-semibold">Nexa</div>
+    <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
+      <div className="space-y-3 text-center">
+        <div className="text-2xl font-semibold text-indigo-600">Nexa</div>
         {error ? (
-          <p className="text-sm text-red-500">{error}</p>
+          <div className="space-y-3">
+            <p className="text-sm text-red-500">{error}</p>
+            <a href="/login" className="text-sm text-indigo-600 hover:underline">
+              Back to login
+            </a>
+          </div>
         ) : (
-          <p className="text-sm text-muted">Finishing sign-in…</p>
+          <p className="text-sm text-zinc-500">Finishing sign-in…</p>
         )}
       </div>
     </div>
