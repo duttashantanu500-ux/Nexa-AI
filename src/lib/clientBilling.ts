@@ -52,28 +52,44 @@ function freeState(): ClientBillingState {
 
 /**
  * Resolve a valid access token for the currently signed-in Nexa user.
- * Recovers from expired/missing browser sessions when possible.
+ * Tries getSession → refresh → getUser → password recovery from nexa_auth.
  */
 async function resolveAccessToken(): Promise<string | null> {
   const sb = getSupabase();
   if (!sb) return null;
 
+  // 1) Existing session
   try {
     const { data } = await sb.auth.getSession();
-    if (data.session?.access_token) return data.session.access_token;
+    if (data.session?.access_token) {
+      // Validate token is still accepted
+      const { error } = await sb.auth.getUser(data.session.access_token);
+      if (!error) return data.session.access_token;
+    }
   } catch {
     /* continue */
   }
 
+  // 2) Refresh
   try {
-    const { data } = await sb.auth.refreshSession();
-    if (data.session?.access_token) return data.session.access_token;
+    const { data, error } = await sb.auth.refreshSession();
+    if (!error && data.session?.access_token) return data.session.access_token;
   } catch {
     /* continue */
   }
 
-  // Recover using locally stored email/password from Nexa login/signup
-  // (same account — does not create a new user).
+  // 3) getUser may refresh internally when cookies exist
+  try {
+    const { data } = await sb.auth.getUser();
+    if (data.user) {
+      const { data: sess } = await sb.auth.getSession();
+      if (sess.session?.access_token) return sess.session.access_token;
+    }
+  } catch {
+    /* continue */
+  }
+
+  // 4) Email/password recovery for same account (not a new user)
   if (typeof window !== "undefined") {
     try {
       const raw = localStorage.getItem("nexa_auth");
@@ -191,7 +207,7 @@ export async function startProCheckout(): Promise<
     return {
       ok: false,
       message:
-        "Your session expired. Please log out and log in again, then try Upgrade.",
+        "Please sign in again to upgrade. Your session could not be verified.",
     };
   }
 
@@ -209,6 +225,13 @@ export async function startProCheckout(): Promise<
     });
     const data = await res.json();
     if (!data.ok || !data.checkoutUrl) {
+      if (res.status === 401) {
+        return {
+          ok: false,
+          message:
+            "Please sign in again to upgrade. Your session could not be verified.",
+        };
+      }
       return {
         ok: false,
         message: data.message || "We couldn't start checkout. Please try again.",
@@ -223,7 +246,6 @@ export async function startProCheckout(): Promise<
   }
 }
 
-/** Count connected external (non-builtin) services for Free plan limits */
 export async function getConnectedExternalCount(userId: string): Promise<number> {
   if (!userId) return 0;
   let n = 0;
@@ -243,10 +265,6 @@ export async function getConnectedExternalCount(userId: string): Promise<number>
   return n;
 }
 
-/**
- * Check whether the user may connect another external service.
- * Only counts services that are already connected.
- */
 export async function assertCanConnect(
   userId: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -255,7 +273,6 @@ export async function assertCanConnect(
   return canConnectService(count, billing);
 }
 
-/** Record one real agent run against the monthly allowance */
 export async function recordAgentRun(): Promise<
   { ok: true; runsUsedThisPeriod: number } | { ok: false; message: string; limitReached?: boolean }
 > {
@@ -282,7 +299,6 @@ export async function recordAgentRun(): Promise<
   }
 }
 
-/** Count active non-builtin connections for limit checks */
 export function countActiveConnections(
   connections: { provider?: string; status?: string }[]
 ): number {
