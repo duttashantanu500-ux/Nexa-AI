@@ -6,15 +6,11 @@ import {
   isSupabaseConfigured,
   signUpWithEmail,
   signInWithGoogle,
-  getSessionUserId,
+  resendSignupEmail,
 } from "@/lib/auth";
 import { persistUserProfile } from "@/lib/sessionUser";
 import { UserProfile } from "@/types";
 import Link from "next/link";
-
-function localUid() {
-  return `u_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-}
 
 export default function SignupPage() {
   const router = useRouter();
@@ -23,6 +19,9 @@ export default function SignupPage() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
+  const [resendMsg, setResendMsg] = useState("");
+  const [resendBusy, setResendBusy] = useState(false);
   const supabaseReady = isSupabaseConfigured();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -42,50 +41,79 @@ export default function SignupPage() {
       return;
     }
 
-    let stableId = "";
+    if (!supabaseReady) {
+      setError("Account service is not available. Please try again later.");
+      setLoading(false);
+      return;
+    }
 
-    if (supabaseReady) {
-      const result = await signUpWithEmail({ email, password, name });
-      if (result.error) {
-        setError(result.error);
-        setLoading(false);
-        return;
+    const result = await signUpWithEmail({ email, password, name });
+    if (result.error) {
+      setError(result.error);
+      setLoading(false);
+      return;
+    }
+
+    if (result.needsConfirmation) {
+      try {
+        localStorage.setItem(
+          "nexa_auth",
+          JSON.stringify({
+            email: email.toLowerCase().trim(),
+            password,
+          })
+        );
+      } catch {
+        /* */
       }
-      // Always use the cloud account id so connector tokens survive restarts
-      stableId = (await getSessionUserId()) || "";
+      setAwaitingConfirm(true);
+      setLoading(false);
+      return;
     }
 
-    if (!stableId) {
-      // Local-only mode (no Supabase)
-      stableId = localUid();
+    if (result.userId) {
+      const user: UserProfile = {
+        id: result.userId,
+        email: email.toLowerCase().trim(),
+        name: name.trim(),
+        createdAt: new Date().toISOString(),
+        onboardingCompleted: false,
+      };
+      persistUserProfile(user);
+      try {
+        localStorage.setItem(
+          "nexa_auth",
+          JSON.stringify({ email: user.email, password })
+        );
+      } catch {
+        /* */
+      }
+      setLoading(false);
+      router.push("/onboarding");
+      return;
     }
 
-    const user: UserProfile = {
-      id: stableId,
-      email: email.toLowerCase().trim(),
-      name: name.trim(),
-      createdAt: new Date().toISOString(),
-      onboardingCompleted: false,
-    };
-    persistUserProfile(user);
-
-    try {
-      localStorage.setItem(
-        "nexa_auth",
-        JSON.stringify({ email: user.email, password })
-      );
-    } catch {
-      /* */
-    }
+    setError("Could not create account.");
     setLoading(false);
-    router.push("/onboarding");
+  };
+
+  const handleResend = async () => {
+    setResendBusy(true);
+    setResendMsg("");
+    const r = await resendSignupEmail(email);
+    setResendBusy(false);
+    if (r.error) {
+      setResendMsg("Could not resend. Wait a minute and try again.");
+      return;
+    }
+    setResendMsg("Confirmation email sent. Check your inbox.");
   };
 
   const handleGoogle = async () => {
     setError("");
     setLoading(true);
     if (!supabaseReady) {
-      setError("Google sign-in needs account setup. Use email for now.");
+      setError("Google sign-in is not available right now.");
       setLoading(false);
       return;
     }
@@ -96,10 +124,50 @@ export default function SignupPage() {
     }
   };
 
+  if (awaitingConfirm) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
+        <div className="w-full max-w-md space-y-6 text-center">
+          <h1 className="text-3xl font-semibold tracking-tight text-indigo-600">
+            Nexa
+          </h1>
+          <div className="rounded-xl border border-zinc-200 bg-white p-6 text-left dark:border-zinc-800 dark:bg-zinc-900">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+              Check your email
+            </h2>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+              We sent a confirmation link to{" "}
+              <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                {email}
+              </span>
+              . Open it to activate your account, then log in.
+            </p>
+            <button
+              type="button"
+              disabled={resendBusy}
+              onClick={() => void handleResend()}
+              className="mt-4 rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 disabled:opacity-50"
+            >
+              {resendBusy ? "Sending…" : "Resend confirmation"}
+            </button>
+            {resendMsg && (
+              <p className="mt-2 text-xs text-indigo-600">{resendMsg}</p>
+            )}
+            <p className="mt-4 text-sm text-zinc-500">
+              <Link href="/login" className="text-indigo-600 hover:underline">
+                Go to login
+              </Link>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
       <div className="w-full max-w-md space-y-8">
-        <div className="text-center space-y-2">
+        <div className="space-y-2 text-center">
           <h1 className="text-3xl font-semibold tracking-tight text-indigo-600">
             Nexa
           </h1>
