@@ -1,19 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMcpConnection } from "@/lib/connectors/mcpAuth";
+import { requireAuthUser } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   try {
-    const userId = req.nextUrl.searchParams.get("userId") || "";
-    if (!userId) {
+    // Unauthenticated: only generic availability (no user data)
+    const authHeader = req.headers.get("authorization") || "";
+    if (!authHeader.startsWith("Bearer ")) {
       return NextResponse.json({
         status: "available",
         message: "Sign in to connect your own MCP server.",
       });
     }
 
-    const conn = await getMcpConnection(userId);
+    const auth = await requireAuthUser(req);
+    if ("error" in auth) {
+      return NextResponse.json({
+        status: "available",
+        message: "Sign in to connect your own MCP server.",
+      });
+    }
+
+    // Ignore client-supplied userId — always use JWT subject
+    const conn = await getMcpConnection(auth.userId);
     if (!conn) {
       return NextResponse.json({
         status: "available",
@@ -31,7 +42,7 @@ export async function GET(req: NextRequest) {
       endpointHost: safeHost(conn.endpoint),
       discoveredTools: conn.discoveredTools.map((t) => ({
         name: t.name,
-        description: t.description || "",
+        description: (t.description || "").slice(0, 500),
       })),
       approvedTools: conn.approvedTools,
     });
