@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   isSupabaseConfigured,
   signUpWithEmail,
-  signInWithGoogle,
   resendSignupEmail,
 } from "@/lib/auth";
 import { persistUserProfile } from "@/lib/sessionUser";
@@ -109,21 +108,6 @@ export default function SignupPage() {
     setResendMsg("Confirmation email sent. Check your inbox.");
   };
 
-  const handleGoogle = async () => {
-    setError("");
-    setLoading(true);
-    if (!supabaseReady) {
-      setError("Google sign-in is not available right now.");
-      setLoading(false);
-      return;
-    }
-    const result = await signInWithGoogle();
-    if (result.error) {
-      setError(result.error);
-      setLoading(false);
-    }
-  };
-
   if (awaitingConfirm) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
@@ -219,15 +203,6 @@ export default function SignupPage() {
             {loading ? "Creating account…" : "Create account"}
           </button>
         </form>
-
-        <button
-          type="button"
-          onClick={handleGoogle}
-          disabled={loading}
-          className="w-full rounded-lg border border-zinc-200 bg-white py-2.5 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900 disabled:opacity-50"
-        >
-          Continue with Google
-        </button>
 
         <p className="text-center text-sm text-zinc-500">
           Already have an account?{" "}
