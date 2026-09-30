@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { authHeaders } from "@/lib/authHeaders";
 
 type UiStatus = "available" | "connected" | "error" | "loading";
 
@@ -38,22 +39,27 @@ export function McpConnectionPanel({
   const refresh = useCallback(async () => {
     if (!userId) return;
     try {
-      const res = await fetch(
-        `/api/connections/mcp/status?userId=${encodeURIComponent(userId)}`
-      );
+      const headers = await authHeaders();
+      const res = await fetch("/api/connections/mcp/status", { headers });
       const data = await res.json();
       const st = (data.status as UiStatus) || "available";
-      applyStatus(st === "connected" ? "connected" : st === "error" ? "error" : "available");
+      applyStatus(
+        st === "connected" ? "connected" : st === "error" ? "error" : "available"
+      );
       setHost(data.endpointHost || "");
       if (data.label) setLabel(data.label);
       const tools: ToolRow[] = Array.isArray(data.discoveredTools)
-        ? data.discoveredTools.map((t: { name: string; description?: string }) => ({
-            name: t.name,
-            description: t.description || "",
-          }))
+        ? data.discoveredTools.map(
+            (t: { name: string; description?: string }) => ({
+              name: t.name,
+              description: t.description || "",
+            })
+          )
         : [];
       setDiscovered(tools);
-      const ap: string[] = Array.isArray(data.approvedTools) ? data.approvedTools : [];
+      const ap: string[] = Array.isArray(data.approvedTools)
+        ? data.approvedTools
+        : [];
       setApproved(ap);
       const sel: Record<string, boolean> = {};
       for (const t of tools) sel[t.name] = ap.includes(t.name);
@@ -78,9 +84,12 @@ export function McpConnectionPanel({
     setBanner("");
     applyStatus("loading");
     try {
+      const headers = await authHeaders({
+        "Content-Type": "application/json",
+      });
       const res = await fetch("/api/connections/mcp/connect", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           userId,
           endpoint: url,
@@ -91,7 +100,9 @@ export function McpConnectionPanel({
       const data = await res.json();
       if (!data.ok) {
         applyStatus("error");
-        setBanner(data.message || "Could not connect. Check the address and try again.");
+        setBanner(
+          data.message || "Could not connect. Check the address and try again."
+        );
         setBusy(false);
         return;
       }
@@ -117,9 +128,12 @@ export function McpConnectionPanel({
       .filter(([, on]) => on)
       .map(([name]) => name);
     try {
+      const headers = await authHeaders({
+        "Content-Type": "application/json",
+      });
       const res = await fetch("/api/connections/mcp/approve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ userId, tools }),
       });
       const data = await res.json();
@@ -136,13 +150,19 @@ export function McpConnectionPanel({
     setBusy(true);
     setBanner("");
     try {
+      const headers = await authHeaders({
+        "Content-Type": "application/json",
+      });
       const res = await fetch("/api/connections/mcp/test", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ userId }),
       });
       const data = await res.json();
-      setBanner(data.message || (data.ok ? "Connected successfully." : "Couldn't reach this server."));
+      setBanner(
+        data.message ||
+          (data.ok ? "Connected successfully." : "Couldn't reach this server.")
+      );
       await refresh();
     } catch {
       setBanner("Couldn't reach this server.");
@@ -155,9 +175,12 @@ export function McpConnectionPanel({
     if (!confirm("Remove this custom connection from Nexa?")) return;
     setBusy(true);
     try {
+      const headers = await authHeaders({
+        "Content-Type": "application/json",
+      });
       const res = await fetch("/api/connections/mcp/disconnect", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ userId }),
       });
       const data = await res.json();
@@ -257,7 +280,9 @@ export function McpConnectionPanel({
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => void refresh().then(() => setBanner("Tool list updated."))}
+                onClick={() =>
+                  void refresh().then(() => setBanner("Tool list updated."))
+                }
                 className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
               >
                 Refresh tools
@@ -280,7 +305,9 @@ export function McpConnectionPanel({
               allow them.
             </p>
             {discovered.length === 0 ? (
-              <p className="text-sm text-zinc-500">No tools found on this server.</p>
+              <p className="text-sm text-zinc-500">
+                No tools found on this server.
+              </p>
             ) : (
               <ul className="max-h-80 space-y-2 overflow-y-auto">
                 {discovered.map((t) => (
@@ -301,7 +328,9 @@ export function McpConnectionPanel({
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium break-all">{t.name}</span>
+                        <span className="text-sm font-medium break-all">
+                          {t.name}
+                        </span>
                         {approved.includes(t.name) && (
                           <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
                             Allowed
@@ -309,7 +338,9 @@ export function McpConnectionPanel({
                         )}
                       </div>
                       {t.description && (
-                        <p className="mt-0.5 text-xs text-zinc-500">{t.description}</p>
+                        <p className="mt-0.5 text-xs text-zinc-500">
+                          {t.description}
+                        </p>
                       )}
                     </div>
                   </li>
