@@ -2,11 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  isSupabaseConfigured,
-  signInWithEmail,
-  signInWithGoogle,
-} from "@/lib/auth";
+import { isSupabaseConfigured, signInWithEmail } from "@/lib/auth";
 import { loadAppState } from "@/lib/conversationStore";
 import { loadOperatorState } from "@/lib/operatorStore";
 import { persistUserProfile, getStableUserId } from "@/lib/sessionUser";
@@ -76,21 +72,6 @@ export default function LoginPage() {
     goAfterLogin();
   };
 
-  const handleGoogle = async () => {
-    setError("");
-    setLoading(true);
-    if (!supabaseReady) {
-      setError("Google sign-in is not available right now.");
-      setLoading(false);
-      return;
-    }
-    const result = await signInWithGoogle();
-    if (result.error) {
-      setError(result.error);
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
       <div className="w-full max-w-md space-y-8">
@@ -143,24 +124,6 @@ export default function LoginPage() {
             {loading ? "Signing in…" : "Log in"}
           </button>
         </form>
-
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-zinc-200 dark:border-zinc-800" />
-          </div>
-          <div className="relative flex justify-center text-xs">
-            <span className="bg-zinc-50 px-2 text-zinc-500 dark:bg-zinc-950">or</span>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={handleGoogle}
-          disabled={loading}
-          className="w-full rounded-lg border border-zinc-200 bg-white py-2.5 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900 disabled:opacity-50"
-        >
-          Continue with Google
-        </button>
 
         <p className="text-center text-sm text-zinc-500">
           No account?{" "}
