@@ -48,12 +48,21 @@ export const metadata: Metadata = {
     title: "Nexa — AI Agent Operating System",
     description:
       "Connect your tools. Build agents. Let them handle the work. Nexa is the operating system for AI agents.",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "Nexa — AI Agent Operating System",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Nexa — AI Agent Operating System",
     description:
       "Connect your tools. Build agents. Let them handle the work.",
+    images: ["/twitter-image"],
   },
   robots: {
     index: true,
@@ -68,10 +77,11 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
+      { url: "/icon", type: "image/png" },
       { url: "/icon.svg", type: "image/svg+xml" },
       { url: "/favicon.ico" },
     ],
-    apple: [{ url: "/apple-icon" }],
+    apple: [{ url: "/apple-icon", sizes: "180x180", type: "image/png" }],
   },
 };
 
