@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { connectAndDiscover } from "@/lib/connectors/mcpAuth";
+import { connectAndDiscover, getMcpConnection } from "@/lib/connectors/mcpAuth";
 import { getBillingSnapshot, ensureFreeSubscription } from "@/lib/billing";
 import { LIMIT_MESSAGES } from "@/lib/plans";
-import { getMcpConnection } from "@/lib/connectors/mcpAuth";
 import { loadConnection } from "@/lib/connectors/tokenStore";
+import {
+  requireAuthUser,
+  assertUserIdMatch,
+  isSafeOutboundUrl,
+} from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
@@ -24,38 +28,50 @@ async function countConnected(userId: string): Promise<number> {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireAuthUser(req);
+    if ("error" in auth) return auth.error;
+
     const body = await req.json().catch(() => ({}));
-    const userId = String(body.userId || "").trim();
-    const endpoint = String(body.endpoint || "").trim();
+    const mismatch = assertUserIdMatch(
+      auth.userId,
+      typeof body.userId === "string" ? body.userId : undefined
+    );
+    if (mismatch) return mismatch;
+
+    const userId = auth.userId;
+    const endpointRaw = String(body.endpoint || "").trim();
     const authorization =
       typeof body.authorization === "string" ? body.authorization : undefined;
-    const label = typeof body.label === "string" ? body.label : undefined;
+    const label = typeof body.label === "string" ? body.label.slice(0, 80) : undefined;
 
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, message: "Please sign in first." },
-        { status: 401 }
-      );
-    }
-    if (!endpoint) {
+    if (!endpointRaw) {
       return NextResponse.json(
         { ok: false, message: "Enter your MCP server address." },
         { status: 400 }
       );
     }
 
-    // Connection limit (Free: 3) — only if not already connected
+    const safeUrl = isSafeOutboundUrl(endpointRaw);
+    if (!safeUrl.ok) {
+      return NextResponse.json(
+        { ok: false, message: safeUrl.message },
+        { status: 400 }
+      );
+    }
+
     const existing = await getMcpConnection(userId);
     if (!existing) {
       await ensureFreeSubscription(userId);
       const snap = await getBillingSnapshot(userId);
-      if (
-        snap.limits.maxConnections !== Number.POSITIVE_INFINITY
-      ) {
+      if (snap.limits.maxConnections !== Number.POSITIVE_INFINITY) {
         const count = await countConnected(userId);
         if (count >= snap.limits.maxConnections) {
           return NextResponse.json(
-            { ok: false, message: LIMIT_MESSAGES.connections, limitReached: true },
+            {
+              ok: false,
+              message: LIMIT_MESSAGES.connections,
+              limitReached: true,
+            },
             { status: 403 }
           );
         }
@@ -64,7 +80,7 @@ export async function POST(req: NextRequest) {
 
     const result = await connectAndDiscover({
       userId,
-      endpoint,
+      endpoint: safeUrl.url,
       authorization,
       label,
     });
