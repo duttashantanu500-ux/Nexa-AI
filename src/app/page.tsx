@@ -78,7 +78,8 @@ export default function LandingPage() {
               Get started
             </Link>
             <Link
-              href="/login"	colorbox className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900"
+              href="/login"
+              className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900"
             >
               Sign in
             </Link>
@@ -94,9 +95,18 @@ export default function LandingPage() {
           </h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             {[
-              { t: "Connect your tools", d: "Notion, Slack, Buffer, Ideogram, Vault, MCP, and more." },
-              { t: "Create an agent", d: "Instructions, tools, permissions, and optional schedule." },
-              { t: "Let it handle the work", d: "Runs execute for real. Review history anytime." },
+              {
+                t: "Connect your tools",
+                d: "Notion, Slack, Buffer, Ideogram, Vault, MCP, and more.",
+              },
+              {
+                t: "Create an agent",
+                d: "Instructions, tools, permissions, and optional schedule.",
+              },
+              {
+                t: "Let it handle the work",
+                d: "Runs execute for real. Review history anytime.",
+              },
             ].map((s) => (
               <div
                 key={s.t}
@@ -119,8 +129,14 @@ export default function LandingPage() {
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             {[
               { t: "Agents", d: "Build and run agents with clear tool access." },
-              { t: "Connections", d: "Wire agents to the tools you already use." },
-              { t: "Vault", d: "Private files agents can use when you allow it." },
+              {
+                t: "Connections",
+                d: "Wire agents to the tools you already use.",
+              },
+              {
+                t: "Vault",
+                d: "Private files agents can use when you allow it.",
+              },
             ].map((s) => (
               <div
                 key={s.t}
@@ -163,12 +179,16 @@ export default function LandingPage() {
             <div className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
               <div className="text-sm font-semibold">Free</div>
               <div className="mt-1 text-2xl font-semibold">$0</div>
-              <p className="mt-1 text-xs text-zinc-500">3 agents · 100 runs/mo · 500 MB Vault</p>
+              <p className="mt-1 text-xs text-zinc-500">
+                3 agents · 100 runs/mo · 500 MB Vault
+              </p>
             </div>
             <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 dark:border-indigo-900 dark:bg-indigo-950/30">
               <div className="text-sm font-semibold">Pro</div>
               <div className="mt-1 text-2xl font-semibold">$9/mo</div>
-              <p className="mt-1 text-xs text-zinc-500">20 agents · 1,000 runs · 5 GB Vault</p>
+              <p className="mt-1 text-xs text-zinc-500">
+                20 agents · 1,000 runs · 5 GB Vault
+              </p>
             </div>
           </div>
           <div className="mt-4">
@@ -202,7 +222,10 @@ export default function LandingPage() {
             <Link href="/signup" className="hover:text-zinc-800">
               Get started
             </Link>
-            <a href="mailto:nexa.com.intelligence@gmail.com" className="hover:text-zinc-800">
+            <a
+              href="mailto:nexa.com.intelligence@gmail.com"
+              className="hover:text-zinc-800"
+            >
               Contact
             </a>
           </div>
@@ -223,8 +246,18 @@ export default function LandingPage() {
             description:
               "Nexa is an AI agent operating system for connecting tools, building agents, and running workflows.",
             offers: [
-              { "@type": "Offer", price: "0", priceCurrency: "USD", name: "Free" },
-              { "@type": "Offer", price: "9", priceCurrency: "USD", name: "Pro" },
+              {
+                "@type": "Offer",
+                price: "0",
+                priceCurrency: "USD",
+                name: "Free",
+              },
+              {
+                "@type": "Offer",
+                price: "9",
+                priceCurrency: "USD",
+                name: "Pro",
+              },
             ],
           }),
         }}
