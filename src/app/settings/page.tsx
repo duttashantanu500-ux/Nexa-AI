@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import {
@@ -174,8 +175,10 @@ export default function SettingsPage() {
   const planId = billing?.planId || "free";
   const isPro = planId === "pro";
   const maxAgents = billing?.limits.maxAgents ?? PLAN_FREE.limits.maxAgents;
-  const maxConn = billing?.limits.maxConnections ?? PLAN_FREE.limits.maxConnections;
-  const maxRuns = billing?.limits.maxRunsPerMonth ?? PLAN_FREE.limits.maxRunsPerMonth;
+  const maxConn =
+    billing?.limits.maxConnections ?? PLAN_FREE.limits.maxConnections;
+  const maxRuns =
+    billing?.limits.maxRunsPerMonth ?? PLAN_FREE.limits.maxRunsPerMonth;
   const vaultLimit = billing?.limits.vaultBytes ?? PLAN_FREE.limits.vaultBytes;
   const runsUsed = billing?.runsUsedThisPeriod ?? 0;
 
@@ -191,28 +194,28 @@ export default function SettingsPage() {
             Profile
           </h2>
           <label className="block space-y-1">
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">Name</span>
+            <span className="text-xs text-zinc-500">Name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+              className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
             />
           </label>
           <label className="block space-y-1">
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">Email</span>
+            <span className="text-xs text-zinc-500">Email</span>
             <input
               value={email}
               disabled
-              className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-400"
+              className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-950"
             />
           </label>
           <label className="block space-y-1">
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">Age</span>
+            <span className="text-xs text-zinc-500">Age</span>
             <input
               type="number"
               value={age}
               onChange={(e) => setAge(e.target.value)}
-              className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+              className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
             />
           </label>
           <button
@@ -252,7 +255,7 @@ export default function SettingsPage() {
               </span>
             </div>
 
-            <ul className="mt-3 space-y-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+            <ul className="mt-3 space-y-1 text-xs text-zinc-600 dark:text-zinc-400">
               <li>
                 Agents: {usage.agents} / {maxAgents}
               </li>
@@ -273,81 +276,38 @@ export default function SettingsPage() {
               </li>
             </ul>
 
-            {!isPro && (
-              <div className="mt-4 space-y-2">
-                <p className="text-xs text-zinc-500">
-                  Upgrade to Pro for more agents, unlimited connections, 1,000
-                  runs/month, 5 GB Vault, and advanced workflow options.
-                </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {!isPro && (
                 <button
                   type="button"
                   disabled={billingBusy}
                   onClick={() => void upgrade()}
                   className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white disabled:opacity-50"
                 >
-                  {billingBusy ? "Opening checkout…" : "Upgrade to Pro — $9/month"}
+                  {billingBusy ? "Opening checkout…" : "Upgrade to Pro — $9/mo"}
                 </button>
-              </div>
-            )}
-
-            {isPro && (
-              <p className="mt-3 text-xs text-zinc-500">
-                To change or cancel, use the receipt from checkout. Pro stays
-                active until the end of the billing period if you cancel.
-              </p>
-            )}
-
-            <button
-              type="button"
-              disabled={billingBusy}
-              onClick={() => void refreshPlan()}
-              className="mt-3 text-xs text-indigo-600 hover:underline disabled:opacity-50"
-            >
-              Refresh plan status
-            </button>
+              )}
+              <Link
+                href="/plans"
+                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+              >
+                View plans
+              </Link>
+              <button
+                type="button"
+                disabled={billingBusy}
+                onClick={() => void refreshPlan()}
+                className="text-xs text-indigo-600 hover:underline disabled:opacity-50"
+              >
+                Refresh status
+              </button>
+            </div>
 
             {billingMsg && (
               <p className="mt-3 text-xs text-indigo-600 dark:text-indigo-400">
                 {billingMsg}
               </p>
             )}
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div
-              className={`rounded-xl border p-3 ${
-                !isPro
-                  ? "border-indigo-300 bg-indigo-50/50 dark:border-indigo-800 dark:bg-indigo-950/30"
-                  : "border-zinc-200 dark:border-zinc-800"
-              }`}
-            >
-              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-                Free
-              </div>
-              <div className="text-xs text-zinc-500">$0/month</div>
-              <ul className="mt-2 space-y-0.5 text-[11px] text-zinc-600 dark:text-zinc-400">
-                {PLAN_FREE.features.slice(0, 5).map((f) => (
-                  <li key={f}>· {f}</li>
-                ))}
-              </ul>
-            </div>
-            <div
-              className={`rounded-xl border p-3 ${
-                isPro
-                  ? "border-indigo-300 bg-indigo-50/50 dark:border-indigo-800 dark:bg-indigo-950/30"
-                  : "border-zinc-200 dark:border-zinc-800"
-              }`}
-            >
-              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-                Pro
-              </div>
-              <div className="text-xs text-zinc-500">$9/month</div>
-              <ul className="mt-2 space-y-0.5 text-[11px] text-zinc-600 dark:text-zinc-400">
-                {PLAN_PRO.features.slice(0, 6).map((f) => (
-                  <li key={f}>· {f}</li>
-                ))}
-              </ul>
-            </div>
           </div>
         </section>
 
@@ -371,10 +331,6 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Light forces a bright background and dark text. Dark forces dark UI.
-            System follows your device.
-          </p>
         </section>
 
         <section className="space-y-3">
@@ -389,38 +345,28 @@ export default function SettingsPage() {
                 setSupportMsg("");
                 setSupportErr(false);
               }}
-              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-200"
+              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
             >
               Contact Support
             </button>
           ) : (
             <div className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
               <p className="text-xs text-zinc-500">
-                Messages go to{" "}
-                <span className="font-medium text-zinc-700 dark:text-zinc-300">
-                  nexa.com.intelligence@gmail.com
-                </span>
-                . Include enough detail so we can help.
+                Messages go to nexa.com.intelligence@gmail.com
               </p>
-              <label className="block space-y-1">
-                <span className="text-xs text-zinc-500">Subject</span>
-                <input
-                  value={supportSubject}
-                  onChange={(e) => setSupportSubject(e.target.value)}
-                  placeholder="Brief summary"
-                  className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-                />
-              </label>
-              <label className="block space-y-1">
-                <span className="text-xs text-zinc-500">Description</span>
-                <textarea
-                  value={supportDesc}
-                  onChange={(e) => setSupportDesc(e.target.value)}
-                  rows={5}
-                  placeholder="What happened? What were you trying to do?"
-                  className="w-full resize-y rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-                />
-              </label>
+              <input
+                value={supportSubject}
+                onChange={(e) => setSupportSubject(e.target.value)}
+                placeholder="Subject"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              />
+              <textarea
+                value={supportDesc}
+                onChange={(e) => setSupportDesc(e.target.value)}
+                rows={4}
+                placeholder="What happened?"
+                className="w-full resize-y rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              />
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -432,10 +378,7 @@ export default function SettingsPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setSupportOpen(false);
-                    setSupportMsg("");
-                  }}
+                  onClick={() => setSupportOpen(false)}
                   className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
                 >
                   Cancel
@@ -444,9 +387,7 @@ export default function SettingsPage() {
               {supportMsg && (
                 <p
                   className={`text-xs ${
-                    supportErr
-                      ? "text-red-600 dark:text-red-400"
-                      : "text-indigo-600 dark:text-indigo-400"
+                    supportErr ? "text-red-600" : "text-indigo-600"
                   }`}
                 >
                   {supportMsg}
