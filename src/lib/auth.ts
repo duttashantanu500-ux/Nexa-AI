@@ -1,4 +1,5 @@
 import { getSupabase, isSupabaseConfigured } from "./supabase";
+import { getAuthRedirectUrl } from "./appUrl";
 import {
   loadAppState,
   saveAppState,
@@ -17,11 +18,6 @@ import {
 
 export { isSupabaseConfigured };
 
-function appOrigin(): string {
-  if (typeof window !== "undefined") return window.location.origin;
-  return process.env.NEXT_PUBLIC_APP_URL || "https://www.nexaiintelligence.online";
-}
-
 export async function signUpWithEmail(params: {
   email: string;
   password: string;
@@ -35,25 +31,28 @@ export async function signUpWithEmail(params: {
   if (!sb) return { error: "Account service is not available." };
 
   const email = params.email.trim().toLowerCase();
+  const redirectTo = getAuthRedirectUrl("/auth/callback");
+
   const { data, error } = await sb.auth.signUp({
     email,
     password: params.password,
     options: {
       data: { name: params.name.trim() },
-      emailRedirectTo: `${appOrigin()}/auth/callback`,
+      emailRedirectTo: redirectTo,
     },
   });
 
   if (error) {
     const msg = error.message || "Could not create account.";
     if (/already|registered|exists/i.test(msg)) {
-      return { error: "An account with this email already exists. Try logging in." };
+      return {
+        error: "An account with this email already exists. Try logging in.",
+      };
     }
     return { error: msg };
   }
   if (!data.user) return { error: "Could not create account." };
 
-  // Session present = confirmed or confirmations disabled
   if (data.session?.user) {
     await sb.from("profiles").upsert({
       id: data.user.id,
@@ -83,7 +82,6 @@ export async function signUpWithEmail(params: {
     return { userId: data.user.id };
   }
 
-  // Email confirmation required — no session yet
   return {
     needsConfirmation: true,
     userId: data.user.id,
@@ -99,7 +97,7 @@ export async function resendSignupEmail(
     type: "signup",
     email: email.trim().toLowerCase(),
     options: {
-      emailRedirectTo: `${appOrigin()}/auth/callback`,
+      emailRedirectTo: getAuthRedirectUrl("/auth/callback"),
     },
   });
   if (error) return { error: error.message };
@@ -141,13 +139,17 @@ export async function signInWithGoogle(): Promise<{ error?: string }> {
   const sb = getSupabase();
   if (!sb) return { error: "Account service is not available." };
 
-  const redirectTo = `${appOrigin()}/auth/callback`;
+  const redirectTo = getAuthRedirectUrl("/auth/callback");
 
   const { error } = await sb.auth.signInWithOAuth({
     provider: "google",
     options: {
       redirectTo,
-      queryParams: { access_type: "offline", prompt: "consent" },
+      skipBrowserRedirect: false,
+      queryParams: {
+        access_type: "offline",
+        prompt: "select_account",
+      },
     },
   });
 
@@ -161,9 +163,12 @@ export async function requestPasswordReset(
   const sb = getSupabase();
   if (!sb) return { error: "Account service is not available." };
 
-  const { error } = await sb.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
-    redirectTo: `${appOrigin()}/auth/callback?next=reset`,
-  });
+  const { error } = await sb.auth.resetPasswordForEmail(
+    email.trim().toLowerCase(),
+    {
+      redirectTo: getAuthRedirectUrl("/auth/callback?next=reset"),
+    }
+  );
 
   if (error) return { error: error.message };
   return {};
