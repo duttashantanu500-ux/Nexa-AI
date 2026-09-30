@@ -135,26 +135,9 @@ export async function signInWithEmail(params: {
   return {};
 }
 
+/** Google authentication is disabled (no OAuth credentials). */
 export async function signInWithGoogle(): Promise<{ error?: string }> {
-  const sb = getSupabase();
-  if (!sb) return { error: "Account service is not available." };
-
-  const redirectTo = getAuthRedirectUrl("/auth/callback");
-
-  const { error } = await sb.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo,
-      skipBrowserRedirect: false,
-      queryParams: {
-        access_type: "offline",
-        prompt: "select_account",
-      },
-    },
-  });
-
-  if (error) return { error: error.message };
-  return {};
+  return { error: "Google sign-in is not available." };
 }
 
 export async function requestPasswordReset(
@@ -295,7 +278,6 @@ export async function syncProfileToCloud(user: UserProfile): Promise<void> {
     name: user.name,
     user_type: user.userType,
     onboarding_completed: user.onboardingCompleted,
-    updated_at: new Date().toISOString(),
   });
 }
 
