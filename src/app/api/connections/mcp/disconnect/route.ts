@@ -1,19 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteMcpConnection } from "@/lib/connectors/mcpAuth";
+import { requireAuthUser, assertUserIdMatch } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireAuthUser(req);
+    if ("error" in auth) return auth.error;
+
     const body = await req.json().catch(() => ({}));
-    const userId = String(body.userId || "").trim();
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, message: "Please sign in first." },
-        { status: 401 }
-      );
-    }
-    await deleteMcpConnection(userId);
+    const mismatch = assertUserIdMatch(
+      auth.userId,
+      typeof body.userId === "string" ? body.userId : undefined
+    );
+    if (mismatch) return mismatch;
+
+    await deleteMcpConnection(auth.userId);
     return NextResponse.json({
       ok: true,
       message: "MCP server disconnected.",
