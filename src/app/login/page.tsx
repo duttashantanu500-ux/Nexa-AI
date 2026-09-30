@@ -21,7 +21,6 @@ export default function LoginPage() {
   const supabaseReady = isSupabaseConfigured();
 
   const goAfterLogin = () => {
-    // Ensure both stores share the same user id before navigating
     getStableUserId();
     const op = loadOperatorState();
     const app = loadAppState();
@@ -36,66 +35,52 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    if (supabaseReady) {
-      const result = await signInWithEmail({ email, password });
-      if (result.error) {
-        setError(result.error);
-        setLoading(false);
-        return;
-      }
-      // hydrateLocalFromCloud already ran; sync operatorStore
-      const app = loadAppState();
-      if (app.user?.id) {
-        persistUserProfile({
-          id: app.user.id,
-          email: app.user.email || email.toLowerCase().trim(),
-          name: app.user.name || "",
-          userType: app.user.userType || "founder",
-          createdAt: app.user.createdAt || new Date().toISOString(),
-          onboardingCompleted: Boolean(app.user.onboardingCompleted),
-        });
-      }
+    if (!supabaseReady) {
+      setError("Account service is not available. Please try again later.");
       setLoading(false);
-      goAfterLogin();
       return;
     }
 
-    // Local fallback
-    const stored = localStorage.getItem("nexa_auth");
-    if (!stored) {
-      setError("No account found. Please sign up.");
+    const result = await signInWithEmail({ email, password });
+    if (result.error) {
+      setError(result.error);
       setLoading(false);
       return;
+    }
+
+    const app = loadAppState();
+    if (app.user?.id) {
+      persistUserProfile({
+        id: app.user.id,
+        email: app.user.email || email.toLowerCase().trim(),
+        name: app.user.name || "",
+        userType: app.user.userType || "founder",
+        createdAt: app.user.createdAt || new Date().toISOString(),
+        onboardingCompleted: Boolean(app.user.onboardingCompleted),
+      });
     }
 
     try {
-      const auth = JSON.parse(stored);
-      if (
-        auth.email === email.toLowerCase().trim() &&
-        auth.password === password
-      ) {
-        getStableUserId();
-        const op = loadOperatorState();
-        const app = loadAppState();
-        if (op.user || app.user) {
-          goAfterLogin();
-        } else {
-          setError("Session data missing. Please sign up again.");
-        }
-      } else {
-        setError("Invalid email or password.");
-      }
+      localStorage.setItem(
+        "nexa_auth",
+        JSON.stringify({
+          email: email.toLowerCase().trim(),
+          password,
+        })
+      );
     } catch {
-      setError("Something went wrong.");
+      /* */
     }
+
     setLoading(false);
+    goAfterLogin();
   };
 
   const handleGoogle = async () => {
     setError("");
     setLoading(true);
     if (!supabaseReady) {
-      setError("Add Supabase keys in Vercel to use Google sign-in.");
+      setError("Google sign-in is not available right now.");
       setLoading(false);
       return;
     }
@@ -107,11 +92,13 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+    <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
       <div className="w-full max-w-md space-y-8">
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight">Nexa</h1>
-          <p className="text-muted text-sm">Welcome back</p>
+        <div className="space-y-2 text-center">
+          <h1 className="text-3xl font-semibold tracking-tight text-indigo-600">
+            Nexa
+          </h1>
+          <p className="text-sm text-zinc-500">Welcome back</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -121,19 +108,27 @@ export default function LoginPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-border bg-card px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+              className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-900"
               placeholder="you@company.com"
               autoFocus
             />
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Password</label>
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Password</label>
+              <Link
+                href="/forgot-password"
+                className="text-xs text-indigo-600 hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-border bg-card px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+              className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-900"
               placeholder="Your password"
             />
           </div>
@@ -143,7 +138,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-accent text-background py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+            className="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
           >
             {loading ? "Signing in…" : "Log in"}
           </button>
@@ -151,10 +146,10 @@ export default function LoginPage() {
 
         <div className="relative">
           <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-border" />
+            <div className="w-full border-t border-zinc-200 dark:border-zinc-800" />
           </div>
           <div className="relative flex justify-center text-xs">
-            <span className="bg-background px-2 text-muted">or</span>
+            <span className="bg-zinc-50 px-2 text-zinc-500 dark:bg-zinc-950">or</span>
           </div>
         </div>
 
@@ -162,14 +157,14 @@ export default function LoginPage() {
           type="button"
           onClick={handleGoogle}
           disabled={loading}
-          className="w-full rounded-lg border border-border bg-card py-2.5 text-sm font-medium hover:bg-sidebar transition disabled:opacity-50"
+          className="w-full rounded-lg border border-zinc-200 bg-white py-2.5 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900 disabled:opacity-50"
         >
           Continue with Google
         </button>
 
-        <p className="text-center text-sm text-muted">
+        <p className="text-center text-sm text-zinc-500">
           No account?{" "}
-          <Link href="/signup" className="text-foreground underline-offset-4 hover:underline">
+          <Link href="/signup" className="text-indigo-600 hover:underline">
             Create one
           </Link>
         </p>
