@@ -3,7 +3,6 @@ import {
   loadAppState,
   saveAppState,
   saveMessages,
-  createId,
 } from "./conversationStore";
 import { setUser } from "./operatorStore";
 import {
@@ -18,52 +17,93 @@ import {
 
 export { isSupabaseConfigured };
 
+function appOrigin(): string {
+  if (typeof window !== "undefined") return window.location.origin;
+  return process.env.NEXT_PUBLIC_APP_URL || "https://www.nexaiintelligence.online";
+}
+
 export async function signUpWithEmail(params: {
   email: string;
   password: string;
   name: string;
-}): Promise<{ error?: string; userId?: string }> {
+}): Promise<{
+  error?: string;
+  userId?: string;
+  needsConfirmation?: boolean;
+}> {
   const sb = getSupabase();
-  if (!sb) return { error: "Supabase is not configured." };
+  if (!sb) return { error: "Account service is not available." };
 
+  const email = params.email.trim().toLowerCase();
   const { data, error } = await sb.auth.signUp({
-    email: params.email.trim().toLowerCase(),
+    email,
     password: params.password,
     options: {
       data: { name: params.name.trim() },
+      emailRedirectTo: `${appOrigin()}/auth/callback`,
     },
   });
 
-  if (error) return { error: error.message };
+  if (error) {
+    const msg = error.message || "Could not create account.";
+    if (/already|registered|exists/i.test(msg)) {
+      return { error: "An account with this email already exists. Try logging in." };
+    }
+    return { error: msg };
+  }
   if (!data.user) return { error: "Could not create account." };
 
-  await sb.from("profiles").upsert({
-    id: data.user.id,
-    email: data.user.email,
-    name: params.name.trim(),
-    onboarding_completed: false,
-  });
+  // Session present = confirmed or confirmations disabled
+  if (data.session?.user) {
+    await sb.from("profiles").upsert({
+      id: data.user.id,
+      email: data.user.email,
+      name: params.name.trim(),
+      onboarding_completed: false,
+    });
 
-  const user: UserProfile = {
-    id: data.user.id,
-    email: (data.user.email || params.email).toLowerCase(),
-    name: params.name.trim(),
-    userType: "founder",
-    createdAt: new Date().toISOString(),
-    onboardingCompleted: false,
+    const user: UserProfile = {
+      id: data.user.id,
+      email: (data.user.email || email).toLowerCase(),
+      name: params.name.trim(),
+      userType: "founder",
+      createdAt: new Date().toISOString(),
+      onboardingCompleted: false,
+    };
+
+    setUser(user);
+    saveAppState({
+      user,
+      businessContext: null,
+      memories: [],
+      conversations: [],
+      currentConversationId: null,
+    });
+
+    return { userId: data.user.id };
+  }
+
+  // Email confirmation required — no session yet
+  return {
+    needsConfirmation: true,
+    userId: data.user.id,
   };
+}
 
-  // Both stores must use the same stable cloud id
-  setUser(user);
-  saveAppState({
-    user,
-    businessContext: null,
-    memories: [],
-    conversations: [],
-    currentConversationId: null,
+export async function resendSignupEmail(
+  email: string
+): Promise<{ error?: string }> {
+  const sb = getSupabase();
+  if (!sb) return { error: "Account service is not available." };
+  const { error } = await sb.auth.resend({
+    type: "signup",
+    email: email.trim().toLowerCase(),
+    options: {
+      emailRedirectTo: `${appOrigin()}/auth/callback`,
+    },
   });
-
-  return { userId: data.user.id };
+  if (error) return { error: error.message };
+  return {};
 }
 
 export async function signInWithEmail(params: {
@@ -71,14 +111,26 @@ export async function signInWithEmail(params: {
   password: string;
 }): Promise<{ error?: string }> {
   const sb = getSupabase();
-  if (!sb) return { error: "Supabase is not configured." };
+  if (!sb) return { error: "Account service is not available." };
 
   const { data, error } = await sb.auth.signInWithPassword({
     email: params.email.trim().toLowerCase(),
     password: params.password,
   });
 
-  if (error) return { error: error.message };
+  if (error) {
+    const msg = error.message || "Login failed.";
+    if (/confirm|verified|not confirmed/i.test(msg)) {
+      return {
+        error:
+          "Please confirm your email first. Check your inbox for the confirmation link.",
+      };
+    }
+    if (/invalid/i.test(msg)) {
+      return { error: "Invalid email or password." };
+    }
+    return { error: msg };
+  }
   if (!data.user) return { error: "Login failed." };
 
   await hydrateLocalFromCloud(data.user.id);
@@ -87,18 +139,43 @@ export async function signInWithEmail(params: {
 
 export async function signInWithGoogle(): Promise<{ error?: string }> {
   const sb = getSupabase();
-  if (!sb) return { error: "Supabase is not configured." };
+  if (!sb) return { error: "Account service is not available." };
 
-  const redirectTo =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/auth/callback`
-      : undefined;
+  const redirectTo = `${appOrigin()}/auth/callback`;
 
   const { error } = await sb.auth.signInWithOAuth({
     provider: "google",
-    options: { redirectTo },
+    options: {
+      redirectTo,
+      queryParams: { access_type: "offline", prompt: "consent" },
+    },
   });
 
+  if (error) return { error: error.message };
+  return {};
+}
+
+export async function requestPasswordReset(
+  email: string
+): Promise<{ error?: string }> {
+  const sb = getSupabase();
+  if (!sb) return { error: "Account service is not available." };
+
+  const { error } = await sb.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+    redirectTo: `${appOrigin()}/auth/callback?next=reset`,
+  });
+
+  if (error) return { error: error.message };
+  return {};
+}
+
+export async function updatePassword(
+  password: string
+): Promise<{ error?: string }> {
+  const sb = getSupabase();
+  if (!sb) return { error: "Account service is not available." };
+
+  const { error } = await sb.auth.updateUser({ password });
   if (error) return { error: error.message };
   return {};
 }
@@ -152,7 +229,6 @@ export async function hydrateLocalFromCloud(userId: string): Promise<void> {
     onboardingCompleted: Boolean(profile?.onboarding_completed),
   };
 
-  // Critical: Connections/agents use operatorStore — keep it in sync
   setUser(user);
 
   const conversations: Conversation[] = (convs || []).map((c: any) => ({
