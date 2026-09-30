@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createCheckoutSession, isDodoConfigured } from "@/lib/billing";
+import { safeReturnOrigin } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
@@ -21,7 +22,10 @@ export async function POST(req: NextRequest) {
   try {
     if (!isDodoConfigured()) {
       return NextResponse.json(
-        { ok: false, message: "Billing is not available right now. Please try again later." },
+        {
+          ok: false,
+          message: "Billing is not available right now. Please try again later.",
+        },
         { status: 503 }
       );
     }
@@ -44,12 +48,8 @@ export async function POST(req: NextRequest) {
 
     const user = authData.user;
     const body = await req.json().catch(() => ({}));
-    const origin =
-      (typeof body.returnOrigin === "string" && body.returnOrigin) ||
-      process.env.NEXT_PUBLIC_APP_URL ||
-      req.nextUrl.origin;
-
-    const returnUrl = `${origin.replace(/\/$/, "")}/settings?billing=success`;
+    const origin = safeReturnOrigin(body.returnOrigin, req);
+    const returnUrl = `${origin}/settings?billing=success`;
 
     const result = await createCheckoutSession({
       userId: user.id,
