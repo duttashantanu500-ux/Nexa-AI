@@ -7,6 +7,7 @@ import { loadAppState } from "@/lib/conversationStore";
 import { loadOperatorState } from "@/lib/operatorStore";
 import { persistUserProfile, getStableUserId } from "@/lib/sessionUser";
 import Link from "next/link";
+import { NexaLogo } from "@/components/NexaLogo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -75,10 +76,12 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
       <div className="w-full max-w-md space-y-8">
-        <div className="space-y-2 text-center">
-          <h1 className="text-3xl font-semibold tracking-tight text-indigo-600">
-            Nexa
-          </h1>
+        <div className="flex flex-col items-center space-y-3 text-center">
+          <NexaLogo
+            size={40}
+            href="/"
+            wordmarkClassName="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
+          />
           <p className="text-sm text-zinc-500">Welcome back</p>
         </div>
 

@@ -2,25 +2,26 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   isSupabaseConfigured,
   signUpWithEmail,
-  resendSignupEmail,
+  resendSignupConfirmation,
 } from "@/lib/auth";
-import { persistUserProfile } from "@/lib/sessionUser";
-import { UserProfile } from "@/types";
-import Link from "next/link";
+import { loadAppState } from "@/lib/conversationStore";
+import { persistUserProfile, getStableUserId } from "@/lib/sessionUser";
+import { NexaLogo } from "@/components/NexaLogo";
 
 export default function SignupPage() {
   const router = useRouter();
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
   const [resendMsg, setResendMsg] = useState("");
-  const [resendBusy, setResendBusy] = useState(false);
+  const [resending, setResending] = useState(false);
   const supabaseReady = isSupabaseConfigured();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -28,20 +29,14 @@ export default function SignupPage() {
     setError("");
     setLoading(true);
 
-    if (!email || !password || !name) {
-      setError("Please fill in all fields.");
-      setLoading(false);
-      return;
-    }
-
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
-      setLoading(false);
-      return;
-    }
-
     if (!supabaseReady) {
       setError("Account service is not available. Please try again later.");
+      setLoading(false);
+      return;
+    }
+
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
       setLoading(false);
       return;
     }
@@ -53,54 +48,46 @@ export default function SignupPage() {
       return;
     }
 
-    if (result.needsConfirmation) {
-      try {
-        localStorage.setItem(
-          "nexa_auth",
-          JSON.stringify({
-            email: email.toLowerCase().trim(),
-            password,
-          })
-        );
-      } catch {
-        /* */
-      }
+    if (result.needsEmailConfirmation) {
       setAwaitingConfirm(true);
       setLoading(false);
       return;
     }
 
-    if (result.userId) {
-      const user: UserProfile = {
-        id: result.userId,
-        email: email.toLowerCase().trim(),
-        name: name.trim(),
-        createdAt: new Date().toISOString(),
-        onboardingCompleted: false,
-      };
-      persistUserProfile(user);
-      try {
-        localStorage.setItem(
-          "nexa_auth",
-          JSON.stringify({ email: user.email, password })
-        );
-      } catch {
-        /* */
-      }
-      setLoading(false);
-      router.push("/onboarding");
-      return;
+    const app = loadAppState();
+    if (app.user?.id) {
+      persistUserProfile({
+        id: app.user.id,
+        email: app.user.email || email.toLowerCase().trim(),
+        name: name.trim() || app.user.name || "",
+        userType: app.user.userType || "founder",
+        createdAt: app.user.createdAt || new Date().toISOString(),
+        onboardingCompleted: Boolean(app.user.onboardingCompleted),
+      });
     }
 
-    setError("Could not create account.");
+    try {
+      localStorage.setItem(
+        "nexa_auth",
+        JSON.stringify({
+          email: email.toLowerCase().trim(),
+          password,
+        })
+      );
+    } catch {
+      /* */
+    }
+
+    getStableUserId();
     setLoading(false);
+    router.push("/onboarding");
   };
 
   const handleResend = async () => {
-    setResendBusy(true);
     setResendMsg("");
-    const r = await resendSignupEmail(email);
-    setResendBusy(false);
+    setResending(true);
+    const r = await resendSignupConfirmation(email);
+    setResending(false);
     if (r.error) {
       setResendMsg("Could not resend. Wait a minute and try again.");
       return;
@@ -112,9 +99,13 @@ export default function SignupPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
         <div className="w-full max-w-md space-y-6 text-center">
-          <h1 className="text-3xl font-semibold tracking-tight text-indigo-600">
-            Nexa
-          </h1>
+          <div className="flex justify-center">
+            <NexaLogo
+              size={40}
+              href="/"
+              wordmarkClassName="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
+            />
+          </div>
           <div className="rounded-xl border border-zinc-200 bg-white p-6 text-left dark:border-zinc-800 dark:bg-zinc-900">
             <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               Check your email
@@ -128,18 +119,18 @@ export default function SignupPage() {
             </p>
             <button
               type="button"
-              disabled={resendBusy}
+              disabled={resending}
               onClick={() => void handleResend()}
-              className="mt-4 rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 disabled:opacity-50"
+              className="mt-4 text-sm text-indigo-600 hover:underline disabled:opacity-50"
             >
-              {resendBusy ? "Sending…" : "Resend confirmation"}
+              {resending ? "Sending…" : "Resend confirmation email"}
             </button>
             {resendMsg && (
-              <p className="mt-2 text-xs text-indigo-600">{resendMsg}</p>
+              <p className="mt-2 text-xs text-zinc-500">{resendMsg}</p>
             )}
             <p className="mt-4 text-sm text-zinc-500">
               <Link href="/login" className="text-indigo-600 hover:underline">
-                Go to login
+                Back to log in
               </Link>
             </p>
           </div>
@@ -151,11 +142,15 @@ export default function SignupPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
       <div className="w-full max-w-md space-y-8">
-        <div className="space-y-2 text-center">
-          <h1 className="text-3xl font-semibold tracking-tight text-indigo-600">
-            Nexa
-          </h1>
-          <p className="text-sm text-zinc-500">AI Agent Operating System</p>
+        <div className="flex flex-col items-center space-y-3 text-center">
+          <div className="flex justify-center">
+            <NexaLogo
+              size={40}
+              href="/"
+              wordmarkClassName="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
+            />
+          </div>
+          <p className="text-sm text-zinc-500">Create your Nexa account</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -170,7 +165,6 @@ export default function SignupPage() {
               autoFocus
             />
           </div>
-
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Email</label>
             <input
@@ -178,10 +172,9 @@ export default function SignupPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-900"
-              placeholder="you@email.com"
+              placeholder="you@company.com"
             />
           </div>
-
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Password</label>
             <input
@@ -189,7 +182,7 @@ export default function SignupPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-900"
-              placeholder="At least 6 characters"
+              placeholder="At least 8 characters"
             />
           </div>
 
