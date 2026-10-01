@@ -5,6 +5,7 @@ export const alt = "Nexa — AI Agent Operating System";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
+/** Professional share / link-preview splash */
 export default function OpenGraphImage() {
   return new ImageResponse(
     (
@@ -14,57 +15,75 @@ export default function OpenGraphImage() {
           height: "100%",
           display: "flex",
           alignItems: "center",
-          background: "#fafafa",
-          fontFamily: "system-ui, sans-serif",
+          background: "#FAFAFA",
+          fontFamily: "system-ui, -apple-system, sans-serif",
         }}
       >
         <div
           style={{
-            width: 12,
+            width: 14,
             height: "100%",
-            background: "#4F46E5",
+            background: "#09D59A",
           }}
         />
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            padding: "0 64px",
-            gap: 48,
+            padding: "0 72px",
+            gap: 52,
           }}
         >
           <div
             style={{
-              width: 180,
-              height: 180,
-              borderRadius: 40,
-              background: "#4F46E5",
+              width: 200,
+              height: 200,
+              borderRadius: 44,
+              background: "#FFFFFF",
+              border: "2px solid #E4E4E7",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "white",
-              fontSize: 96,
-              fontWeight: 700,
+              boxShadow: "0 12px 40px rgba(9, 213, 154, 0.12)",
             }}
           >
-            N
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div
               style={{
-                fontSize: 72,
-                fontWeight: 700,
-                color: "#18181b",
-                letterSpacing: "-0.02em",
+                fontSize: 120,
+                fontWeight: 800,
+                color: "#09D59A",
+                letterSpacing: "-0.04em",
+                lineHeight: 1,
+              }}
+            >
+              N
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div
+              style={{
+                fontSize: 76,
+                fontWeight: 750,
+                color: "#18181B",
+                letterSpacing: "-0.03em",
+                lineHeight: 1.05,
               }}
             >
               Nexa
             </div>
-            <div style={{ fontSize: 32, color: "#71717a" }}>
+            <div
+              style={{
+                width: 72,
+                height: 5,
+                borderRadius: 4,
+                background: "#09D59A",
+              }}
+            />
+            <div style={{ fontSize: 34, color: "#52525B", marginTop: 4 }}>
               AI Agent Operating System
             </div>
-            <div style={{ fontSize: 28, color: "#a1a1aa" }}>
-              Connect tools. Build agents. Run the work.
+            <div style={{ fontSize: 28, color: "#A1A1AA" }}>
+              Connect tools · Build agents · Run the work
             </div>
           </div>
         </div>

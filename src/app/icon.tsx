@@ -4,6 +4,7 @@ export const runtime = "edge";
 export const size = { width: 32, height: 32 };
 export const contentType = "image/png";
 
+/** Browser tab favicon — official Nexa green N */
 export default function Icon() {
   return new ImageResponse(
     (
@@ -14,15 +15,22 @@ export default function Icon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#4F46E5",
-          borderRadius: 8,
-          color: "white",
-          fontSize: 20,
-          fontWeight: 700,
-          fontFamily: "system-ui, sans-serif",
+          background: "#FAFAFA",
+          borderRadius: 7,
         }}
       >
-        N
+        <div
+          style={{
+            fontSize: 22,
+            fontWeight: 800,
+            color: "#09D59A",
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            letterSpacing: "-0.04em",
+            lineHeight: 1,
+          }}
+        >
+          N
+        </div>
       </div>
     ),
     { ...size }

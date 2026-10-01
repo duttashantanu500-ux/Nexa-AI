@@ -37,6 +37,7 @@ export const metadata: Metadata = {
   authors: [{ name: "Nexa" }],
   creator: "Nexa",
   applicationName: "Nexa",
+  manifest: "/site.webmanifest",
   alternates: {
     canonical: "/",
   },
@@ -77,18 +78,18 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/icon", type: "image/png" },
+      { url: "/icon", type: "image/png", sizes: "32x32" },
       { url: "/icon.svg", type: "image/svg+xml" },
-      { url: "/favicon.ico" },
     ],
     apple: [{ url: "/apple-icon", sizes: "180x180", type: "image/png" }],
+    shortcut: ["/icon"],
   },
 };
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#fafafa" },
-    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+    { media: "(prefers-color-scheme: light)", color: "#09D59A" },
+    { media: "(prefers-color-scheme: dark)", color: "#09D59A" },
   ],
   width: "device-width",
   initialScale: 1,
