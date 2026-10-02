@@ -103,7 +103,7 @@ export default function IdeogramSetupPage() {
                 Connect Ideogram
               </h1>
               <p className="mt-1 text-sm text-zinc-500">
-                Add your Ideogram API key so agents can generate images using your account.
+                Add your Ideogram API key so your AI employees can generate images using your account.
               </p>
             </div>
           </div>
