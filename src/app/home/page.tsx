@@ -57,7 +57,7 @@ export default function HomePage() {
             {name ? `, ${name}` : ""}.
           </h1>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-            Connect your services. Build workflows. Nexa bridges the gap between them.
+            Connect your tools. Build your AI team. Let them handle the work.
           </p>
         </div>
 
@@ -66,7 +66,7 @@ export default function HomePage() {
             href="/agents/new"
             className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500"
           >
-            Create agent
+            Hire AI Employee
           </Link>
           <Link
             href="/connections"
@@ -100,15 +100,15 @@ export default function HomePage() {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              Agents ({agents.length})
+              AI Team ({agents.length})
             </h2>
             <span className="text-xs text-zinc-500">{active.length} active</span>
           </div>
           {agents.length === 0 ? (
             <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-700">
-              <p className="text-sm text-zinc-600">No agents yet.</p>
+              <p className="text-sm text-zinc-600">No AI employees yet.</p>
               <Link href="/agents/new" className="mt-2 inline-block text-sm text-indigo-600">
-                Create an agent →
+                Hire an AI employee →
               </Link>
             </div>
           ) : (
@@ -133,7 +133,7 @@ export default function HomePage() {
         {runs.length > 0 && (
           <section className="space-y-2">
             <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              Recent runs
+              Recent work
               {failedRuns.length > 0 && (
                 <span className="ml-2 text-xs font-normal text-red-600">
                   {failedRuns.length} failed
@@ -150,7 +150,7 @@ export default function HomePage() {
                         href={`/agents/${r.agentId}`}
                         className="font-medium hover:text-indigo-600"
                       >
-                        {agent?.name || "Agent"}
+                        {agent?.name || "AI Employee"}
                       </Link>
                       <span
                         className={`text-xs capitalize ${
