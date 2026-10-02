@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      message: `Found ${result.tools.length} tool${result.tools.length === 1 ? "" : "s"}. Approve the ones agents may use.`,
+      message: `Found ${result.tools.length} tool${result.tools.length === 1 ? "" : "s"}. Approve the ones your AI employees may use.`,
       tools: result.tools,
       serverName: result.serverName,
     });
