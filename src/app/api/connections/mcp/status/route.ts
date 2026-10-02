@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     if (!conn) {
       return NextResponse.json({
         status: "available",
-        message: "Add your own MCP server to use its tools in agents.",
+        message: "Add your own MCP server to use its tools with your AI employees.",
       });
     }
 
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
       message:
         conn.approvedTools.length > 0
           ? `${conn.approvedTools.length} approved tool${conn.approvedTools.length === 1 ? "" : "s"}`
-          : "Connected — review and approve tools to use them in agents.",
+          : "Connected — review and approve tools for your AI employees.",
       label: conn.label,
       endpointHost: safeHost(conn.endpoint),
       discoveredTools: conn.discoveredTools.map((t) => ({
