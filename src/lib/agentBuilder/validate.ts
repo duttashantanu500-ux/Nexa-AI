@@ -91,7 +91,7 @@ export function validateProposal(raw: unknown): ValidatedProposal {
   if (!proposal.name.trim()) {
     issues.push({
       code: "name_required",
-      message: "Agent name is required.",
+      message: "Employee name is required.",
       severity: "error",
     });
   }
@@ -99,7 +99,7 @@ export function validateProposal(raw: unknown): ValidatedProposal {
   if (proposal.steps.length === 0) {
     issues.push({
       code: "no_steps",
-      message: "No valid workflow steps. Describe what the agent should do with available tools.",
+      message: "No valid workflow steps. Describe what this AI employee should do with available tools.",
       severity: "error",
     });
   }
@@ -167,7 +167,7 @@ function normalizeProposal(raw: unknown, issues: ValidationIssue[]): AgentPropos
   }
 
   return {
-    name: String(o.name || "Untitled agent").slice(0, 80),
+    name: String(o.name || "Untitled employee").slice(0, 80),
     description: String(o.description || "").slice(0, 400),
     purpose: o.purpose ? String(o.purpose).slice(0, 400) : undefined,
     trigger: frequency === "once" ? "manual" : "schedule",
