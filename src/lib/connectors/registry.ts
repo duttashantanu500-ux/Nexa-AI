@@ -67,7 +67,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     provider: "notion",
     icon: "N",
     description: "Notes & docs",
-    detailDescription: "Connect your Notion workspace so agents can search and write pages.",
+    detailDescription: "Connect your Notion workspace so your AI employees can search and write pages.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
     costNote: "Uses your Notion account.",
@@ -124,7 +124,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     provider: "slack",
     icon: "S",
     description: "Team messages",
-    detailDescription: "Connect your Slack workspace so agents can list channels and send messages.",
+    detailDescription: "Connect your Slack workspace so your AI employees can list channels and send messages.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
     costNote: "Uses your Slack workspace.",
@@ -167,7 +167,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     icon: "B",
     description: "Social scheduling",
     detailDescription:
-      "Connect your Buffer account. Agents can view channels and create or schedule posts.",
+      "Connect your Buffer account. Your AI employees can view channels and create or schedule posts.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
     costNote: "Uses your Buffer account.",
@@ -243,7 +243,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     icon: "I",
     description: "AI images",
     detailDescription:
-      "Connect your Ideogram account. Agents can create images from text prompts using your Ideogram access.",
+      "Connect your Ideogram account. Your AI employees can create images from text prompts using your Ideogram access.",
     connectionMethod: "api_key",
     costLabel: "user_paid",
     costNote: "Uses your Ideogram account.",
@@ -327,7 +327,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     icon: "MCP",
     description: "Custom tools",
     detailDescription:
-      "Connect your own MCP server. Discover tools, approve the ones agents may use, and run them in workflows.",
+      "Connect your own MCP server. Discover tools, approve the ones your AI employees may use, and run them in workflows.",
     connectionMethod: "custom",
     costLabel: "user_paid",
     costNote: "Uses your MCP server.",
@@ -371,7 +371,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     provider: "github",
     icon: "G",
     description: "Code & issues",
-    detailDescription: "Connect GitHub so agents can list and create issues.",
+    detailDescription: "Connect GitHub so your AI employees can list and create issues.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
     costNote: "Uses your GitHub account.",
@@ -418,7 +418,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     provider: "google",
     icon: "M",
     description: "Email",
-    detailDescription: "Connect Gmail so agents can read and send email on your behalf.",
+    detailDescription: "Connect Gmail so your AI employees can read and send email on your behalf.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
     configurable: true,
@@ -433,7 +433,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     provider: "google",
     icon: "D",
     description: "Files",
-    detailDescription: "Connect Google Drive so agents can search and read your files.",
+    detailDescription: "Connect Google Drive so your AI employees can search and read your files.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
     configurable: true,
@@ -448,7 +448,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     provider: "google",
     icon: "H",
     description: "Spreadsheets",
-    detailDescription: "Connect Google Sheets so agents can read and update spreadsheets.",
+    detailDescription: "Connect Google Sheets so your AI employees can read and update spreadsheets.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
     configurable: true,
@@ -463,7 +463,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     provider: "google",
     icon: "C",
     description: "Calendar",
-    detailDescription: "Connect Google Calendar so agents can view and create events.",
+    detailDescription: "Connect Google Calendar so your AI employees can view and create events.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
     configurable: true,
@@ -625,6 +625,6 @@ export function statusBadgeClass(s: ConnectorUiStatus): string {
     case "coming_soon":
       return "rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
     default:
-      return "rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500";
+      return "rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
   }
 }
