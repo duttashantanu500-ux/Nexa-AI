@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       configured: true,
       status: "available",
-      message: "Connect your Buffer account to use it in agents.",
+      message: "Connect your Buffer account to use it with your AI employees.",
       connectPath: `/api/oauth/buffer/start?userId=${encodeURIComponent(userId)}`,
       workspaceName: null,
       canDisconnect: false,
