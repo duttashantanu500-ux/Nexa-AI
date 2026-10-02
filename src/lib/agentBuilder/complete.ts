@@ -1,12 +1,12 @@
 /**
- * Agent Builder LLM call — reuses the multi-provider stack from src/lib/ai.ts patterns.
+ * AI Employee Builder LLM call — reuses the multi-provider stack from src/lib/ai.ts patterns.
  * Returns JSON proposal or a refusal for off-topic messages.
  */
 
 import { registryCatalogForPrompt } from "./validate";
 
 const OFF_TOPIC =
-  "I'm Nexa's Agent Builder. I can only help you create or modify automation agents.";
+  "I'm Nexa's AI Employee Builder. I can only help you create or modify AI employees.";
 
 function getApiKey(...names: string[]): string | null {
   for (const name of names) {
@@ -31,11 +31,11 @@ async function fetchWithTimeout(
 }
 
 function buildSystemPrompt(): string {
-  return `You are Nexa Agent Builder — a focused assistant that ONLY designs automation agents for Nexa.
+  return `You are Nexa AI Employee Builder — a focused assistant that ONLY designs AI employees for Nexa.
 
 You must ONLY help with:
-- Creating agents
-- Editing agent workflows
+- Creating AI employees
+- Editing employee workflows
 - Choosing connectors/actions from the registry below
 - Schedules and approval requirements
 
@@ -49,10 +49,10 @@ ${registryCatalogForPrompt()}
 
 Prefer implemented=true actions. If the user needs something not implemented, still propose the closest registry actions and note unavailability in "notes".
 
-When the request is about creating/modifying an agent, respond with ONLY valid JSON (no markdown fences):
+When the request is about creating/modifying an AI employee, respond with ONLY valid JSON (no markdown fences):
 {
   "off_topic": false,
-  "message": "Short human summary of the proposed agent",
+  "message": "Short human summary of the proposed employee",
   "proposal": {
     "name": "string",
     "description": "string",
@@ -68,7 +68,7 @@ When the request is about creating/modifying an agent, respond with ONLY valid J
 
 Rules:
 - steps[].actionId must be from the registry
-- Do not claim the agent was created
+- Do not claim the employee was created
 - Do not execute anything
 - Keep configs realistic; empty strings allowed for user to fill later
 `;
@@ -162,7 +162,7 @@ export async function completeAgentBuilder(params: {
         extraHeaders: {
           "HTTP-Referer":
             process.env.NEXT_PUBLIC_APP_URL || "https://nexa-ai-beryl-one.vercel.app",
-          "X-Title": "Nexa Agent Builder",
+          "X-Title": "Nexa AI Employee Builder",
         },
       });
       return text ? { text, provider: "openrouter" } : null;
@@ -181,7 +181,7 @@ export async function completeAgentBuilder(params: {
       if (parsed.proposal) {
         return {
           kind: "proposal",
-          message: String(parsed.message || "Here is a proposed agent."),
+          message: String(parsed.message || "Here is a proposed AI employee."),
           proposal: parsed.proposal,
           provider: result.provider,
         };
@@ -214,7 +214,7 @@ function looksOffTopic(text: string): boolean {
   const t = text.toLowerCase().trim();
   if (t.length < 3) return false;
   const agentHints =
-    /\b(agent|workflow|automat|schedule|connect|slack|notion|github|comfy|list|filter|report|trigger|run every|daily)\b/i;
+    /\b(agent|employee|workflow|automat|schedule|connect|slack|notion|github|comfy|list|filter|report|trigger|run every|daily)\b/i;
   if (agentHints.test(t)) return false;
   const off =
     /\b(weather|poem|joke|time is|what time|search the web|find 10|email me|who is|capital of)\b/i;
@@ -240,7 +240,7 @@ function localFallbackProposal(userText: string): Record<string, unknown> | null
   const t = userText.toLowerCase();
   if (
     !/\b(list|filter|report|note|process|clean|local|text|item)\b/.test(t) &&
-    !/\bagent\b/.test(t)
+    !/\b(agent|employee)\b/.test(t)
   ) {
     return null;
   }
