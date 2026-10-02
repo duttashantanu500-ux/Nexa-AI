@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       configured: true,
       status: "available",
-      message: "Connect your Ideogram account to create images in agents.",
+      message: "Connect your Ideogram account to create images with your AI employees.",
       canDisconnect: false,
     });
   }
