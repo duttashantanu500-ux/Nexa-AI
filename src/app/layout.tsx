@@ -19,20 +19,20 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Nexa — AI Agent Operating System",
+    default: "Nexa — Build your AI Team",
     template: "%s · Nexa",
   },
   description:
-    "Nexa is an AI agent operating system. Connect your tools, build agents, and let them run the work — with Vault, scheduling, and run history.",
+    "Nexa is where you build your AI team. Hire AI employees, connect their tools, and let them handle the work — with Vault, schedules, and work history.",
   keywords: [
     "Nexa",
-    "AI agents",
-    "agent operating system",
+    "AI employees",
+    "AI team",
     "workflow automation",
     "AI automation",
     "connect tools",
     "Notion Slack Buffer",
-    "agent builder",
+    "AI employee builder",
   ],
   authors: [{ name: "Nexa" }],
   creator: "Nexa",
@@ -46,23 +46,23 @@ export const metadata: Metadata = {
     locale: "en_US",
     url: SITE_URL,
     siteName: "Nexa",
-    title: "Nexa — AI Agent Operating System",
+    title: "Nexa — Build your AI Team",
     description:
-      "Connect your tools. Build agents. Let them handle the work. Nexa is the operating system for AI agents.",
+      "Connect your tools. Build your AI team. Let them handle the work.",
     images: [
       {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "Nexa — AI Agent Operating System",
+        alt: "Nexa — Build your AI Team",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Nexa — AI Agent Operating System",
+    title: "Nexa — Build your AI Team",
     description:
-      "Connect your tools. Build agents. Let them handle the work.",
+      "Connect your tools. Build your AI team. Let them handle the work.",
     images: ["/twitter-image"],
   },
   robots: {

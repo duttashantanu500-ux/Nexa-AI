@@ -8,22 +8,22 @@ import { loadOperatorState } from "@/lib/operatorStore";
 import { startProCheckout } from "@/lib/clientBilling";
 
 const FREE = [
-  "Up to 3 Agents",
+  "Up to 3 AI Employees",
   "Up to 3 Connections",
-  "100 Agent Runs/month",
+  "100 work runs/month",
   "Vault 500 MB",
   "Scheduling",
-  "Agent Builder",
+  "AI Employee Builder",
   "Run history",
 ];
 
 const PRO = [
-  "Up to 20 Agents",
+  "Up to 20 AI Employees",
   "Unlimited Connections",
-  "1,000 Agent Runs/month",
+  "1,000 work runs/month",
   "Vault 5 GB",
   "Scheduling",
-  "Agent Builder",
+  "AI Employee Builder",
   "Run history",
   "Advanced workflow options",
   "Priority execution",
@@ -42,18 +42,18 @@ export default function PlansPage() {
 
   const upgrade = async () => {
     if (!signedIn) {
-      router.push("/signup");
+      router.push("/login");
       return;
     }
     setBusy(true);
     setMsg("");
-    const result = await startProCheckout();
+    const r = await startProCheckout();
     setBusy(false);
-    if (!result.ok) {
-      setMsg(result.message);
+    if (!r.ok || !r.checkoutUrl) {
+      setMsg(r.message || "Could not start checkout.");
       return;
     }
-    window.location.href = result.checkoutUrl;
+    window.location.href = r.checkoutUrl;
   };
 
   return (
