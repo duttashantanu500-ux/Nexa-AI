@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       configured: true,
       status: "available",
-      message: "Connect your Notion account to use it in agents.",
+      message: "Connect your Notion account to use it with your AI employees.",
       connectPath: `/api/oauth/notion/start?userId=${encodeURIComponent(userId)}`,
       workspaceName: null,
       source: null,
