@@ -108,7 +108,7 @@ export function McpConnectionPanel({
       }
       setBanner(
         data.message ||
-          "Connected. Review the tools below and choose which ones agents may use."
+          "Connected. Review the tools below and choose which ones your AI employees may use."
       );
       setEndpoint("");
       setAuthToken("");
@@ -301,7 +301,7 @@ export function McpConnectionPanel({
           <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
             <h2 className="text-sm font-semibold">Tools</h2>
             <p className="text-xs text-zinc-500">
-              Choose which tools agents may use. New tools stay off until you
+              Choose which tools your AI employees may use. New tools stay off until you
               allow them.
             </p>
             {discovered.length === 0 ? (
