@@ -9,7 +9,7 @@ import { NexaLogo } from "@/components/NexaLogo";
 
 const NAV = [
   { href: "/home", label: "Home" },
-  { href: "/agents", label: "Agents" },
+  { href: "/agents", label: "AI Team" },
   { href: "/connections", label: "Connections" },
   { href: "/vault", label: "Vault" },
   { href: "/settings", label: "Settings" },

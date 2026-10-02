@@ -29,38 +29,38 @@ export default function AgentsPage() {
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Agents</h1>
+            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Your AI Team</h1>
             <p className="mt-1 text-sm text-zinc-500">
-              Workflow agents across your connected tools.
+              Your AI employees — each with a role, tools, and schedule.
             </p>
           </div>
           <Link
             href="/agents/new"
             className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white"
           >
-            Create agent
+            Hire AI Employee
           </Link>
         </div>
 
         {dueCount > 0 && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
             {dueCount} schedule{dueCount === 1 ? "" : "s"} due while this app is open. Open the
-            agent and use Run now (browser cannot run schedules after the tab closes).
+            employee and use Run now (browser cannot run schedules after the tab closes).
           </div>
         )}
 
         {agents.some((a) => (a.schedule?.consecutiveFailures || 0) >= 3) && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
-            One or more agents have failed their schedule 3+ times. Check Connections and recent run
+            One or more AI employees have failed their schedule 3+ times. Check Connections and recent work
             history.
           </div>
         )}
 
         {agents.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-200 p-10 text-center dark:border-zinc-800">
-            <p className="text-sm text-zinc-500">No agents yet.</p>
+            <p className="text-sm text-zinc-500">No AI employees yet.</p>
             <Link href="/agents/new" className="mt-3 inline-block text-sm text-indigo-600">
-              Create your first agent
+              Hire your first AI employee
             </Link>
           </div>
         ) : (
