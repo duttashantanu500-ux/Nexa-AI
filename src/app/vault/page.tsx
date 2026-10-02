@@ -81,7 +81,7 @@ export default function VaultPage() {
           <div>
             <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Vault</h1>
             <p className="mt-1 text-sm text-zinc-500">
-              Your private knowledge, ready for your agents.
+              Your private knowledge, ready for your AI team.
             </p>
           </div>
           <div>
@@ -170,7 +170,7 @@ export default function VaultPage() {
               <p className="text-sm text-zinc-500">
                 {query.trim()
                   ? "We couldn't find anything matching your search."
-                  : "No files yet. Add notes, documents, or images your agents can use."}
+                  : "No files yet. Add notes, documents, or images your AI employees can use."}
               </p>
             </div>
           ) : (
