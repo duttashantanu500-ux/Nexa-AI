@@ -64,7 +64,8 @@ function ConnectionsInner() {
 
   useEffect(() => {
     const s = loadOperatorState();
-    const uid = getStableUserId() || s.user?.id || "";
+    // Prefer real session user id so status matches OAuth token storage
+    const uid = (s.user?.id || getStableUserId() || "").trim();
     if (!uid) {
       router.replace("/signup");
       return;
@@ -80,8 +81,13 @@ function ConnectionsInner() {
     }
     const err = search.get("error");
     const connected = search.get("connected");
-    if (connected) setBanner("Connection updated.");
-    else if (err) setBanner("Something went wrong. Please try again.");
+    if (connected) {
+      setBanner("Connected successfully.");
+    } else if (err) {
+      setBanner(
+        "Could not finish connecting. If the tool still shows Connected below, you are fine."
+      );
+    }
 
     const load = async () => {
       try {
@@ -135,20 +141,22 @@ function ConnectionsInner() {
   }, [router, search]);
 
   const resolveStatus = (c: ConnectorDefinition): ConnectorUiStatus => {
-    if (statusLoaded) {
-      if (c.id === "notion") return notionStatus || "available";
-      if (c.id === "slack") return slackStatus || "available";
-      if (c.id === "buffer") return bufferStatus || "available";
-      if (c.id === "ideogram") return ideogramStatus || "available";
-      if (c.id === "mcp") return mcpStatus || "available";
-      if (c.id === "hubspot") return hubspotStatus || "available";
-    } else {
-      if (c.id === "notion" && notionStatus) return notionStatus;
-      if (c.id === "slack" && slackStatus) return slackStatus;
-      if (c.id === "buffer" && bufferStatus) return bufferStatus;
-      if (c.id === "ideogram" && ideogramStatus) return ideogramStatus;
-      if (c.id === "mcp" && mcpStatus) return mcpStatus;
-      if (c.id === "hubspot" && hubspotStatus) return hubspotStatus;
+    const live: Record<string, ConnectorUiStatus | null> = {
+      notion: notionStatus,
+      slack: slackStatus,
+      buffer: bufferStatus,
+      ideogram: ideogramStatus,
+      mcp: mcpStatus,
+      hubspot: hubspotStatus,
+    };
+    if (c.id in live) {
+      const s = live[c.id];
+      if (s === "connected") return "connected";
+      if (s === "error") return "error";
+      if (s === "unavailable") return "unavailable";
+      if (s === "available") return "available";
+      // Not loaded yet — do not flash "Available"
+      return statusLoaded ? "available" : "loading";
     }
     if (c.id === "local_comfyui") return comfyOk ? "connected" : "available";
     if (c.id === "local_data" || c.id === "vault") return "connected";
