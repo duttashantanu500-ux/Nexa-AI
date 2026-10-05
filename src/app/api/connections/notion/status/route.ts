@@ -1,68 +1,57 @@
 import { NextRequest, NextResponse } from "next/server";
-import { notionVerifyToken } from "@/lib/connectors/providers/notion";
-import { notionOAuthConfigured, resolveNotionToken } from "@/lib/connectors/notionAuth";
+
+function json(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store, max-age=0" },
+  });
+}
+import { getConnection } from "@/lib/connectors/tokenStore";
 
 export async function GET(req: NextRequest) {
-  if (!notionOAuthConfigured()) {
-    return NextResponse.json({
-      configured: false,
-      status: "unavailable",
-      message:
-        "Notion is not set up for user sign-in yet. Admin must add NOTION_CLIENT_ID and NOTION_CLIENT_SECRET (public Notion integration).",
-      connectPath: null,
-      source: null,
-      canDisconnect: false,
-    });
-  }
-
-  const userId = req.nextUrl.searchParams.get("userId")?.trim() || "";
+  const userId = req.nextUrl.searchParams.get("userId")?.trim();
   if (!userId) {
-    return NextResponse.json({
-      configured: true,
-      status: "available",
-      message: "Sign in, then connect your own Notion account.",
+    return json({
+      ok: true,
+      status: "unavailable",
+      message: "Sign in to connect Notion.",
       connectPath: null,
-      source: null,
-      canDisconnect: false,
     });
   }
 
-  const resolved = await resolveNotionToken(userId);
-
-  if (!resolved) {
-    return NextResponse.json({
-      configured: true,
+  if (!process.env.NOTION_CLIENT_ID || !process.env.NOTION_CLIENT_SECRET) {
+    return json({
+      ok: true,
       status: "available",
-      message: "Connect your Notion account to use it with your AI employees.",
-      connectPath: `/api/oauth/notion/start?userId=${encodeURIComponent(userId)}`,
-      workspaceName: null,
-      source: null,
-      canDisconnect: false,
+      message: "Notion is not configured on this server yet.",
+      connectPath: null,
     });
   }
 
-  const verify = await notionVerifyToken(resolved.token);
-  if (!verify.ok) {
-    return NextResponse.json({
-      configured: true,
+  const conn = await getConnection(userId, "notion");
+  if (!conn?.accessToken) {
+    return json({
+      ok: true,
+      status: "available",
+      message: "Connect your Notion workspace.",
+      connectPath: `/api/oauth/notion?userId=${encodeURIComponent(userId)}`,
+    });
+  }
+
+  if (!conn.accessToken) {
+    return json({
+      ok: true,
       status: "error",
-      message: "Your Notion link expired or was revoked. Connect again.",
-      connectPath: `/api/oauth/notion/start?userId=${encodeURIComponent(userId)}`,
-      workspaceName: resolved.meta.workspaceName || null,
-      source: "oauth",
-      canDisconnect: true,
+      message: "Notion token is missing. Please reconnect.",
+      connectPath: `/api/oauth/notion?userId=${encodeURIComponent(userId)}`,
     });
   }
 
-  return NextResponse.json({
-    configured: true,
+  return json({
+    ok: true,
     status: "connected",
-    message: "Your Notion account is connected",
+    message: "Notion is connected.",
+    workspaceName: conn.workspaceName || null,
     connectPath: null,
-    workspaceName: resolved.meta.workspaceName || "Notion",
-    source: "oauth",
-    canDisconnect: true,
-    connectedAt: resolved.meta.connectedAt,
-    lastVerifiedAt: resolved.meta.lastVerifiedAt,
   });
 }

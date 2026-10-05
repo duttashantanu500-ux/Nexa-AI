@@ -1,64 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
-import { hubspotVerifyToken } from "@/lib/connectors/providers/hubspot";
-import {
-  hubspotOAuthConfigured,
-  resolveHubspotToken,
-} from "@/lib/connectors/hubspotAuth";
+
+function json(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store, max-age=0" },
+  });
+}
+import { getConnection } from "@/lib/connectors/tokenStore";
 
 export async function GET(req: NextRequest) {
-  if (!hubspotOAuthConfigured()) {
-    return NextResponse.json({
-      configured: false,
-      status: "unavailable",
-      message: "HubSpot is not set up on this site yet.",
-      connectPath: null,
-      canDisconnect: false,
-    });
-  }
-
-  const userId = req.nextUrl.searchParams.get("userId")?.trim() || "";
+  const userId = req.nextUrl.searchParams.get("userId")?.trim();
   if (!userId) {
-    return NextResponse.json({
-      configured: true,
-      status: "available",
-      message: "Sign in, then connect your HubSpot account.",
+    return json({
+      ok: true,
+      status: "unavailable",
+      message: "Sign in to connect HubSpot.",
       connectPath: null,
-      canDisconnect: false,
     });
   }
 
-  const resolved = await resolveHubspotToken(userId);
-  if (!resolved) {
-    return NextResponse.json({
-      configured: true,
+  if (!process.env.HUBSPOT_CLIENT_ID || !process.env.HUBSPOT_CLIENT_SECRET) {
+    return json({
+      ok: true,
       status: "available",
-      message: "Connect your HubSpot account to use it with your AI employees.",
-      connectPath: `/api/oauth/hubspot/start?userId=${encodeURIComponent(userId)}`,
-      workspaceName: null,
-      canDisconnect: false,
+      message: "HubSpot is not configured on this server yet.",
+      connectPath: null,
     });
   }
 
-  const verify = await hubspotVerifyToken(resolved.token);
-  if (!verify.ok) {
-    return NextResponse.json({
-      configured: true,
+  const conn = await getConnection(userId, "hubspot");
+  if (!conn?.accessToken) {
+    return json({
+      ok: true,
+      status: "available",
+      message: "Connect your HubSpot account to manage CRM data.",
+      connectPath: `/api/oauth/hubspot?userId=${encodeURIComponent(userId)}`,
+    });
+  }
+
+  if (!conn.accessToken.startsWith("pat-") && !conn.accessToken.includes(".")) {
+    // keep connected if token present; soft warn only via message if needed
+  }
+
+  if (!conn.accessToken) {
+    return json({
+      ok: true,
       status: "error",
-      message: "Your HubSpot connection needs to be refreshed.",
-      connectPath: `/api/oauth/hubspot/start?userId=${encodeURIComponent(userId)}`,
-      workspaceName: resolved.meta.workspaceName || null,
-      canDisconnect: true,
+      message: "HubSpot token is missing. Please reconnect.",
+      connectPath: `/api/oauth/hubspot?userId=${encodeURIComponent(userId)}`,
     });
   }
 
-  return NextResponse.json({
-    configured: true,
+  return json({
+    ok: true,
     status: "connected",
-    message: "Your HubSpot account is connected",
+    message: "HubSpot is connected.",
+    workspaceName: conn.workspaceName || null,
     connectPath: null,
-    workspaceName: resolved.meta.workspaceName || null,
-    canDisconnect: true,
-    connectedAt: resolved.meta.connectedAt,
-    lastVerifiedAt: resolved.meta.lastVerifiedAt,
   });
 }
