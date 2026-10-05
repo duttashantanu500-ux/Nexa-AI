@@ -153,20 +153,29 @@ export async function checkStorageHealth(): Promise<StorageHealth> {
 /** Alias used by storage-health route */
 export const checkTokenStorageHealth = checkStorageHealth;
 
-export async function saveConnection(conn: StoredConnection): Promise<void> {
+export async function saveConnection(
+  conn: StoredConnection
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const admin = supabaseAdmin();
-  const encrypted = encryptSecret(
-    JSON.stringify({
-      accessToken: conn.accessToken,
-      refreshToken: conn.refreshToken,
-      workspaceName: conn.workspaceName,
-      workspaceId: conn.workspaceId,
-      botId: conn.botId,
-      scopes: conn.scopes,
-      connectedAt: conn.connectedAt,
-      lastVerifiedAt: conn.lastVerifiedAt,
-    })
-  );
+  let encrypted: string;
+  try {
+    encrypted = encryptSecret(
+      JSON.stringify({
+        accessToken: conn.accessToken,
+        refreshToken: conn.refreshToken,
+        workspaceName: conn.workspaceName,
+        workspaceId: conn.workspaceId,
+        botId: conn.botId,
+        scopes: conn.scopes,
+        connectedAt: conn.connectedAt,
+        lastVerifiedAt: conn.lastVerifiedAt,
+      })
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "encrypt_failed";
+    console.error("[tokenStore] encrypt failed", msg);
+    return { ok: false, error: msg };
+  }
 
   if (admin) {
     const { error } = await admin.from("nexa_oauth_tokens").upsert(
@@ -180,13 +189,15 @@ export async function saveConnection(conn: StoredConnection): Promise<void> {
     );
     if (error) {
       console.error("[tokenStore] saveConnection failed", error.message);
-      throw new Error(error.message);
+      memory.set(memKey(conn.userId, conn.connectorId), encrypted);
+      return { ok: false, error: error.message };
     }
     memory.set(memKey(conn.userId, conn.connectorId), encrypted);
-    return;
+    return { ok: true };
   }
 
   memory.set(memKey(conn.userId, conn.connectorId), encrypted);
+  return { ok: true };
 }
 
 export async function loadConnection(
