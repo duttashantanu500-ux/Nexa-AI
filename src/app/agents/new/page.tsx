@@ -47,7 +47,6 @@ export default function NewAgentPage() {
     }
     const scope = draftScopeId(s.user.id);
     scopeRef.current = scope;
-    // No pre-filled employee card — wait for the user's first command
     setLines(loadBuilderChat(scope) as ChatLine[]);
     setChatReady(true);
     void fetchBillingStatus().then(setBilling);
@@ -112,15 +111,27 @@ export default function NewAgentPage() {
           },
         ]);
       } else {
-        setLines((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: data.message || "Here is a proposed AI employee.",
-            thinking,
-          },
-        ]);
-        if (data.proposal) setProposal(data.proposal as AgentProposal);
+        if (data.proposal) {
+          setProposal(data.proposal as AgentProposal);
+          setLines((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content:
+                "Draft ready. Review the card below — connect any missing tools, then hire.",
+              thinking,
+            },
+          ]);
+        } else {
+          setLines((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: data.message || "Here is a proposed AI employee.",
+              thinking,
+            },
+          ]);
+        }
         if (data.validation?.requiredConnectors) {
           setRequiredConnectors(data.validation.requiredConnectors);
         }
