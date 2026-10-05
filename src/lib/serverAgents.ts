@@ -1,6 +1,6 @@
 /**
- * Server-side agent schedule helpers (Supabase).
- * Requires schema from supabase/schema_agents.sql + SERVICE_ROLE_KEY.
+ * Server-side agent helpers (Supabase).
+ * Requires schema_agents.sql + SUPABASE_SERVICE_ROLE_KEY.
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -41,7 +41,6 @@ export async function listDueAgentSchedules(limit = 10) {
   return data || [];
 }
 
-/** Compare-and-set claim to reduce double-fire */
 export async function claimSchedule(id: string, oldNext: string | null, newNext: string | null) {
   const sb = adminClient();
   if (!sb) return false;
@@ -120,4 +119,277 @@ export function computeNextRunIso(params: {
     return next.toISOString();
   }
   return null;
+}
+
+export async function listAgentsForUser(userId: string): Promise<any[]> {
+  const sb = adminClient();
+  if (!sb || !userId) return [];
+  const { data, error } = await sb
+    .from("nexa_agents")
+    .select("*")
+    .eq("owner_user_id", userId)
+    .neq("status", "archived")
+    .order("updated_at", { ascending: false });
+  if (error) {
+    console.error("listAgentsForUser", error.message);
+    return [];
+  }
+  return data || [];
+}
+
+export async function loadAgentSteps(agentId: string, version?: number): Promise<any[]> {
+  const sb = adminClient();
+  if (!sb) return [];
+  if (typeof version === "number" && version > 0) {
+    const { data, error } = await sb
+      .from("nexa_agent_versions")
+      .select("steps")
+      .eq("agent_id", agentId)
+      .eq("version", version)
+      .maybeSingle();
+    if (error) return [];
+    return Array.isArray(data?.steps) ? data!.steps : [];
+  }
+  const { data, error } = await sb
+    .from("nexa_agent_versions")
+    .select("steps")
+    .eq("agent_id", agentId)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return [];
+  return Array.isArray(data?.steps) ? data!.steps : [];
+}
+
+export async function getAgentForUser(agentId: string, userId: string): Promise<any | null> {
+  const sb = adminClient();
+  if (!sb) return null;
+  const { data: agent } = await sb
+    .from("nexa_agents")
+    .select("*")
+    .eq("id", agentId)
+    .eq("owner_user_id", userId)
+    .maybeSingle();
+  if (!agent) return null;
+  const steps = await loadAgentSteps(agentId, agent.current_version);
+  const { data: sch } = await sb
+    .from("nexa_schedules")
+    .select("*")
+    .eq("agent_id", agentId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return { ...agent, steps, schedule: sch || null };
+}
+
+export async function upsertServerAgent(params: {
+  userId: string;
+  agentId?: string;
+  name: string;
+  description?: string;
+  purpose?: string;
+  status?: string;
+  steps: any[];
+  schedule?: any;
+}): Promise<{ ok: true; id: string; version: number } | { ok: false; error: string }> {
+  const sb = adminClient();
+  if (!sb) return { ok: false, error: "Server storage is not configured." };
+  if (!params.userId || !params.name?.trim()) return { ok: false, error: "Name is required." };
+
+  const status = params.status || "active";
+  const description = params.description || params.purpose || "";
+  let agentId = params.agentId || "";
+  let version = 1;
+
+  if (agentId) {
+    const { data: existing } = await sb
+      .from("nexa_agents")
+      .select("id, current_version, owner_user_id")
+      .eq("id", agentId)
+      .maybeSingle();
+    if (!existing || existing.owner_user_id !== params.userId) {
+      return { ok: false, error: "Employee not found." };
+    }
+    version = (existing.current_version || 1) + 1;
+    const { error } = await sb
+      .from("nexa_agents")
+      .update({
+        name: params.name.trim().slice(0, 120),
+        description: description.slice(0, 500),
+        status,
+        current_version: version,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", agentId)
+      .eq("owner_user_id", params.userId);
+    if (error) return { ok: false, error: "Could not update employee." };
+  } else {
+    const { data: created, error } = await sb
+      .from("nexa_agents")
+      .insert({
+        owner_user_id: params.userId,
+        name: params.name.trim().slice(0, 120),
+        description: description.slice(0, 500),
+        status,
+        current_version: 1,
+      })
+      .select("id")
+      .maybeSingle();
+    if (error || !created?.id) return { ok: false, error: "Could not create employee." };
+    agentId = created.id;
+    version = 1;
+  }
+
+  const stepsJson = (params.steps || []).map((s: any, i: number) => ({
+    id: String(s.id || `step_${i}`),
+    actionId: String(s.actionId || ""),
+    name: String(s.name || s.actionId || `Step ${i + 1}`),
+    order: typeof s.order === "number" ? s.order : i,
+    config: s.config && typeof s.config === "object" ? s.config : {},
+    onError: s.onError === "continue" || s.onError === "retry" ? s.onError : "stop",
+  }));
+
+  await sb.from("nexa_agent_versions").insert({
+    agent_id: agentId,
+    version,
+    steps: stepsJson,
+    created_by: params.userId,
+  });
+
+  const freq = params.schedule?.frequency || "once";
+  const enabled =
+    Boolean(params.schedule?.enabled) && freq !== "once" && status !== "paused";
+  const type =
+    freq === "daily" || freq === "weekly" || freq === "monthly" ? freq : "one_time";
+  const timeOfDay = params.schedule?.time || "09:00";
+  const nextRun = enabled
+    ? computeNextRunIso({ type, time_of_day: timeOfDay })
+    : null;
+
+  const { data: existingSch } = await sb
+    .from("nexa_schedules")
+    .select("id")
+    .eq("agent_id", agentId)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingSch?.id) {
+    await sb
+      .from("nexa_schedules")
+      .update({
+        type,
+        time_of_day: timeOfDay,
+        enabled,
+        next_run_at: nextRun,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existingSch.id);
+  } else if (enabled) {
+    await sb.from("nexa_schedules").insert({
+      agent_id: agentId,
+      type,
+      time_of_day: timeOfDay,
+      enabled,
+      next_run_at: nextRun,
+    });
+  }
+
+  return { ok: true, id: agentId, version };
+}
+
+export async function setAgentStatusForUser(
+  agentId: string,
+  userId: string,
+  status: string
+): Promise<boolean> {
+  const sb = adminClient();
+  if (!sb) return false;
+  const { data, error } = await sb
+    .from("nexa_agents")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("id", agentId)
+    .eq("owner_user_id", userId)
+    .select("id")
+    .maybeSingle();
+  if (error || !data) return false;
+  const enabled = status === "active" || status === "ready";
+  await sb
+    .from("nexa_schedules")
+    .update({
+      enabled,
+      updated_at: new Date().toISOString(),
+      ...(enabled ? {} : { next_run_at: null }),
+    })
+    .eq("agent_id", agentId);
+  return true;
+}
+
+export async function archiveAgentForUser(agentId: string, userId: string): Promise<boolean> {
+  return setAgentStatusForUser(agentId, userId, "archived");
+}
+
+export async function createAgentRun(params: {
+  agentId: string;
+  agentVersion: number;
+  triggerSource: string;
+  isTest?: boolean;
+}): Promise<string | null> {
+  const sb = adminClient();
+  if (!sb) return null;
+  const { data, error } = await sb
+    .from("nexa_runs")
+    .insert({
+      agent_id: params.agentId,
+      agent_version: params.agentVersion,
+      trigger_source: params.triggerSource,
+      status: "running",
+      is_test: Boolean(params.isTest),
+      started_at: new Date().toISOString(),
+    })
+    .select("id")
+    .maybeSingle();
+  if (error) return null;
+  return data?.id || null;
+}
+
+export async function finishAgentRun(
+  runId: string | null,
+  result: { ok?: boolean; status?: string; error?: string; steps?: any[]; output?: string }
+) {
+  const sb = adminClient();
+  if (!sb || !runId) return;
+  const status =
+    result.status === "waiting_for_approval"
+      ? "waiting_approval"
+      : result.ok
+        ? "completed"
+        : "failed";
+  await sb
+    .from("nexa_runs")
+    .update({ status, ended_at: new Date().toISOString() })
+    .eq("id", runId);
+}
+
+export async function listRunsForAgent(
+  agentId: string,
+  userId: string,
+  limit = 30
+): Promise<any[]> {
+  const sb = adminClient();
+  if (!sb) return [];
+  const { data: agent } = await sb
+    .from("nexa_agents")
+    .select("id")
+    .eq("id", agentId)
+    .eq("owner_user_id", userId)
+    .maybeSingle();
+  if (!agent) return [];
+  const { data } = await sb
+    .from("nexa_runs")
+    .select("*")
+    .eq("agent_id", agentId)
+    .eq("is_test", false)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  return data || [];
 }
