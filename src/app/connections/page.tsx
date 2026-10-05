@@ -31,6 +31,7 @@ const SHORT: Record<string, string> = {
   buffer: "Social scheduling",
   ideogram: "AI images",
   mcp: "Your own MCP tools",
+  hubspot: "CRM contacts & deals",
 };
 
 export default function ConnectionsPage() {
@@ -58,6 +59,7 @@ function ConnectionsInner() {
   const [bufferStatus, setBufferStatus] = useState<ConnectorUiStatus | null>(null);
   const [ideogramStatus, setIdeogramStatus] = useState<ConnectorUiStatus | null>(null);
   const [mcpStatus, setMcpStatus] = useState<ConnectorUiStatus | null>(null);
+  const [hubspotStatus, setHubspotStatus] = useState<ConnectorUiStatus | null>(null);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -90,18 +92,20 @@ function ConnectionsInner() {
       }
       if (!uid) return;
       try {
-        const [n, sl, b, ig, m] = await Promise.all([
+        const [n, sl, b, ig, m, hs] = await Promise.all([
           fetch(`/api/connections/notion/status?userId=${encodeURIComponent(uid)}`).then((r) => r.json()),
           fetch(`/api/connections/slack/status?userId=${encodeURIComponent(uid)}`).then((r) => r.json()),
           fetch(`/api/connections/buffer/status?userId=${encodeURIComponent(uid)}`).then((r) => r.json()),
           fetch(`/api/connections/ideogram/status?userId=${encodeURIComponent(uid)}`).then((r) => r.json()),
           fetch(`/api/connections/mcp/status?userId=${encodeURIComponent(uid)}`).then((r) => r.json()),
+          fetch(`/api/connections/hubspot/status?userId=${encodeURIComponent(uid)}`).then((r) => r.json()),
         ]);
         setNotionStatus((n.status as ConnectorUiStatus) || null);
         setSlackStatus((sl.status as ConnectorUiStatus) || null);
         setBufferStatus((b.status as ConnectorUiStatus) || null);
         setIdeogramStatus((ig.status as ConnectorUiStatus) || null);
         setMcpStatus((m.status as ConnectorUiStatus) || null);
+        setHubspotStatus((hs.status as ConnectorUiStatus) || null);
       } catch {
         /* */
       }
@@ -115,6 +119,7 @@ function ConnectionsInner() {
     if (c.id === "buffer" && bufferStatus) return bufferStatus;
     if (c.id === "ideogram" && ideogramStatus) return ideogramStatus;
     if (c.id === "mcp" && mcpStatus) return mcpStatus;
+    if (c.id === "hubspot" && hubspotStatus) return hubspotStatus;
     if (c.id === "local_comfyui") return comfyOk ? "connected" : "available";
     if (c.id === "local_data" || c.id === "vault") return "connected";
     if (c.defaultStatus === "coming_soon") return "coming_soon";
