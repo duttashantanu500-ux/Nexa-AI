@@ -17,23 +17,6 @@ import {
 
 const COMFY_KEY = "nexa_comfy_base_url";
 
-const SHORT: Record<string, string> = {
-  notion: "Notes & documentation",
-  slack: "Team communication",
-  github: "Code & issues",
-  gmail: "Email",
-  gdrive: "Files",
-  gsheets: "Spreadsheets",
-  gcal: "Calendar",
-  local_data: "Lists & reports",
-  local_comfyui: "Local images",
-  vault: "Your private files",
-  buffer: "Social scheduling",
-  ideogram: "AI images",
-  mcp: "Your own MCP tools",
-  hubspot: "CRM contacts & deals",
-};
-
 export default function ConnectionsPage() {
   return (
     <Suspense
@@ -80,9 +63,17 @@ function ConnectionsInner() {
       /* */
     }
     const err = search.get("error");
-    const connected = search.get("connected");
+    const connected = (search.get("connected") || "").toLowerCase();
     if (connected) {
       setBanner("Connected successfully.");
+      // Optimistic: show Connected immediately for the returned connector
+      // Only when the query names the tool (detail pages use connected=1)
+      if (connected.includes("notion")) setNotionStatus("connected");
+      if (connected.includes("slack")) setSlackStatus("connected");
+      if (connected.includes("buffer")) setBufferStatus("connected");
+      if (connected.includes("hubspot")) setHubspotStatus("connected");
+      if (connected.includes("ideogram")) setIdeogramStatus("connected");
+      if (connected.includes("mcp")) setMcpStatus("connected");
     } else if (err) {
       setBanner(
         "Could not finish connecting. If the tool still shows Connected below, you are fine."
@@ -119,12 +110,29 @@ function ConnectionsInner() {
             cache: "no-store",
           }).then((r) => r.json()),
         ]);
-        setNotionStatus((n.status as ConnectorUiStatus) || "available");
-        setSlackStatus((sl.status as ConnectorUiStatus) || "available");
-        setBufferStatus((b.status as ConnectorUiStatus) || "available");
-        setIdeogramStatus((ig.status as ConnectorUiStatus) || "available");
-        setMcpStatus((m.status as ConnectorUiStatus) || "available");
-        setHubspotStatus((hs.status as ConnectorUiStatus) || "available");
+        const statuses = {
+          notion: (n.status as ConnectorUiStatus) || "available",
+          slack: (sl.status as ConnectorUiStatus) || "available",
+          buffer: (b.status as ConnectorUiStatus) || "available",
+          ideogram: (ig.status as ConnectorUiStatus) || "available",
+          mcp: (m.status as ConnectorUiStatus) || "available",
+          hubspot: (hs.status as ConnectorUiStatus) || "available",
+        };
+        setNotionStatus(statuses.notion);
+        setSlackStatus(statuses.slack);
+        setBufferStatus(statuses.buffer);
+        setIdeogramStatus(statuses.ideogram);
+        setMcpStatus(statuses.mcp);
+        setHubspotStatus(statuses.hubspot);
+        // Prefer truth: if any live status is connected, never leave an error banner
+        if (Object.values(statuses).some((s) => s === "connected") && connected) {
+          setBanner("Connected successfully.");
+        } else if (
+          Object.values(statuses).some((s) => s === "connected") &&
+          err
+        ) {
+          setBanner("Connected successfully.");
+        }
       } catch {
         /* keep previous */
       } finally {
@@ -183,12 +191,12 @@ function ConnectionsInner() {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <span className="truncate font-medium text-zinc-900 dark:text-zinc-50">{c.name}</span>
+            <span className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
+              {c.name}
+            </span>
             <span className={statusBadgeClass(status)}>{statusLabel(status)}</span>
           </div>
-          <p className="mt-0.5 truncate text-xs text-zinc-500">
-            {SHORT[c.id] || c.description}
-          </p>
+          <p className="mt-0.5 truncate text-xs text-zinc-500">{c.shortDescription}</p>
         </div>
       </Link>
     );
@@ -196,40 +204,39 @@ function ConnectionsInner() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-3xl space-y-8 px-4 py-8">
+      <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
         <div>
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Connections</h1>
-          <p className="mt-1 text-sm text-zinc-500">Connect the tools your AI team uses.</p>
+          <p className="mt-1 text-sm text-zinc-500">
+            Connect tools your AI employees can use. Status comes from live checks — not placeholders.
+          </p>
         </div>
 
+        {banner && (
+          <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-200">
+            {banner}
+          </div>
+        )}
         {storageWarning && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
             {storageWarning}
           </div>
         )}
 
-        {banner && (
-          <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-            {banner}
-          </div>
-        )}
-
-        <section className="space-y-3">
+        <section className="space-y-2">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
             Connected services
           </h2>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-2">
             {services.map((c) => (
               <Card key={c.id} c={c} />
             ))}
           </div>
         </section>
 
-        <section className="space-y-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-            Local tools
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2">
+        <section className="space-y-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Local</h2>
+          <div className="grid gap-2 sm:grid-cols-2">
             {local.map((c) => (
               <Card key={c.id} c={c} />
             ))}
