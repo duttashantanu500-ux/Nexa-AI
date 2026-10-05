@@ -6,52 +6,63 @@ function json(body: Record<string, unknown>, status = 200) {
     headers: { "Cache-Control": "no-store, max-age=0" },
   });
 }
-import { getConnection } from "@/lib/connectors/tokenStore";
+import { bufferVerifyToken } from "@/lib/connectors/providers/buffer";
+import { bufferOAuthConfigured, resolveBufferToken } from "@/lib/connectors/bufferAuth";
 
 export async function GET(req: NextRequest) {
-  const userId = req.nextUrl.searchParams.get("userId")?.trim();
+  if (!bufferOAuthConfigured()) {
+    return json({
+      configured: false,
+      status: "unavailable",
+      message: "Buffer is not set up on this site yet.",
+      connectPath: null,
+      canDisconnect: false,
+    });
+  }
+
+  const userId = req.nextUrl.searchParams.get("userId")?.trim() || "";
   if (!userId) {
     return json({
-      ok: true,
-      status: "unavailable",
-      message: "Sign in to connect Buffer.",
-      connectPath: null,
-    });
-  }
-
-  if (!process.env.BUFFER_CLIENT_ID || !process.env.BUFFER_CLIENT_SECRET) {
-    return json({
-      ok: true,
+      configured: true,
       status: "available",
-      message: "Buffer is not configured on this server yet.",
+      message: "Sign in, then connect your Buffer account.",
       connectPath: null,
+      canDisconnect: false,
     });
   }
 
-  const conn = await getConnection(userId, "buffer");
-  if (!conn?.accessToken) {
+  const resolved = await resolveBufferToken(userId);
+  if (!resolved) {
     return json({
-      ok: true,
+      configured: true,
       status: "available",
-      message: "Connect your Buffer account.",
-      connectPath: `/api/oauth/buffer?userId=${encodeURIComponent(userId)}`,
+      message: "Connect your Buffer account to use it with your AI employees.",
+      connectPath: `/api/oauth/buffer/start?userId=${encodeURIComponent(userId)}`,
+      workspaceName: null,
+      canDisconnect: false,
     });
   }
 
-  if (!conn.accessToken) {
+  const verify = await bufferVerifyToken(resolved.token);
+  if (!verify.ok) {
     return json({
-      ok: true,
+      configured: true,
       status: "error",
-      message: "Buffer token is missing. Please reconnect.",
-      connectPath: `/api/oauth/buffer?userId=${encodeURIComponent(userId)}`,
+      message: "Your Buffer connection needs to be refreshed.",
+      connectPath: `/api/oauth/buffer/start?userId=${encodeURIComponent(userId)}`,
+      workspaceName: resolved.meta.workspaceName || null,
+      canDisconnect: true,
     });
   }
 
   return json({
-    ok: true,
+    configured: true,
     status: "connected",
-    message: "Buffer is connected.",
-    workspaceName: conn.workspaceName || null,
+    message: "Your Buffer account is connected",
     connectPath: null,
+    workspaceName: resolved.meta.workspaceName || null,
+    canDisconnect: true,
+    connectedAt: resolved.meta.connectedAt,
+    lastVerifiedAt: resolved.meta.lastVerifiedAt,
   });
 }

@@ -6,56 +6,66 @@ function json(body: Record<string, unknown>, status = 200) {
     headers: { "Cache-Control": "no-store, max-age=0" },
   });
 }
-import { getConnection } from "@/lib/connectors/tokenStore";
+import { hubspotVerifyToken } from "@/lib/connectors/providers/hubspot";
+import {
+  hubspotOAuthConfigured,
+  resolveHubspotToken,
+} from "@/lib/connectors/hubspotAuth";
 
 export async function GET(req: NextRequest) {
-  const userId = req.nextUrl.searchParams.get("userId")?.trim();
+  if (!hubspotOAuthConfigured()) {
+    return json({
+      configured: false,
+      status: "unavailable",
+      message: "HubSpot is not set up on this site yet.",
+      connectPath: null,
+      canDisconnect: false,
+    });
+  }
+
+  const userId = req.nextUrl.searchParams.get("userId")?.trim() || "";
   if (!userId) {
     return json({
-      ok: true,
-      status: "unavailable",
-      message: "Sign in to connect HubSpot.",
-      connectPath: null,
-    });
-  }
-
-  if (!process.env.HUBSPOT_CLIENT_ID || !process.env.HUBSPOT_CLIENT_SECRET) {
-    return json({
-      ok: true,
+      configured: true,
       status: "available",
-      message: "HubSpot is not configured on this server yet.",
+      message: "Sign in, then connect your HubSpot account.",
       connectPath: null,
+      canDisconnect: false,
     });
   }
 
-  const conn = await getConnection(userId, "hubspot");
-  if (!conn?.accessToken) {
+  const resolved = await resolveHubspotToken(userId);
+  if (!resolved) {
     return json({
-      ok: true,
+      configured: true,
       status: "available",
-      message: "Connect your HubSpot account to manage CRM data.",
-      connectPath: `/api/oauth/hubspot?userId=${encodeURIComponent(userId)}`,
+      message: "Connect your HubSpot account to use it with your AI employees.",
+      connectPath: `/api/oauth/hubspot/start?userId=${encodeURIComponent(userId)}`,
+      workspaceName: null,
+      canDisconnect: false,
     });
   }
 
-  if (!conn.accessToken.startsWith("pat-") && !conn.accessToken.includes(".")) {
-    // keep connected if token present; soft warn only via message if needed
-  }
-
-  if (!conn.accessToken) {
+  const verify = await hubspotVerifyToken(resolved.token);
+  if (!verify.ok) {
     return json({
-      ok: true,
+      configured: true,
       status: "error",
-      message: "HubSpot token is missing. Please reconnect.",
-      connectPath: `/api/oauth/hubspot?userId=${encodeURIComponent(userId)}`,
+      message: "Your HubSpot connection needs to be refreshed.",
+      connectPath: `/api/oauth/hubspot/start?userId=${encodeURIComponent(userId)}`,
+      workspaceName: resolved.meta.workspaceName || null,
+      canDisconnect: true,
     });
   }
 
   return json({
-    ok: true,
+    configured: true,
     status: "connected",
-    message: "HubSpot is connected.",
-    workspaceName: conn.workspaceName || null,
+    message: "Your HubSpot account is connected",
     connectPath: null,
+    workspaceName: resolved.meta.workspaceName || null,
+    canDisconnect: true,
+    connectedAt: resolved.meta.connectedAt,
+    lastVerifiedAt: resolved.meta.lastVerifiedAt,
   });
 }

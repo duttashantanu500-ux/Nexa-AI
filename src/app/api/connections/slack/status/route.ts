@@ -6,52 +6,63 @@ function json(body: Record<string, unknown>, status = 200) {
     headers: { "Cache-Control": "no-store, max-age=0" },
   });
 }
-import { getConnection } from "@/lib/connectors/tokenStore";
+import { slackVerifyToken } from "@/lib/connectors/providers/slack";
+import { slackOAuthConfigured, resolveSlackToken } from "@/lib/connectors/slackAuth";
 
 export async function GET(req: NextRequest) {
-  const userId = req.nextUrl.searchParams.get("userId")?.trim();
+  if (!slackOAuthConfigured()) {
+    return json({
+      configured: false,
+      status: "unavailable",
+      message: "Slack is not set up on this site yet.",
+      connectPath: null,
+      canDisconnect: false,
+    });
+  }
+
+  const userId = req.nextUrl.searchParams.get("userId")?.trim() || "";
   if (!userId) {
     return json({
-      ok: true,
-      status: "unavailable",
-      message: "Sign in to connect Slack.",
-      connectPath: null,
-    });
-  }
-
-  if (!process.env.SLACK_CLIENT_ID || !process.env.SLACK_CLIENT_SECRET) {
-    return json({
-      ok: true,
+      configured: true,
       status: "available",
-      message: "Slack is not configured on this server yet.",
+      message: "Sign in, then connect your Slack workspace.",
       connectPath: null,
+      canDisconnect: false,
     });
   }
 
-  const conn = await getConnection(userId, "slack");
-  if (!conn?.accessToken) {
+  const resolved = await resolveSlackToken(userId);
+  if (!resolved) {
     return json({
-      ok: true,
+      configured: true,
       status: "available",
-      message: "Connect your Slack workspace.",
-      connectPath: `/api/oauth/slack?userId=${encodeURIComponent(userId)}`,
+      message: "Connect your Slack workspace to use it with your AI employees.",
+      connectPath: `/api/oauth/slack/start?userId=${encodeURIComponent(userId)}`,
+      workspaceName: null,
+      canDisconnect: false,
     });
   }
 
-  if (!conn.accessToken) {
+  const verify = await slackVerifyToken(resolved.token);
+  if (!verify.ok) {
     return json({
-      ok: true,
+      configured: true,
       status: "error",
-      message: "Slack token is missing. Please reconnect.",
-      connectPath: `/api/oauth/slack?userId=${encodeURIComponent(userId)}`,
+      message: "Your Slack connection needs to be refreshed.",
+      connectPath: `/api/oauth/slack/start?userId=${encodeURIComponent(userId)}`,
+      workspaceName: resolved.meta.workspaceName || null,
+      canDisconnect: true,
     });
   }
 
   return json({
-    ok: true,
+    configured: true,
     status: "connected",
-    message: "Slack is connected.",
-    workspaceName: conn.workspaceName || null,
+    message: "Your Slack workspace is connected",
     connectPath: null,
+    workspaceName: resolved.meta.workspaceName || null,
+    canDisconnect: true,
+    connectedAt: resolved.meta.connectedAt,
+    lastVerifiedAt: resolved.meta.lastVerifiedAt,
   });
 }
