@@ -60,6 +60,7 @@ function ConnectionsInner() {
   const [ideogramStatus, setIdeogramStatus] = useState<ConnectorUiStatus | null>(null);
   const [mcpStatus, setMcpStatus] = useState<ConnectorUiStatus | null>(null);
   const [hubspotStatus, setHubspotStatus] = useState<ConnectorUiStatus | null>(null);
+  const [statusLoaded, setStatusLoaded] = useState(false);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -79,8 +80,8 @@ function ConnectionsInner() {
     }
     const err = search.get("error");
     const connected = search.get("connected");
-    if (err) setBanner("Something went wrong. Please try again.");
     if (connected) setBanner("Connection updated.");
+    else if (err) setBanner("Something went wrong. Please try again.");
 
     const load = async () => {
       try {
@@ -93,33 +94,62 @@ function ConnectionsInner() {
       if (!uid) return;
       try {
         const [n, sl, b, ig, m, hs] = await Promise.all([
-          fetch(`/api/connections/notion/status?userId=${encodeURIComponent(uid)}`).then((r) => r.json()),
-          fetch(`/api/connections/slack/status?userId=${encodeURIComponent(uid)}`).then((r) => r.json()),
-          fetch(`/api/connections/buffer/status?userId=${encodeURIComponent(uid)}`).then((r) => r.json()),
-          fetch(`/api/connections/ideogram/status?userId=${encodeURIComponent(uid)}`).then((r) => r.json()),
-          fetch(`/api/connections/mcp/status?userId=${encodeURIComponent(uid)}`).then((r) => r.json()),
-          fetch(`/api/connections/hubspot/status?userId=${encodeURIComponent(uid)}`).then((r) => r.json()),
+          fetch(`/api/connections/notion/status?userId=${encodeURIComponent(uid)}`, {
+            cache: "no-store",
+          }).then((r) => r.json()),
+          fetch(`/api/connections/slack/status?userId=${encodeURIComponent(uid)}`, {
+            cache: "no-store",
+          }).then((r) => r.json()),
+          fetch(`/api/connections/buffer/status?userId=${encodeURIComponent(uid)}`, {
+            cache: "no-store",
+          }).then((r) => r.json()),
+          fetch(`/api/connections/ideogram/status?userId=${encodeURIComponent(uid)}`, {
+            cache: "no-store",
+          }).then((r) => r.json()),
+          fetch(`/api/connections/mcp/status?userId=${encodeURIComponent(uid)}`, {
+            cache: "no-store",
+          }).then((r) => r.json()),
+          fetch(`/api/connections/hubspot/status?userId=${encodeURIComponent(uid)}`, {
+            cache: "no-store",
+          }).then((r) => r.json()),
         ]);
-        setNotionStatus((n.status as ConnectorUiStatus) || null);
-        setSlackStatus((sl.status as ConnectorUiStatus) || null);
-        setBufferStatus((b.status as ConnectorUiStatus) || null);
-        setIdeogramStatus((ig.status as ConnectorUiStatus) || null);
-        setMcpStatus((m.status as ConnectorUiStatus) || null);
-        setHubspotStatus((hs.status as ConnectorUiStatus) || null);
+        setNotionStatus((n.status as ConnectorUiStatus) || "available");
+        setSlackStatus((sl.status as ConnectorUiStatus) || "available");
+        setBufferStatus((b.status as ConnectorUiStatus) || "available");
+        setIdeogramStatus((ig.status as ConnectorUiStatus) || "available");
+        setMcpStatus((m.status as ConnectorUiStatus) || "available");
+        setHubspotStatus((hs.status as ConnectorUiStatus) || "available");
       } catch {
-        /* */
+        /* keep previous */
+      } finally {
+        setStatusLoaded(true);
       }
     };
     void load();
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
   }, [router, search]);
 
   const resolveStatus = (c: ConnectorDefinition): ConnectorUiStatus => {
-    if (c.id === "notion" && notionStatus) return notionStatus;
-    if (c.id === "slack" && slackStatus) return slackStatus;
-    if (c.id === "buffer" && bufferStatus) return bufferStatus;
-    if (c.id === "ideogram" && ideogramStatus) return ideogramStatus;
-    if (c.id === "mcp" && mcpStatus) return mcpStatus;
-    if (c.id === "hubspot" && hubspotStatus) return hubspotStatus;
+    if (statusLoaded) {
+      if (c.id === "notion") return notionStatus || "available";
+      if (c.id === "slack") return slackStatus || "available";
+      if (c.id === "buffer") return bufferStatus || "available";
+      if (c.id === "ideogram") return ideogramStatus || "available";
+      if (c.id === "mcp") return mcpStatus || "available";
+      if (c.id === "hubspot") return hubspotStatus || "available";
+    } else {
+      if (c.id === "notion" && notionStatus) return notionStatus;
+      if (c.id === "slack" && slackStatus) return slackStatus;
+      if (c.id === "buffer" && bufferStatus) return bufferStatus;
+      if (c.id === "ideogram" && ideogramStatus) return ideogramStatus;
+      if (c.id === "mcp" && mcpStatus) return mcpStatus;
+      if (c.id === "hubspot" && hubspotStatus) return hubspotStatus;
+    }
     if (c.id === "local_comfyui") return comfyOk ? "connected" : "available";
     if (c.id === "local_data" || c.id === "vault") return "connected";
     if (c.defaultStatus === "coming_soon") return "coming_soon";
