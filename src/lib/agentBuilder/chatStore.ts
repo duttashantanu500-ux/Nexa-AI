@@ -19,10 +19,12 @@ function key(scopeId: string) {
 }
 
 function isBlankTemplate(content: string): boolean {
-  return (
-    /Status:\s*Needs input/i.test(content) &&
-    /Employee:\s*[—-]/i.test(content)
-  );
+  const c = content || "";
+  // Pre-chat / empty templates must never reappear
+  if (/Status:\s*Needs input/i.test(c) && /Employee:\s*[—-]/i.test(c)) return true;
+  if (/Employee:\s*\(loaded\)/i.test(c)) return true;
+  if (/Describe the employee you need/i.test(c) && /Status:\s*Needs input/i.test(c)) return true;
+  return false;
 }
 
 async function authHeader(): Promise<Record<string, string>> {

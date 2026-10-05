@@ -26,16 +26,8 @@ export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
 
   useEffect(() => {
     void loadBuilderChatHydrated(scope).then((msgs) => {
-      if (msgs.length) setLines(msgs);
-      else {
-        setLines([
-          {
-            role: "assistant",
-            content:
-              "Employee:\n(loaded)\n\nStatus:\nActive\n\nNext:\nDescribe a change (schedule, connectors, workflow) or ask what this employee does.",
-          },
-        ]);
-      }
+      // Never invent a pre-chat card — wait for the user
+      setLines(msgs.length ? msgs : []);
       setReady(true);
     });
   }, [scope]);
@@ -129,6 +121,9 @@ export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
         </p>
       </div>
       <div className="flex max-h-80 flex-col gap-2 overflow-y-auto px-4 py-3">
+        {lines.length === 0 && !busy && (
+          <p className="text-sm text-zinc-500">Describe a change, or ask what this employee does.</p>
+        )}
         {lines.map((l, i) => (
           <div
             key={i}
