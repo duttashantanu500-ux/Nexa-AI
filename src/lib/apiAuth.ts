@@ -17,9 +17,6 @@ function extractBearer(req: NextRequest): string | null {
   return null;
 }
 
-/**
- * Verify the caller's Supabase access token and return the authenticated user.
- */
 export async function requireAuthUser(
   req: NextRequest
 ): Promise<AuthSuccess | AuthFailure> {
@@ -62,9 +59,25 @@ export async function requireAuthUser(
   return { user: data.user, userId: data.user.id, accessToken: token };
 }
 
-/**
- * If the client also sent a userId, it must match the JWT subject (IDOR guard).
- */
+/** Compatibility helper used by agent APIs. */
+export async function requireUserId(
+  req: NextRequest
+): Promise<{ userId: string } | { error: string; status: number }> {
+  const auth = await requireAuthUser(req);
+  if ("error" in auth) {
+    const status = auth.error.status || 401;
+    let message = "Please sign in.";
+    try {
+      const body = await auth.error.clone().json();
+      if (body?.message) message = String(body.message);
+    } catch {
+      /* */
+    }
+    return { error: message, status };
+  }
+  return { userId: auth.userId };
+}
+
 export function assertUserIdMatch(
   authedUserId: string,
   claimedUserId: string | null | undefined
@@ -80,10 +93,6 @@ export function assertUserIdMatch(
   return null;
 }
 
-/**
- * Validate MCP / outbound URL to reduce SSRF risk.
- * Allows only http(s) to non-private hosts.
- */
 export function isSafeOutboundUrl(raw: string): { ok: true; url: string } | { ok: false; message: string } {
   let parsed: URL;
   try {
@@ -96,11 +105,7 @@ export function isSafeOutboundUrl(raw: string): { ok: true; url: string } | { ok
     return { ok: false, message: "MCP server URL must use https." };
   }
 
-  // Prefer https in production
-  if (
-    process.env.NODE_ENV === "production" &&
-    parsed.protocol !== "https:"
-  ) {
+  if (process.env.NODE_ENV === "production" && parsed.protocol !== "https:") {
     return { ok: false, message: "MCP server URL must use https." };
   }
 
@@ -116,7 +121,6 @@ export function isSafeOutboundUrl(raw: string): { ok: true; url: string } | { ok
     return { ok: false, message: "That host is not allowed." };
   }
 
-  // Block obvious private IPv4 ranges
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (ipv4) {
     const parts = ipv4.slice(1).map((x) => Number(x));
@@ -136,11 +140,7 @@ export function isSafeOutboundUrl(raw: string): { ok: true; url: string } | { ok
   return { ok: true, url: parsed.toString() };
 }
 
-/** Safe same-origin return URL for checkout redirects. */
-export function safeReturnOrigin(
-  claimed: unknown,
-  req: NextRequest
-): string {
+export function safeReturnOrigin(claimed: unknown, req: NextRequest): string {
   const fallback =
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.NEXT_PUBLIC_SITE_URL ||
@@ -152,9 +152,7 @@ export function safeReturnOrigin(
 
   try {
     const u = new URL(claimed.trim());
-    const allowed = new Set<
-      string
-    >([
+    const allowed = new Set<string>([
       "www.nexaiintelligence.online",
       "nexaiintelligence.online",
     ]);
