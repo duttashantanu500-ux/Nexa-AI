@@ -47,18 +47,8 @@ export default function NewAgentPage() {
     }
     const scope = draftScopeId(s.user.id);
     scopeRef.current = scope;
-    const saved = loadBuilderChat(scope);
-    if (saved.length) {
-      setLines(saved as ChatLine[]);
-    } else {
-      setLines([
-        {
-          role: "assistant",
-          content:
-            "Employee:\n—\n\nRole:\n—\n\nGoal:\nDescribe the employee you need.\n\nConnectors required:\n—\n\nSchedule:\n—\n\nWorkflow:\n—\n\nApproval:\n—\n\nStatus:\nNeeds input\n\nNext:\nDescribe a role or workflow (e.g. Slack morning summary, HubSpot deal review).",
-        },
-      ]);
-    }
+    // No pre-filled employee card — wait for the user's first command
+    setLines(loadBuilderChat(scope) as ChatLine[]);
     setChatReady(true);
     void fetchBillingStatus().then(setBilling);
   }, [router]);
@@ -207,11 +197,15 @@ export default function NewAgentPage() {
             AI Employee Builder
           </h1>
           <p className="mt-0.5 text-sm text-zinc-500">
-            Build one employee at a time — structured answers, not general chat.
+            Build one employee at a time — structured answers after you describe the job.
           </p>
         </div>
 
         <div className="flex flex-1 flex-col gap-3 overflow-y-auto pb-4">
+          {lines.length === 0 && !busy && (
+            <p className="px-1 text-sm text-zinc-500">What should this employee do?</p>
+          )}
+
           {lines.map((l, i) => (
             <div key={i}>
               {l.thinking && l.thinking.length > 0 && (
@@ -326,7 +320,7 @@ export default function NewAgentPage() {
             </button>
           </div>
           <p className="mt-2 text-xs text-zinc-500">
-            One conversation per employee. Answers stay structured — not a general chatbot.
+            One conversation per employee. Structured answers appear after your message.
           </p>
         </div>
       </div>
