@@ -39,9 +39,12 @@ export async function GET(req: NextRequest) {
     return fail("Missing authorization code from HubSpot.");
   }
 
-  const verified = verifyOAuthState(state);
-  if (!verified?.userId) {
-    return fail("This connection link expired or is invalid. Please try Connect again.");
+  // verifyOAuthState returns the userId string (or null)
+  const userId = verifyOAuthState(state);
+  if (!userId) {
+    return fail(
+      "This connection link expired or is invalid. Please try Connect again."
+    );
   }
 
   const clientId = process.env.HUBSPOT_CLIENT_ID!.trim();
@@ -71,7 +74,6 @@ export async function GET(req: NextRequest) {
       return fail("Could not complete HubSpot connection. Please try again.");
     }
 
-    // Optional: fetch hub info for display name
     let workspaceName: string | undefined;
     let workspaceId: string | undefined;
     try {
@@ -91,8 +93,8 @@ export async function GET(req: NextRequest) {
       /* non-fatal */
     }
 
-    await saveConnection({
-      userId: verified.userId,
+    const saved = await saveConnection({
+      userId,
       connectorId: "hubspot",
       accessToken: String(tokenData.access_token),
       refreshToken: tokenData.refresh_token
@@ -104,6 +106,12 @@ export async function GET(req: NextRequest) {
       connectedAt: new Date().toISOString(),
       lastVerifiedAt: new Date().toISOString(),
     });
+
+    if (!saved.ok) {
+      return NextResponse.redirect(
+        `${origin}/connections/hubspot?error=save_failed`
+      );
+    }
 
     return NextResponse.redirect(
       `${origin}/connections/hubspot?connected=1`
