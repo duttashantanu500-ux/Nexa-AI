@@ -10,7 +10,7 @@ import {
   fetchBillingStatus,
   type BillingStatusResponse,
 } from "@/lib/clientBilling";
-import type { ValidatedProposal } from "@/lib/agentBuilder/types";
+import type { AgentProposal } from "@/lib/agentBuilder/types";
 
 type ChatLine = { role: "user" | "assistant"; content: string; thinking?: string[] };
 
@@ -26,7 +26,7 @@ export default function NewAgentPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [thinkingLive, setThinkingLive] = useState<string[]>([]);
-  const [proposal, setProposal] = useState<ValidatedProposal | null>(null);
+  const [proposal, setProposal] = useState<AgentProposal | null>(null);
   const [requiredConnectors, setRequiredConnectors] = useState<
     { id: string; name: string; status: string }[]
   >([]);
@@ -106,7 +106,7 @@ export default function NewAgentPage() {
             thinking,
           },
         ]);
-        if (data.proposal) setProposal(data.proposal as ValidatedProposal);
+        if (data.proposal) setProposal(data.proposal as AgentProposal);
         if (data.validation?.requiredConnectors) {
           setRequiredConnectors(data.validation.requiredConnectors);
         }
@@ -134,7 +134,7 @@ export default function NewAgentPage() {
         setCreating(false);
         return;
       }
-      const steps = (proposal.steps || []).map((st: any, i: number) => ({
+      const steps = (proposal.steps || []).map((st, i) => ({
         id: stepId(),
         actionId: st.actionId,
         name: st.name || st.actionId,
@@ -150,7 +150,7 @@ export default function NewAgentPage() {
         steps,
         status: "active",
         schedule: {
-          frequency: (proposal.schedule?.frequency as any) || "once",
+          frequency: proposal.schedule?.frequency || "once",
           enabled: Boolean(proposal.schedule?.enabled),
         },
       });
@@ -232,7 +232,7 @@ export default function NewAgentPage() {
               </p>
               {proposal.steps?.length > 0 && (
                 <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-zinc-600 dark:text-zinc-400">
-                  {proposal.steps.map((st: any, i: number) => (
+                  {proposal.steps.map((st, i) => (
                     <li key={i}>{st.name || st.actionId}</li>
                   ))}
                 </ol>
