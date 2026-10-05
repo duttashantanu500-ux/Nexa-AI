@@ -1,5 +1,6 @@
 /**
- * AI Employee Builder LLM call — multi-provider with local fallback.
+ * AI Employee Builder LLM call — reuses multi-provider stack.
+ * Returns structured Employee card + proposal JSON (never essay chat).
  */
 
 import { registryCatalogForPrompt } from "./validate";
@@ -34,49 +35,62 @@ function connectionSummary(connections?: Record<string, string>): string {
     return "Connection status unknown. Prefer local_data and vault when unsure; note external connectors may need connecting.";
   }
   const lines = Object.entries(connections).map(([id, status]) => `- ${id}: ${status}`);
-  return `Live connection status:\n${lines.join("\n")}\nIf status is not \"connected\", you may still propose that connector's actions, but your message MUST say the user needs to connect it under Connections before those steps will run.`;
+  return `Live connection status for this user:\n${lines.join("\n")}\nIf status is not \"connected\", still propose the employee but Status must be Connection required.`;
 }
 
 function buildSystemPrompt(connections?: Record<string, string>): string {
-  return `You are Nexa AI Employee Builder — you ONLY design AI employees for Nexa.
+  return `You are Nexa's AI Employee Builder — not a general chatbot.
+Your job: understand the request, propose one AI employee, use only real connectors/actions.
 
-If the user asks anything unrelated, respond with EXACTLY this sentence and nothing else:\n${OFF_TOPIC}
+If the user asks anything unrelated (weather, poems, general chat), respond with EXACTLY:
+${OFF_TOPIC}
 
-Only use action IDs from this registry:\n${registryCatalogForPrompt()}\n\n${connectionSummary(connections)}
+Never invent connectors or action IDs. Only use this registry:
 
-Prefer implemented=true actions. Built-in tools (local_data, vault) work without OAuth.
-External tools need a connected account.
+${registryCatalogForPrompt()}
 
-When creating/modifying an AI employee, respond with ONLY valid JSON (no markdown fences):
+${connectionSummary(connections)}
+
+Respond with ONLY valid JSON (no markdown fences, no essays):
 {
   "off_topic": false,
-  "message": "Short human summary including which connectors are connected vs need connecting",
+  "intent": "create|update|preview|question",
+  "message": "PLAIN TEXT structured card with newlines. Format EXACTLY:\n\nEmployee:\n[name]\n\nRole:\n[role]\n\nGoal:\n[one short line]\n\nConnectors required:\n- [name]\n\nSchedule:\n[Manual | Every day at HH:MM | ...]\n\nWorkflow:\n1. [step]\n2. [step]\n\nApproval:\n[Required / Not required]\n\nStatus:\n[Ready | Connection required | Needs input]\n\nNext:\n[one short action]",
   "proposal": {
     "name": "string",
     "description": "string",
     "purpose": "string",
     "trigger": "manual" | "schedule",
-    "schedule": { "frequency": "once" | "daily" | "weekly" | "monthly", "time": "HH:MM", "timezone": "UTC" },
+    "schedule": { "frequency": "once" | "daily" | "weekly" | "monthly", "time": "HH:MM", "timezone": "UTC", "enabled": true },
     "steps": [
-      { "actionId": "local_data.list_from_text", "config": { "text": "...", "separator": "newline" }, "onError": "stop" }
+      { "actionId": "from_registry", "name": "Human step label", "config": {}, "onError": "stop", "requiresApproval": false }
     ],
-    "notes": "optional"
+    "notes": "optional short note"
   }
 }
 
 Rules:
-- steps[].actionId must be from the registry
-- Do not claim the employee was created or that steps already ran
-- CRM/contacts/deals/companies → hubspot.*; Slack → slack.*; Notion → notion.*; social → buffer.*; images → ideogram.*
-- Custom MCP tools → mcp.call_tool only with exact tool names; never invent tool names
-- You may mix multiple connectors in one employee
-- Schedules: daily|weekly|monthly (not hourly)
+- message MUST be the structured card — short fields, no paragraphs, no "Certainly" / "I'd be happy to" / "Feel free"
+- Prefer fewest steps that achieve the goal
+- CRM → hubspot.*; Slack → slack.*; Notion → notion.*; social → buffer.*; images → ideogram.*; custom → mcp.call_tool only
+- If a connector is not connected: Status = Connection required; Next = Connect [name]
+- If info is missing: Status = Needs input; Next = ONE focused question only
+- If enough info: Status = Ready; Next = Create employee
+- Never claim Created, Active, Succeeded, or that work ran
+- Schedules: once/manual, daily, weekly, monthly (no hourly). time HH:MM
+- When user updates (\"add Slack\", \"every Friday\"): same JSON, update the same draft
 `;
 }
 
 export type BuilderCompleteResult =
   | { kind: "off_topic"; message: string; thinking?: string[] }
-  | { kind: "proposal"; message: string; proposal: unknown; provider?: string; thinking?: string[] }
+  | {
+      kind: "proposal";
+      message: string;
+      proposal: unknown;
+      provider?: string;
+      thinking?: string[];
+    }
   | { kind: "error"; message: string; thinking?: string[] };
 
 export async function completeAgentBuilder(params: {
@@ -88,9 +102,29 @@ export async function completeAgentBuilder(params: {
   thinking.push("Checking available connectors and actions");
 
   const system = buildSystemPrompt(params.connections);
+  // Cost control: recent turns + compact summary of older ones (full history kept in UI only)
+  const all = params.messages || [];
+  const recent = all.slice(-6);
+  const older = all.slice(0, Math.max(0, all.length - 6));
+  const summary =
+    older.length > 0
+      ? older
+          .map((m) => `${m.role}: ${String(m.content || "").slice(0, 120)}`)
+          .join(" | ")
+          .slice(0, 600)
+      : "";
+  const contextPrefix = summary
+    ? [
+        {
+          role: "user" as const,
+          content: `[Earlier conversation summary]\n${summary}`,
+        },
+      ]
+    : [];
   const textMessages = [
     { role: "system" as const, content: system },
-    ...params.messages.map((m) => ({
+    ...contextPrefix,
+    ...recent.map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     })),
@@ -129,7 +163,7 @@ export async function completeAgentBuilder(params: {
         apiKey: geminiKey,
         model: "gemini-2.5-flash",
         system,
-        messages: params.messages,
+        messages: recent,
       });
       return text ? { text, provider: "gemini" } : null;
     });
@@ -196,7 +230,13 @@ export async function completeAgentBuilder(params: {
         thinking.push("Preparing proposal for your review");
         return {
           kind: "proposal",
-          message: String(parsed.message || "Here is a proposed AI employee."),
+          message: String(
+            parsed.message ||
+              formatLocalStructuredMessage(
+                (parsed.proposal as Record<string, unknown>) || {},
+                params.connections
+              )
+          ),
           proposal: parsed.proposal,
           provider: result.provider,
           thinking,
@@ -211,15 +251,12 @@ export async function completeAgentBuilder(params: {
   const fallback = localFallbackProposal(lastUser?.content || "", params.connections);
   if (fallback) {
     thinking.push("Preparing proposal for your review");
-    const notes =
-      typeof (fallback as { notes?: string }).notes === "string"
-        ? String((fallback as { notes?: string }).notes)
-        : "";
     return {
       kind: "proposal",
-      message:
-        "Built a starter workflow from your description. Review the steps below — connect any external tools under Connections before those steps can run live." +
-        (notes ? `\n\n${notes}` : ""),
+      message: formatLocalStructuredMessage(
+        fallback as Record<string, unknown>,
+        params.connections
+      ),
       proposal: fallback,
       provider: "local_fallback",
       thinking,
@@ -229,7 +266,7 @@ export async function completeAgentBuilder(params: {
   return {
     kind: "error",
     message:
-      "Could not design that employee yet. Try describing a concrete workflow (list/filter/report, Slack, HubSpot, Notion) or check AI API keys in Vercel.",
+      "Could not design that employee yet. Try describing a concrete workflow (list/filter/report, Slack message, HubSpot contact, Notion page) or check AI API keys in Vercel.",
     thinking,
   };
 }
@@ -238,10 +275,10 @@ function looksOffTopic(text: string): boolean {
   const t = text.toLowerCase().trim();
   if (t.length < 3) return false;
   const agentHints =
-    /\b(agent|employee|workflow|automat|schedule|connect|slack|notion|github|hubspot|buffer|ideogram|comfy|crm|contact|deal|compan|list|filter|report|trigger|run every|daily|hire|post|message|page|mcp|tool)\b/i;
+    /\b(agent|employee|workflow|automat|schedule|connect|slack|notion|github|hubspot|buffer|ideogram|comfy|crm|contact|deal|compan|list|filter|report|trigger|run every|daily|hire|post|message|page|team|role|task|step|action|build|create|make|mcp)\b/i;
   if (agentHints.test(t)) return false;
   const off =
-    /\b(weather|poem|joke|time is|what time|search the web|find 10|email me|who is|capital of)\b/i;
+    /\b(weather|poem|joke|time is|what time|search the web|find 10|email me|who is|capital of|tell me a story|write a song)\b/i;
   return off.test(t);
 }
 
@@ -260,6 +297,70 @@ function parseModelJson(text: string): Record<string, unknown> | null {
   }
 }
 
+function humanScheduleLabel(sch: any): string {
+  if (!sch || sch.frequency === "once" || sch.enabled === false) return "Manual";
+  const t = sch.time || "09:00";
+  if (sch.frequency === "daily") return `Every day at ${t}`;
+  if (sch.frequency === "weekly") return `Every week at ${t}`;
+  if (sch.frequency === "monthly") return `Every month at ${t}`;
+  return String(sch.frequency || "Manual");
+}
+
+function formatLocalStructuredMessage(
+  proposal: Record<string, unknown>,
+  connections?: Record<string, string>
+): string {
+  const name = String(proposal.name || "AI Employee");
+  const role = String(proposal.purpose || proposal.description || "Specialist");
+  const goal = String(proposal.description || proposal.purpose || "Complete the assigned workflow.");
+  const steps = Array.isArray(proposal.steps) ? (proposal.steps as any[]) : [];
+  const connectors = new Set<string>();
+  for (const s of steps) {
+    const id = String(s.actionId || "");
+    const c = id.split(".")[0];
+    if (c && c !== "local_data" && c !== "vault") connectors.add(c);
+  }
+  const connLines = [...connectors].map((c) => {
+    if (connections?.[c] === "connected") return `- ${c} ✓`;
+    return `- ${c}`;
+  });
+  const needConnect = [...connectors].some((c) => connections?.[c] !== "connected");
+  const approval = steps.some((s) => s.requiresApproval) ? "Required" : "Not required";
+  const status = needConnect ? "Connection required" : steps.length ? "Ready" : "Needs input";
+  const next = needConnect
+    ? `Connect ${[...connectors].filter((c) => connections?.[c] !== "connected").join(", ") || "required tools"}.`
+    : "Create employee";
+  const wf = steps.map((s, i) => `${i + 1}. ${s.name || s.actionId || "Step"}`).join("\n");
+  return [
+    "Employee:",
+    name,
+    "",
+    "Role:",
+    role,
+    "",
+    "Goal:",
+    goal.slice(0, 120),
+    "",
+    "Connectors required:",
+    connLines.length ? connLines.join("\n") : "- None (built-in tools)",
+    "",
+    "Schedule:",
+    humanScheduleLabel(proposal.schedule),
+    "",
+    "Workflow:",
+    wf || "1. Complete assigned work",
+    "",
+    "Approval:",
+    approval,
+    "",
+    "Status:",
+    status,
+    "",
+    "Next:",
+    next,
+  ].join("\n");
+}
+
 function localFallbackProposal(
   userText: string,
   connections?: Record<string, string>
@@ -273,14 +374,14 @@ function localFallbackProposal(
 
   if (wantsHubspot) {
     return {
-      name: "HubSpot CRM helper",
+      name: "Deal Review Employee",
       description: userText.slice(0, 200),
-      purpose: "Work with HubSpot contacts, companies, or deals",
+      purpose: "Sales Operations",
       trigger: "manual",
-      schedule: { frequency: "once", time: "09:00", timezone: "UTC" },
+      schedule: { frequency: "once", time: "09:00", timezone: "UTC", enabled: false },
       steps: [
-        { actionId: "hubspot.search_contacts", config: { query: "" }, onError: "stop" },
-        { actionId: "hubspot.list_deals", config: { limit: "10" }, onError: "continue" },
+        { actionId: "hubspot.search_contacts", name: "Find contacts", config: { query: "" }, onError: "stop" },
+        { actionId: "hubspot.list_deals", name: "List deals", config: { limit: "10" }, onError: "continue" },
       ],
       notes:
         connections?.hubspot === "connected"
@@ -290,14 +391,14 @@ function localFallbackProposal(
   }
   if (wantsSlack) {
     return {
-      name: "Slack messenger",
+      name: "Slack Summary Employee",
       description: userText.slice(0, 200),
-      purpose: "List channels and send Slack messages",
+      purpose: "Communication Assistant",
       trigger: "manual",
-      schedule: { frequency: "once", time: "09:00", timezone: "UTC" },
+      schedule: { frequency: "once", time: "09:00", timezone: "UTC", enabled: false },
       steps: [
-        { actionId: "slack.list_channels", config: {}, onError: "stop" },
-        { actionId: "slack.post_message", config: { channel: "", text: "" }, onError: "stop" },
+        { actionId: "slack.list_channels", name: "List channels", config: {}, onError: "stop" },
+        { actionId: "slack.post_message", name: "Deliver summary", config: { channel: "", text: "" }, onError: "stop", requiresApproval: true },
       ],
       notes:
         connections?.slack === "connected"
@@ -307,14 +408,14 @@ function localFallbackProposal(
   }
   if (wantsNotion) {
     return {
-      name: "Notion scribe",
+      name: "Notion Research Employee",
       description: userText.slice(0, 200),
-      purpose: "Search and create Notion pages",
+      purpose: "Knowledge Assistant",
       trigger: "manual",
-      schedule: { frequency: "once", time: "09:00", timezone: "UTC" },
+      schedule: { frequency: "once", time: "09:00", timezone: "UTC", enabled: false },
       steps: [
-        { actionId: "notion.search", config: { query: "" }, onError: "stop" },
-        { actionId: "notion.create_page", config: { title: "", content: "" }, onError: "stop" },
+        { actionId: "notion.search", name: "Search Notion", config: { query: "" }, onError: "stop" },
+        { actionId: "notion.create_page", name: "Create page", config: { title: "", content: "" }, onError: "stop", requiresApproval: true },
       ],
       notes:
         connections?.notion === "connected"
@@ -324,14 +425,14 @@ function localFallbackProposal(
   }
   if (wantsBuffer) {
     return {
-      name: "Social poster",
+      name: "Social Media Employee",
       description: userText.slice(0, 200),
-      purpose: "View Buffer channels and create posts",
+      purpose: "Social Media Manager",
       trigger: "manual",
-      schedule: { frequency: "once", time: "09:00", timezone: "UTC" },
+      schedule: { frequency: "once", time: "09:00", timezone: "UTC", enabled: false },
       steps: [
-        { actionId: "buffer.list_channels", config: {}, onError: "stop" },
-        { actionId: "buffer.create_post", config: { channel: "", text: "" }, onError: "stop" },
+        { actionId: "buffer.list_channels", name: "List channels", config: {}, onError: "stop" },
+        { actionId: "buffer.create_post", name: "Schedule or publish", config: { channel: "", text: "" }, onError: "stop", requiresApproval: true },
       ],
       notes:
         connections?.buffer === "connected"
@@ -341,16 +442,18 @@ function localFallbackProposal(
   }
   if (wantsMcp) {
     return {
-      name: "Custom MCP tool runner",
+      name: "Custom Connector Employee",
       description: userText.slice(0, 200),
-      purpose: "Call a tool from your connected MCP server",
+      purpose: "Custom tool runner",
       trigger: "manual",
-      schedule: { frequency: "once", time: "09:00", timezone: "UTC" },
-      steps: [{ actionId: "mcp.call_tool", config: { tool: "", args: "{}" }, onError: "stop" }],
+      schedule: { frequency: "once", time: "09:00", timezone: "UTC", enabled: false },
+      steps: [
+        { actionId: "mcp.call_tool", name: "Call approved tool", config: { tool: "", args: "{}" }, onError: "stop" },
+      ],
       notes:
         connections?.mcp === "connected"
-          ? "MCP is connected. Set the exact tool name from your server discovery list."
-          : "Connect an MCP server under Connections first, then set the tool name from the discovered list.",
+          ? "Custom connector is connected. Use an approved tool name."
+          : "Connect your custom connector under Connections first.",
     };
   }
 
@@ -358,32 +461,35 @@ function localFallbackProposal(
   return {
     name: daily ? "Daily list processor" : "List processor",
     description: userText.slice(0, 200),
-    purpose: "Process text into a filtered list and report",
+    purpose: "Operations",
     trigger: daily ? "schedule" : "manual",
     schedule: {
       frequency: daily ? "daily" : "once",
       time: "09:00",
       timezone: "UTC",
+      enabled: daily,
     },
     steps: [
       {
         actionId: "local_data.list_from_text",
+        name: "Load list",
         config: { text: "", separator: "newline" },
         onError: "stop",
       },
       {
         actionId: "local_data.filter",
+        name: "Filter items",
         config: { keyword: "", mode: "include" },
         onError: "stop",
       },
       {
         actionId: "local_data.report",
+        name: "Build report",
         config: { title: "Processed list" },
         onError: "stop",
       },
     ],
-    notes:
-      "Uses built-in tools only — no external connector required. Fill list text and filter keyword before activating.",
+    notes: "Uses built-in tools only — no external connector required.",
   };
 }
 
