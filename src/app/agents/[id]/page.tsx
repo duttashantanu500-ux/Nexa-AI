@@ -27,6 +27,7 @@ import {
   startProCheckout,
 } from "@/lib/clientBilling";
 import { Agent, AgentRun } from "@/types";
+import { EmployeeBuilderChat } from "@/components/EmployeeBuilderChat";
 
 const COMFY_KEY = "nexa_comfy_base_url";
 const NOTION_PARENT_KEY = "nexa_notion_default_parent";
@@ -91,7 +92,6 @@ export default function AgentDetailPage() {
     setUpgrading(false);
   };
 
-  /** Start Work — real execution only. Never simulates success. */
   const execute = async () => {
     if (!agent || running) return;
     if (agent.status === "paused") {
@@ -342,11 +342,7 @@ export default function AgentDetailPage() {
           <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 dark:border-indigo-900 dark:bg-indigo-950/20">
             <div className="flex items-start justify-between gap-2">
               <h2 className="text-sm font-semibold">Preview — what this employee will do</h2>
-              <button
-                type="button"
-                onClick={() => setPreviewOpen(false)}
-                className="text-xs text-zinc-500"
-              >
+              <button type="button" onClick={() => setPreviewOpen(false)} className="text-xs text-zinc-500">
                 Close
               </button>
             </div>
@@ -454,10 +450,7 @@ export default function AgentDetailPage() {
         {needsSignIn && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
             <p>Your session expired. Sign in again to start work.</p>
-            <Link
-              href="/login"
-              className="mt-2 inline-block rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white"
-            >
+            <Link href="/login" className="mt-2 inline-block rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white">
               Sign in
             </Link>
           </div>
@@ -515,6 +508,8 @@ export default function AgentDetailPage() {
             </ol>
           )}
         </div>
+
+        <EmployeeBuilderChat agentId={agent.id} />
 
         <section className="space-y-3">
           <h2 className="text-sm font-semibold">Work history</h2>
