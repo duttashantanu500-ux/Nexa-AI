@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { hubspotVerifyToken } from "@/lib/connectors/providers/hubspot";
+import {
+  hubspotOAuthConfigured,
+  resolveHubspotToken,
+} from "@/lib/connectors/hubspotAuth";
 
 function json(body: Record<string, unknown>, status = 200) {
   return NextResponse.json(body, {
@@ -6,11 +11,6 @@ function json(body: Record<string, unknown>, status = 200) {
     headers: { "Cache-Control": "no-store, max-age=0" },
   });
 }
-import { hubspotVerifyToken } from "@/lib/connectors/providers/hubspot";
-import {
-  hubspotOAuthConfigured,
-  resolveHubspotToken,
-} from "@/lib/connectors/hubspotAuth";
 
 export async function GET(req: NextRequest) {
   if (!hubspotOAuthConfigured()) {
@@ -46,23 +46,34 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const verify = await hubspotVerifyToken(resolved.token);
-  if (!verify.ok) {
-    return json({
-      configured: true,
-      status: "error",
-      message: "Your HubSpot connection needs to be refreshed.",
-      connectPath: `/api/oauth/hubspot/start?userId=${encodeURIComponent(userId)}`,
-      workspaceName: resolved.meta.workspaceName || null,
-      canDisconnect: true,
-    });
+  let status: "connected" | "error" = "connected";
+  let message = "Your HubSpot account is connected";
+  try {
+    const verifyPromise = hubspotVerifyToken(resolved.token);
+    const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 2000));
+    const raced = await Promise.race([verifyPromise, timeout]);
+    if (
+      raced !== "timeout" &&
+      raced &&
+      typeof raced === "object" &&
+      "ok" in raced &&
+      !(raced as { ok: boolean }).ok
+    ) {
+      status = "error";
+      message = "Your HubSpot connection needs to be refreshed.";
+    }
+  } catch {
+    /* keep connected */
   }
 
   return json({
     configured: true,
-    status: "connected",
-    message: "Your HubSpot account is connected",
-    connectPath: null,
+    status,
+    message,
+    connectPath:
+      status === "error"
+        ? `/api/oauth/hubspot/start?userId=${encodeURIComponent(userId)}`
+        : null,
     workspaceName: resolved.meta.workspaceName || null,
     canDisconnect: true,
     connectedAt: resolved.meta.connectedAt,

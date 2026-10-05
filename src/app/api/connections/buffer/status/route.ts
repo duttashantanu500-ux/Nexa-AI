@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { bufferVerifyToken } from "@/lib/connectors/providers/buffer";
+import { bufferOAuthConfigured, resolveBufferToken } from "@/lib/connectors/bufferAuth";
 
 function json(body: Record<string, unknown>, status = 200) {
   return NextResponse.json(body, {
@@ -6,8 +8,6 @@ function json(body: Record<string, unknown>, status = 200) {
     headers: { "Cache-Control": "no-store, max-age=0" },
   });
 }
-import { bufferVerifyToken } from "@/lib/connectors/providers/buffer";
-import { bufferOAuthConfigured, resolveBufferToken } from "@/lib/connectors/bufferAuth";
 
 export async function GET(req: NextRequest) {
   if (!bufferOAuthConfigured()) {
@@ -43,23 +43,34 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const verify = await bufferVerifyToken(resolved.token);
-  if (!verify.ok) {
-    return json({
-      configured: true,
-      status: "error",
-      message: "Your Buffer connection needs to be refreshed.",
-      connectPath: `/api/oauth/buffer/start?userId=${encodeURIComponent(userId)}`,
-      workspaceName: resolved.meta.workspaceName || null,
-      canDisconnect: true,
-    });
+  let status: "connected" | "error" = "connected";
+  let message = "Your Buffer account is connected";
+  try {
+    const verifyPromise = bufferVerifyToken(resolved.token);
+    const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 2000));
+    const raced = await Promise.race([verifyPromise, timeout]);
+    if (
+      raced !== "timeout" &&
+      raced &&
+      typeof raced === "object" &&
+      "ok" in raced &&
+      !(raced as { ok: boolean }).ok
+    ) {
+      status = "error";
+      message = "Your Buffer connection needs to be refreshed.";
+    }
+  } catch {
+    /* keep connected */
   }
 
   return json({
     configured: true,
-    status: "connected",
-    message: "Your Buffer account is connected",
-    connectPath: null,
+    status,
+    message,
+    connectPath:
+      status === "error"
+        ? `/api/oauth/buffer/start?userId=${encodeURIComponent(userId)}`
+        : null,
     workspaceName: resolved.meta.workspaceName || null,
     canDisconnect: true,
     connectedAt: resolved.meta.connectedAt,
