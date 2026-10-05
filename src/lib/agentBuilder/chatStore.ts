@@ -5,7 +5,7 @@
  */
 import { getSupabase } from "../supabase";
 
-const KEY_PREFIX = "nexa_employee_builder_chat_v1:";
+const KEY_PREFIX = "nexa_employee_builder_chat_v2:";
 
 export type BuilderLine = {
   role: "user" | "assistant";
@@ -16,6 +16,13 @@ export type BuilderLine = {
 
 function key(scopeId: string) {
   return KEY_PREFIX + scopeId;
+}
+
+function isBlankTemplate(content: string): boolean {
+  return (
+    /Status:\s*Needs input/i.test(content) &&
+    /Employee:\s*[—-]/i.test(content)
+  );
 }
 
 async function authHeader(): Promise<Record<string, string>> {
@@ -43,7 +50,8 @@ export function loadBuilderChat(scopeId: string): BuilderLine[] {
         (m) =>
           m &&
           (m.role === "user" || m.role === "assistant") &&
-          typeof m.content === "string"
+          typeof m.content === "string" &&
+          !(m.role === "assistant" && isBlankTemplate(String(m.content)))
       )
       .map((m) => ({
         role: m.role,
@@ -78,7 +86,9 @@ export async function fetchBuilderChatFromServer(
     );
     const data = await res.json();
     if (!data.ok || !Array.isArray(data.messages)) return null;
-    return data.messages as BuilderLine[];
+    return (data.messages as BuilderLine[]).filter(
+      (m) => !(m.role === "assistant" && isBlankTemplate(m.content))
+    );
   } catch {
     return null;
   }
