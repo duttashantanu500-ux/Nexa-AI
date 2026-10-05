@@ -6,9 +6,17 @@ import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { createAgent, loadOperatorState, stepId } from "@/lib/operatorStore";
 import {
+  draftScopeId,
+  employeeScopeId,
+  loadBuilderChat,
+  migrateBuilderChat,
+  saveBuilderChat,
+  type BuilderLine,
+} from "@/lib/agentBuilder/chatStore";
+import {
   canCreateAgent,
   fetchBillingStatus,
-  type BillingStatusResponse,
+  type ClientBillingState,
 } from "@/lib/clientBilling";
 import type { AgentProposal } from "@/lib/agentBuilder/types";
 
@@ -16,13 +24,9 @@ type ChatLine = { role: "user" | "assistant"; content: string; thinking?: string
 
 export default function NewAgentPage() {
   const router = useRouter();
-  const [lines, setLines] = useState<ChatLine[]>([
-    {
-      role: "assistant",
-      content:
-        "Describe the AI employee you want on your team. I'll propose a workflow using only Nexa's available connectors and actions — then you confirm before anything is hired.",
-    },
-  ]);
+  const [lines, setLines] = useState<ChatLine[]>([]);
+  const [chatReady, setChatReady] = useState(false);
+  const scopeRef = useRef("");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [thinkingLive, setThinkingLive] = useState<string[]>([]);
@@ -32,7 +36,7 @@ export default function NewAgentPage() {
   >([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
-  const [billing, setBilling] = useState<BillingStatusResponse | null>(null);
+  const [billing, setBilling] = useState<ClientBillingState | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -41,8 +45,28 @@ export default function NewAgentPage() {
       router.replace("/login");
       return;
     }
+    const scope = draftScopeId(s.user.id);
+    scopeRef.current = scope;
+    const saved = loadBuilderChat(scope);
+    if (saved.length) {
+      setLines(saved as ChatLine[]);
+    } else {
+      setLines([
+        {
+          role: "assistant",
+          content:
+            "Employee:\n—\n\nRole:\n—\n\nGoal:\nDescribe the employee you need.\n\nConnectors required:\n—\n\nSchedule:\n—\n\nWorkflow:\n—\n\nApproval:\n—\n\nStatus:\nNeeds input\n\nNext:\nDescribe a role or workflow (e.g. Slack morning summary, HubSpot deal review).",
+        },
+      ]);
+    }
+    setChatReady(true);
     void fetchBillingStatus().then(setBilling);
   }, [router]);
+
+  useEffect(() => {
+    if (!chatReady || !scopeRef.current) return;
+    saveBuilderChat(scopeRef.current, lines as BuilderLine[]);
+  }, [lines, chatReady]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -102,7 +126,7 @@ export default function NewAgentPage() {
           ...prev,
           {
             role: "assistant",
-            content: data.message || "Here is a proposed AI employee. Review them below.",
+            content: data.message || "Here is a proposed AI employee.",
             thinking,
           },
         ]);
@@ -128,7 +152,8 @@ export default function NewAgentPage() {
         router.replace("/login");
         return;
       }
-      const check = canCreateAgent(s.agents.length, billing);
+      const bill = billing || (await fetchBillingStatus());
+      const check = canCreateAgent(s.agents.length, bill);
       if (!check.ok) {
         setError(check.message || "Limit reached.");
         setCreating(false);
@@ -154,6 +179,9 @@ export default function NewAgentPage() {
           enabled: Boolean(proposal.schedule?.enabled),
         },
       });
+      if (scopeRef.current && agent?.id) {
+        migrateBuilderChat(scopeRef.current, employeeScopeId(agent.id));
+      }
       router.push(`/agents/${agent.id}`);
     } catch {
       setError("Could not hire this AI employee. Please try again.");
@@ -179,7 +207,7 @@ export default function NewAgentPage() {
             AI Employee Builder
           </h1>
           <p className="mt-0.5 text-sm text-zinc-500">
-            Natural language only for hiring AI employees — not a general chatbot.
+            Build one employee at a time — structured answers, not general chat.
           </p>
         </div>
 
@@ -203,18 +231,20 @@ export default function NewAgentPage() {
                     : "mr-8 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                 }
               >
-                {l.content.split("\n").map((line, li) => (
-                  <p key={li} className={li > 0 ? "mt-1" : ""}>
-                    {line}
-                  </p>
-                ))}
+                {l.role === "assistant" ? (
+                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-zinc-800 dark:text-zinc-100">
+                    {l.content}
+                  </pre>
+                ) : (
+                  l.content
+                )}
               </div>
             </div>
           ))}
 
           {busy && thinkingLive.length > 0 && (
             <div className="mr-8 space-y-1 rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-xs text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-300">
-              <div className="font-medium">Thinking…</div>
+              <div className="font-medium">Working…</div>
               {thinkingLive.map((t, j) => (
                 <div key={j} className="flex items-center gap-1.5 opacity-80">
                   <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" />
@@ -282,7 +312,7 @@ export default function NewAgentPage() {
                   void send();
                 }
               }}
-              placeholder='e.g. "Hire a research employee who filters a list daily and builds a report"'
+              placeholder='e.g. "Summarize Slack every morning" or "Review HubSpot deals weekly"'
               className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               disabled={busy}
             />
@@ -296,7 +326,7 @@ export default function NewAgentPage() {
             </button>
           </div>
           <p className="mt-2 text-xs text-zinc-500">
-            Unrelated questions are declined. Missing connectors are called out clearly.
+            One conversation per employee. Answers stay structured — not a general chatbot.
           </p>
         </div>
       </div>
