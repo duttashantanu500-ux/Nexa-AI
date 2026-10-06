@@ -48,6 +48,7 @@ export async function callOpenAICompat(params: {
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     console.error("[agent-builder] provider HTTP", res.status, params.model, errText.slice(0, 200));
+    // Retry once without json mode if provider rejected it
     if (params.jsonMode && (res.status === 400 || res.status === 404)) {
       return callOpenAICompat({ ...params, jsonMode: false });
     }
@@ -111,6 +112,7 @@ export async function callOllama(params: {
   jsonFormat?: boolean;
 }): Promise<string | null> {
   const base = params.baseUrl.replace(/\/$/, "");
+  // Accept either https://ollama.com or https://ollama.com/api
   const chatUrl = base.endsWith("/api") ? `${base}/chat` : `${base}/api/chat`;
 
   const body: Record<string, unknown> = {
@@ -140,6 +142,7 @@ export async function callOllama(params: {
   );
 
   if (!res.ok) {
+    // Do not log request body or key; status + short body only
     const errText = await res.text().catch(() => "");
     console.error("[agent-builder] ollama HTTP", res.status, params.model, errText.slice(0, 160));
     if (params.jsonFormat !== false && (res.status === 400 || res.status === 422)) {
