@@ -48,7 +48,6 @@ export async function callOpenAICompat(params: {
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     console.error("[agent-builder] provider HTTP", res.status, params.model, errText.slice(0, 200));
-    // Retry once without json mode if provider rejected it
     if (params.jsonMode && (res.status === 400 || res.status === 404)) {
       return callOpenAICompat({ ...params, jsonMode: false });
     }
@@ -97,4 +96,65 @@ export async function callGemini(params: {
   };
   const parts = data.candidates?.[0]?.content?.parts || [];
   return parts.map((p) => p.text || "").join("").trim() || null;
+}
+
+/**
+ * Ollama Cloud (https://ollama.com/api) or self-hosted Ollama.
+ * Auth: Authorization Bearer. Never log apiKey.
+ * Native /api/chat with optional JSON format.
+ */
+export async function callOllama(params: {
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  messages: { role: string; content: string }[];
+  jsonFormat?: boolean;
+}): Promise<string | null> {
+  const base = params.baseUrl.replace(/\/$/, "");
+  const chatUrl = base.endsWith("/api") ? `${base}/chat` : `${base}/api/chat`;
+
+  const body: Record<string, unknown> = {
+    model: params.model,
+    messages: params.messages.map((m) => ({
+      role: m.role === "assistant" ? "assistant" : m.role === "system" ? "system" : "user",
+      content: m.content,
+    })),
+    stream: false,
+    options: { temperature: 0.2 },
+  };
+  if (params.jsonFormat !== false) {
+    body.format = "json";
+  }
+
+  const res = await fetchWithTimeout(
+    chatUrl,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${params.apiKey}`,
+      },
+      body: JSON.stringify(body),
+    },
+    45000
+  );
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("[agent-builder] ollama HTTP", res.status, params.model, errText.slice(0, 160));
+    if (params.jsonFormat !== false && (res.status === 400 || res.status === 422)) {
+      return callOllama({ ...params, jsonFormat: false });
+    }
+    return null;
+  }
+
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: { content?: string };
+    error?: string;
+  };
+  if (data.error) {
+    console.error("[agent-builder] ollama error", params.model, String(data.error).slice(0, 160));
+    return null;
+  }
+  return data.message?.content?.trim() || null;
 }
