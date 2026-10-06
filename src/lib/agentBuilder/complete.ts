@@ -2,7 +2,7 @@
  * AI Employee Builder LLM call — multi-provider with local fallback.
  */
 import { registryCatalogForPrompt } from "./validate";
-import { callOpenAICompat, callGemini } from "./modelClients";
+import { callOpenAICompat, callGemini, callOllama } from "./modelClients";
 
 const OFF_TOPIC =
   "I'm Nexa's AI Employee Builder. I can only help you create or modify AI employees for your team — not general chat. Describe a role or workflow (for example: research daily, post to Slack, update HubSpot contacts).";
@@ -61,9 +61,37 @@ export async function completeAgentBuilder(params: {
   const deepseekKey = getApiKey("DEEPSEEK_API_KEY");
   const openrouterKey = getApiKey("OPENROUTER_API_KEY");
   const openaiKey = getApiKey("OPENAI_API_KEY");
+  const ollamaKey = getApiKey("OLLAMA_API_KEY");
+  const ollamaBase = (
+    process.env.OLLAMA_API_BASE ||
+    process.env.OLLAMA_HOST ||
+    "https://ollama.com/api"
+  ).replace(/\/$/, "");
+  const ollamaModels = (
+    process.env.OLLAMA_MODEL ||
+    "gpt-oss:20b,gemma4:31b"
+  )
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   type Attempt = () => Promise<{ text: string; provider: string } | null>;
   const attempts: Attempt[] = [];
+
+  if (ollamaKey) {
+    for (const model of ollamaModels) {
+      attempts.push(async () => {
+        const text = await callOllama({
+          baseUrl: ollamaBase,
+          model,
+          apiKey: ollamaKey,
+          messages: textMessages,
+          jsonFormat: true,
+        });
+        return text ? { text, provider: `ollama:${model}` } : null;
+      });
+    }
+  }
 
   if (groqKey) {
     for (const model of ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]) {
@@ -311,16 +339,35 @@ function localFallbackProposal(
     };
   }
   if (wantsSlack) {
+    const daily = /\b(every morning|daily|each day)\b/.test(t);
+    const wantsNotionAlso = /\b(notion|page|doc)\b/.test(t);
+    const steps: any[] = [
+      { actionId: "slack.list_channels", name: "List channels", config: {}, onError: "stop" },
+    ];
+    if (wantsNotionAlso) {
+      steps.push({
+        actionId: "notion.create_page",
+        name: "Post summary to Notion",
+        config: { title: "Slack summary", content: "" },
+        onError: "stop",
+        requiresApproval: true,
+      });
+    } else {
+      steps.push({
+        actionId: "slack.post_message",
+        name: "Deliver summary",
+        config: { channel: "", text: "" },
+        onError: "stop",
+        requiresApproval: true,
+      });
+    }
     return {
       name: "Slack Summary Employee",
       description: userText.slice(0, 200),
       purpose: "Communication Assistant",
-      trigger: "manual",
-      schedule: { frequency: "once", time: "09:00", timezone: "UTC", enabled: false },
-      steps: [
-        { actionId: "slack.list_channels", name: "List channels", config: {}, onError: "stop" },
-        { actionId: "slack.post_message", name: "Deliver summary", config: { channel: "", text: "" }, onError: "stop", requiresApproval: true },
-      ],
+      trigger: daily ? "schedule" : "manual",
+      schedule: { frequency: daily ? "daily" : "once", time: "09:00", timezone: "UTC", enabled: daily },
+      steps,
       notes: connections?.slack === "connected" ? "Slack is connected." : "Connect Slack under Connections first.",
     };
   }
