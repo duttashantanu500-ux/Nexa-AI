@@ -29,7 +29,6 @@ export async function GET(
   }
   return NextResponse.json(
     { ok: true, runs },
-    { headers: { "Cache-Control": "no-store" }
-    );
+    { headers: { "Cache-Control": "no-store" } }
   );
 }
