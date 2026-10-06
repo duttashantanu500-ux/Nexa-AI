@@ -4,15 +4,61 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
-import { loadOperatorState } from "@/lib/operatorStore";
+import { loadOperatorState, saveOperatorState } from "@/lib/operatorStore";
+import { fetchServerAgents } from "@/lib/serverAgentClient";
 import { CONNECTOR_REGISTRY } from "@/lib/connectors/registry";
-import { Agent, AgentRun } from "@/types";
+import { Agent, AgentRun, defaultPermissions } from "@/types";
 
 function greeting() {
   const h = new Date().getHours();
   if (h < 12) return "Good morning";
   if (h < 17) return "Good afternoon";
   return "Good evening";
+}
+
+function mergeAgents(local: Agent[], remote: any[], userId: string): Agent[] {
+  const byId = new Map<string, Agent>();
+  for (const a of local) {
+    if (!a?.id) continue;
+    byId.set(a.id, { ...a, userId: a.userId || userId });
+  }
+  for (const r of remote) {
+    if (!r?.id) continue;
+    const existing = byId.get(r.id);
+    if (existing) {
+      byId.set(r.id, {
+        ...existing,
+        name: r.name || existing.name,
+        description: r.description || existing.description,
+        purpose: r.purpose || existing.purpose || r.description || "",
+        status: r.status || existing.status,
+        steps: Array.isArray(r.steps) && r.steps.length ? r.steps : existing.steps,
+        userId,
+      });
+    } else {
+      byId.set(r.id, {
+        id: r.id,
+        userId,
+        name: r.name || "AI Employee",
+        description: r.description || "",
+        purpose: r.purpose || r.description || "",
+        instructions: "",
+        expectedOutput: "",
+        constraints: "",
+        status: r.status || "active",
+        version: r.version || 1,
+        tools: [],
+        steps: Array.isArray(r.steps) ? r.steps : [],
+        permissions: defaultPermissions(),
+        schedule: r.schedule || { frequency: "once", enabled: false },
+        lastRunAt: null,
+        lastRunStatus: null,
+        createdAt: r.createdAt || new Date().toISOString(),
+        updatedAt: r.updatedAt || new Date().toISOString(),
+      } as Agent);
+    }
+  }
+  return Array.from(byId.values()).filter((a) => String(a.status) !== "archived");
 }
 
 export default function HomePage() {
@@ -23,15 +69,46 @@ export default function HomePage() {
   const [runs, setRuns] = useState<AgentRun[]>([]);
 
   useEffect(() => {
-    const s = loadOperatorState();
-    if (!s.user?.onboardingCompleted) {
-      router.replace("/signup");
-      return;
-    }
-    setName(s.user.name || "");
-    setAgents(s.agents.filter((a) => a.userId === s.user!.id));
-    setRuns(s.agentRuns.filter((r) => r.userId === s.user!.id).slice(0, 8));
-    setReady(true);
+    let cancelled = false;
+    const run = async () => {
+      const s = loadOperatorState();
+      if (!s.user?.onboardingCompleted) {
+        router.replace("/signup");
+        return;
+      }
+      const uid = s.user.id || "";
+      setName(s.user.name || "");
+
+      let localAgents = (s.agents || []).filter((a) => {
+        if (String(a.status) === "archived") return false;
+        if (!a.userId || !uid) return true;
+        return a.userId === uid;
+      });
+      if (localAgents.length === 0 && (s.agents || []).length > 0) {
+        localAgents = (s.agents || []).filter((a) => String(a.status) !== "archived");
+      }
+      if (!cancelled) {
+        setAgents(localAgents);
+        setRuns((s.agentRuns || []).filter((r) => !uid || r.userId === uid).slice(0, 8));
+        setReady(true);
+      }
+
+      try {
+        const remote = await fetchServerAgents();
+        if (cancelled || !remote.ok) return;
+        const merged = mergeAgents(localAgents, remote.agents || [], uid);
+        const st = loadOperatorState();
+        st.agents = merged;
+        saveOperatorState(st);
+        if (!cancelled) setAgents(merged);
+      } catch {
+        /* keep local */
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   const active = agents.filter((a) => a.status === "active" || a.status === "ready");
@@ -77,9 +154,7 @@ export default function HomePage() {
         </div>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-            Services
-          </h2>
+          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Services</h2>
           <div className="grid gap-2 sm:grid-cols-2">
             {priority.map((c) => (
               <Link
@@ -130,43 +205,15 @@ export default function HomePage() {
           )}
         </section>
 
-        {runs.length > 0 && (
+        {failedRuns.length > 0 && (
           <section className="space-y-2">
             <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              Recent work
-              {failedRuns.length > 0 && (
-                <span className="ml-2 text-xs font-normal text-red-600">
-                  {failedRuns.length} failed
-                </span>
-              )}
+              Needs attention
             </h2>
-            <ul className="divide-y divide-zinc-100 rounded-xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
-              {runs.map((r) => {
-                const agent = agents.find((a) => a.id === r.agentId);
-                return (
-                  <li key={r.id} className="px-4 py-3 text-sm">
-                    <div className="flex justify-between gap-2">
-                      <Link
-                        href={`/agents/${r.agentId}`}
-                        className="font-medium hover:text-indigo-600"
-                      >
-                        {agent?.name || "AI Employee"}
-                      </Link>
-                      <span
-                        className={`text-xs capitalize ${
-                          r.status === "failed" ? "text-red-600" : "text-zinc-500"
-                        }`}
-                      >
-                        {r.status}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-xs text-zinc-500">
-                      {new Date(r.startedAt).toLocaleString()}
-                    </p>
-                  </li>
-                );
-              })}
-            </ul>
+            <p className="text-xs text-zinc-500">
+              {failedRuns.length} recent run{failedRuns.length === 1 ? "" : "s"} failed. Open the
+              employee to review work history.
+            </p>
           </section>
         )}
       </div>
