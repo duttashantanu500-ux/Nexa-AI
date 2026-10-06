@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { bufferVerifyToken } from "@/lib/connectors/providers/buffer";
 import { bufferOAuthConfigured, resolveBufferToken } from "@/lib/connectors/bufferAuth";
 
 function json(body: Record<string, unknown>, status = 200) {
@@ -36,42 +35,24 @@ export async function GET(req: NextRequest) {
     return json({
       configured: true,
       status: "available",
-      message: "Connect your Buffer account to use it with your AI employees.",
+      message: "Connect Buffer to use it with your AI employees.",
       connectPath: `/api/oauth/buffer/start?userId=${encodeURIComponent(userId)}`,
       workspaceName: null,
       canDisconnect: false,
     });
   }
 
-  let status: "connected" | "error" = "connected";
-  let message = "Your Buffer account is connected";
-  try {
-    const verifyPromise = bufferVerifyToken(resolved.token);
-    const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 2000));
-    const raced = await Promise.race([verifyPromise, timeout]);
-    if (
-      raced !== "timeout" &&
-      raced &&
-      typeof raced === "object" &&
-      "ok" in raced &&
-      !(raced as { ok: boolean }).ok
-    ) {
-      status = "error";
-      message = "Your Buffer connection needs to be refreshed.";
-    }
-  } catch {
-    /* keep connected */
-  }
+  const workspace =
+    (resolved.meta as { workspaceName?: string; teamName?: string })?.workspaceName ||
+    (resolved.meta as { teamName?: string })?.teamName ||
+    null;
 
   return json({
     configured: true,
-    status,
-    message,
-    connectPath:
-      status === "error"
-        ? `/api/oauth/buffer/start?userId=${encodeURIComponent(userId)}`
-        : null,
-    workspaceName: resolved.meta.workspaceName || null,
+    status: "connected",
+    message: `Your Buffer account is connected`,
+    connectPath: null,
+    workspaceName: workspace,
     canDisconnect: true,
     connectedAt: resolved.meta.connectedAt,
     lastVerifiedAt: resolved.meta.lastVerifiedAt,

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { slackVerifyToken } from "@/lib/connectors/providers/slack";
 import { slackOAuthConfigured, resolveSlackToken } from "@/lib/connectors/slackAuth";
 
 function json(body: Record<string, unknown>, status = 200) {
@@ -25,7 +24,7 @@ export async function GET(req: NextRequest) {
     return json({
       configured: true,
       status: "available",
-      message: "Sign in, then connect your Slack workspace.",
+      message: "Sign in, then connect your Slack account.",
       connectPath: null,
       canDisconnect: false,
     });
@@ -36,43 +35,24 @@ export async function GET(req: NextRequest) {
     return json({
       configured: true,
       status: "available",
-      message: "Connect your Slack workspace to use it with your AI employees.",
+      message: "Connect Slack to use it with your AI employees.",
       connectPath: `/api/oauth/slack/start?userId=${encodeURIComponent(userId)}`,
       workspaceName: null,
       canDisconnect: false,
     });
   }
 
-  // Token present → Connected immediately; optional 2s verify
-  let status: "connected" | "error" = "connected";
-  let message = "Your Slack workspace is connected";
-  try {
-    const verifyPromise = slackVerifyToken(resolved.token);
-    const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 2000));
-    const raced = await Promise.race([verifyPromise, timeout]);
-    if (
-      raced !== "timeout" &&
-      raced &&
-      typeof raced === "object" &&
-      "ok" in raced &&
-      !(raced as { ok: boolean }).ok
-    ) {
-      status = "error";
-      message = "Your Slack connection needs to be refreshed.";
-    }
-  } catch {
-    /* keep connected */
-  }
+  const workspace =
+    (resolved.meta as { workspaceName?: string; teamName?: string })?.workspaceName ||
+    (resolved.meta as { teamName?: string })?.teamName ||
+    null;
 
   return json({
     configured: true,
-    status,
-    message,
-    connectPath:
-      status === "error"
-        ? `/api/oauth/slack/start?userId=${encodeURIComponent(userId)}`
-        : null,
-    workspaceName: resolved.meta.workspaceName || null,
+    status: "connected",
+    message: `Your Slack account is connected`,
+    connectPath: null,
+    workspaceName: workspace,
     canDisconnect: true,
     connectedAt: resolved.meta.connectedAt,
     lastVerifiedAt: resolved.meta.lastVerifiedAt,

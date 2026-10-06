@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { hubspotVerifyToken } from "@/lib/connectors/providers/hubspot";
-import {
-  hubspotOAuthConfigured,
-  resolveHubspotToken,
-} from "@/lib/connectors/hubspotAuth";
+import { hubspotOAuthConfigured, resolveHubspotToken } from "@/lib/connectors/hubspotAuth";
 
 function json(body: Record<string, unknown>, status = 200) {
   return NextResponse.json(body, {
@@ -39,42 +35,24 @@ export async function GET(req: NextRequest) {
     return json({
       configured: true,
       status: "available",
-      message: "Connect your HubSpot account to use it with your AI employees.",
+      message: "Connect HubSpot to use it with your AI employees.",
       connectPath: `/api/oauth/hubspot/start?userId=${encodeURIComponent(userId)}`,
       workspaceName: null,
       canDisconnect: false,
     });
   }
 
-  let status: "connected" | "error" = "connected";
-  let message = "Your HubSpot account is connected";
-  try {
-    const verifyPromise = hubspotVerifyToken(resolved.token);
-    const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 2000));
-    const raced = await Promise.race([verifyPromise, timeout]);
-    if (
-      raced !== "timeout" &&
-      raced &&
-      typeof raced === "object" &&
-      "ok" in raced &&
-      !(raced as { ok: boolean }).ok
-    ) {
-      status = "error";
-      message = "Your HubSpot connection needs to be refreshed.";
-    }
-  } catch {
-    /* keep connected */
-  }
+  const workspace =
+    (resolved.meta as { workspaceName?: string; teamName?: string })?.workspaceName ||
+    (resolved.meta as { teamName?: string })?.teamName ||
+    null;
 
   return json({
     configured: true,
-    status,
-    message,
-    connectPath:
-      status === "error"
-        ? `/api/oauth/hubspot/start?userId=${encodeURIComponent(userId)}`
-        : null,
-    workspaceName: resolved.meta.workspaceName || null,
+    status: "connected",
+    message: `Your HubSpot account is connected`,
+    connectPath: null,
+    workspaceName: workspace,
     canDisconnect: true,
     connectedAt: resolved.meta.connectedAt,
     lastVerifiedAt: resolved.meta.lastVerifiedAt,
