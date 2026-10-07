@@ -1,38 +1,19 @@
-import { ImageResponse } from "next/og";
+import { NextResponse } from "next/server";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
+export const dynamic = "force-static";
 export const size = { width: 32, height: 32 };
 export const contentType = "image/png";
 
-/** Browser tab favicon — official Nexa green N */
+const PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAFKUlEQVR4nO2X2Y8UVRSHv3Oruqu3qWYZFHQUd406qGMUUHHfYozR4G6MD2rcYvwvjA+++GBcSeDFYDRE3A0YFhU30NGZiILioBJkmJ6hu7p7umu5x4dedBgGTXzwQSqp3KrUqTrf+d1zzr0lqqr8h4f5L50fATgC8I8BrE4d/85WAW2P/xpAASOAxq3xcLbashViRCx/Yw6Ae7iHVsGIsv7bCd7d4bL4eMsdF/Zg1ZkGY1UxIgyPlHluExxXtDxxfR7PSyOAzEAzowK2Hc3IvhqrvvYoRT6vDmf5YPAARiCxUyMXEcbLNZ56T9ldLfL+j0VWbqpgRA87FYefAk1Y/XWCuHlMMomf83jlG49de8s4phV1B1ZIeGlTg/GkSFpC5uSFt7/LsX13GSNg7aFdHBKgE/3m7wOGS3lcJ+a2MwN63YC6FHhxi9JoNhGExCqOgY3DAZt39+CI5fazxznRr1Anx4qPLDaJmCkhpgG05IRKrcGaYUEdl/7eKjcM9HL3gOImk/wU+Kz6uIJIgogwdqDGys8c1KTp7x3nzkt7uXUgwdMGQ2NF3tlWmTZtMwMAgrJmsE4p8fFNlbsGUlg1DJxU4IaTq6hV1u/q4ePvKhiJeX5jk1LUw1yvyuNXZ7HqsvQMn2ULA2J1eGVritKBOsa0ApwRoCP9jj0BW37NYlCuObHJ/Dk5VMGq4a6lRc4oHiCUDKsHU6xc/ztf7fPBhtx7fsiCuQWsVRCX+y/P0psK2B/6vLwhQEimJeQ0BeI45NXBiNBkOamnzE3n9WBVcNqWbirNw8tSFLTMaLPAO7uOxuKypK/Gtef6JBZcR0gszJ9b4M7zQ8TGbB4psm1HJyF1OkAn+g3bA36uFvA9qIWGSr3VgDpNJrFK31E+Dy4OiZsNPC/F7HSVR6/wUHG7/aFVJXDTBT7986o0yLDiI0sYNkGkOxXmr4lXrjb4YFeKbMalGYaMRj4rtjRQG0+Trpm4KAYRmIwMv5VCBJhS9QqOm+KBSw1ZmWRHeTZrPm2rMAWgnXhrh+pUtEAxNcm1x4+TkZhvx33WbpvACMRWcYzw22jAqq1pPC9Ns14jJMczG4SJSg35a3SmlflnLixw3Wk1LIbXv8mwd3/QVch0pP9hT8DW0SwGy8V9EcsXz+O83jJqHN7amWfnnjKuEZIk4uVPQmrkmZUKeOyiCjmps69Z5Nl1VUQjEm05TtoLUmwN91ycZ0GmQin2WbEpBJIWpAjEccTa7QmRyXJsNuCq03Mk6nDvkjzHeRPEJscLWxLCZo31wwFDJZ+UhNx+TsRlixZw66I62IjPf5/LG19UcI3FMYojimta55xiloeWJXgS8cmveYZG6hgBV4Avdzf4qerjSoNbznLIeB6xVXLZLPcviXjywypjOpun142xt5bDOikumV/iyv5ZRAncvHg2P4yW2fjLHF4byjMyEeClXQTBWou1ilql0nApZJTxWprv9zbpP6G9Gs7KGTLUuKhPObuvB6u05LZwyoIelp81zqpBj6F4Hs0E5rll7luaQXHai43DI1dk2Ll6jF8me3lze6blFBBttWtty51yIOdUGVjYWoilsy2v1hsUsmmQqa3BKhgSXv+izOD+DAU3ZvkiOPUYv1s9nXFfqcprXzYpNdKgijGG5mSEl0mDQBJbjCbceC4MnDKr9Z62Cf7J5gFN2oDSddp91L1XoNP0pX19cL8zXfuuAgd/8OCjUy2dEjuUbWcbJh3f7ZvuO/y5Tes0LDnyZ3QE4H8P8AcHTIWGBatO7gAAAABJRU5ErkJggg==";
+
 export default function Icon() {
-  return new ImageResponse(
-    (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#FAFAFA",
-          borderRadius: 7,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 22,
-            fontWeight: 800,
-            color: "#09D59A",
-            fontFamily: "system-ui, -apple-system, sans-serif",
-            letterSpacing: "-0.04em",
-            lineHeight: 1,
-          }}
-        >
-          N
-        </div>
-      </div>
-    ),
-    { ...size }
-  );
+  const buf = Buffer.from(PNG_BASE64, "base64");
+  return new NextResponse(buf, {
+    headers: {
+      "Content-Type": "image/png",
+      "Cache-Control": "public, max-age=86400, immutable",
+    },
+  });
 }
