@@ -4,7 +4,7 @@ export const runtime = "edge";
 export const size = { width: 180, height: 180 };
 export const contentType = "image/png";
 
-/** Home-screen / browser dropdown icon */
+/** Apple / home-screen icon — Nexa mark on clean white */
 export default function AppleIcon() {
   return new ImageResponse(
     (
@@ -15,22 +15,25 @@ export default function AppleIcon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#FAFAFA",
+          background: "#FFFFFF",
           borderRadius: 36,
         }}
       >
-        <div
-          style={{
-            fontSize: 110,
-            fontWeight: 800,
-            color: "#09D59A",
-            fontFamily: "system-ui, -apple-system, sans-serif",
-            letterSpacing: "-0.04em",
-            lineHeight: 1,
-          }}
+        <svg
+          width="120"
+          height="80"
+          viewBox="0 0 120 80"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
         >
-          N
-        </div>
+          <path
+            d="M8 68 L8 32 L36 68 L36 12 L68 68 L68 28 C68 28 82 12 100 28 C112 40 110 62 92 68 C76 74 68 56 68 56"
+            stroke="#5B9CF5"
+            strokeWidth="12"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       </div>
     ),
     { ...size }
