@@ -9,7 +9,8 @@ type Props = {
 };
 
 /**
- * Official Nexa mark — green N (matches browser favicon / brand assets).
+ * Official Nexa mark — exact brand logo (blue) on clean white.
+ * Uses /icon route which serves the official asset.
  */
 export function NexaLogo({
   size = 28,
@@ -21,29 +22,19 @@ export function NexaLogo({
   const mark = (
     <span className={`inline-flex items-center gap-2 ${className}`}>
       <span
-        className="inline-flex shrink-0 items-center justify-center rounded-lg bg-[#FAFAFA] ring-1 ring-zinc-200/80 dark:bg-zinc-900 dark:ring-zinc-700"
+        className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white ring-1 ring-zinc-200/80 dark:bg-zinc-900 dark:ring-zinc-700"
         style={{ width: size, height: size }}
         aria-hidden
       >
-        <svg
-          width={Math.round(size * 0.72)}
-          height={Math.round(size * 0.72)}
-          viewBox="0 0 32 32"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <text
-            x="16"
-            y="23"
-            textAnchor="middle"
-            fontFamily="system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
-            fontSize="20"
-            fontWeight="800"
-            fill="#09D59A"
-          >
-            N
-          </text>
-        </svg>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/icon"
+          alt=""
+          width={size}
+          height={size}
+          className="h-full w-full object-contain p-[8%]"
+          draggable={false}
+        />
       </span>
       {showWordmark && (
         <span
