@@ -4,25 +4,31 @@
   "description": "Connect your tools. Build agents. Let them handle the work.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#FAFAFA",
-  "theme_color": "#09D59A",
+  "background_color": "#FFFFFF",
+  "theme_color": "#5B9CF5",
   "icons": [
     {
-      "src": "/icon",
-      "sizes": "32x32",
+      "src": "/icon-192.png",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/apple-icon",
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
       "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/favicon.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon",
       "purpose": "any"
     }
   ]
