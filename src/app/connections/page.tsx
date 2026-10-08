@@ -16,6 +16,25 @@ import {
 } from "@/lib/connectors/registry";
 
 const COMFY_KEY = "nexa_comfy_base_url";
+const STATUS_CACHE_KEY = "nexa_conn_status_v1";
+
+function readStatusCache(): Partial<Record<string, ConnectorUiStatus>> {
+  try {
+    const raw = sessionStorage.getItem(STATUS_CACHE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Partial<Record<string, ConnectorUiStatus>>;
+  } catch {
+    return {};
+  }
+}
+
+function writeStatusCache(map: Record<string, ConnectorUiStatus>) {
+  try {
+    sessionStorage.setItem(STATUS_CACHE_KEY, JSON.stringify(map));
+  } catch {
+    /* */
+  }
+}
 
 export default function ConnectionsPage() {
   return (
@@ -46,6 +65,16 @@ function ConnectionsInner() {
   const [statusLoaded, setStatusLoaded] = useState(false);
 
   useEffect(() => {
+    // Seed from session cache so we never flash "Checking…" on revisit
+    const cached = readStatusCache();
+    if (cached.notion) setNotionStatus(cached.notion);
+    if (cached.slack) setSlackStatus(cached.slack);
+    if (cached.buffer) setBufferStatus(cached.buffer);
+    if (cached.ideogram) setIdeogramStatus(cached.ideogram);
+    if (cached.mcp) setMcpStatus(cached.mcp);
+    if (cached.hubspot) setHubspotStatus(cached.hubspot);
+    if (Object.keys(cached).length > 0) setStatusLoaded(true);
+
     const s = loadOperatorState();
     // Prefer real session user id so status matches OAuth token storage
     const uid = (s.user?.id || getStableUserId() || "").trim();
@@ -67,7 +96,6 @@ function ConnectionsInner() {
     if (connected) {
       setBanner("Connected successfully.");
       // Optimistic: show Connected immediately for the returned connector
-      // Only when the query names the tool (detail pages use connected=1)
       if (connected.includes("notion")) setNotionStatus("connected");
       if (connected.includes("slack")) setSlackStatus("connected");
       if (connected.includes("buffer")) setBufferStatus("connected");
@@ -81,42 +109,32 @@ function ConnectionsInner() {
     }
 
     const load = async () => {
-      try {
-        const health = await fetch("/api/connections/storage-health");
-        const h = await health.json();
-        if (h?.warning) setStorageWarning(String(h.warning));
-      } catch {
-        /* */
+      if (!uid) {
+        setStatusLoaded(true);
+        return;
       }
-      if (!uid) return;
+      // Parallel: storage health is advisory only; status is the critical path
+      const healthP = fetch("/api/connections/storage-health")
+        .then((r) => r.json())
+        .then((h) => {
+          if (h?.warning) setStorageWarning(String(h.warning));
+        })
+        .catch(() => {});
       try {
-        const [n, sl, b, ig, m, hs] = await Promise.all([
-          fetch(`/api/connections/notion/status?userId=${encodeURIComponent(uid)}`, {
-            cache: "no-store",
-          }).then((r) => r.json()),
-          fetch(`/api/connections/slack/status?userId=${encodeURIComponent(uid)}`, {
-            cache: "no-store",
-          }).then((r) => r.json()),
-          fetch(`/api/connections/buffer/status?userId=${encodeURIComponent(uid)}`, {
-            cache: "no-store",
-          }).then((r) => r.json()),
-          fetch(`/api/connections/ideogram/status?userId=${encodeURIComponent(uid)}`, {
-            cache: "no-store",
-          }).then((r) => r.json()),
-          fetch(`/api/connections/mcp/status?userId=${encodeURIComponent(uid)}`, {
-            cache: "no-store",
-          }).then((r) => r.json()),
-          fetch(`/api/connections/hubspot/status?userId=${encodeURIComponent(uid)}`, {
-            cache: "no-store",
-          }).then((r) => r.json()),
-        ]);
+        // Single batch call — persisted tokens only, one DB query, no remote health
+        const batchRes = await fetch(
+          `/api/connections/status?userId=${encodeURIComponent(uid)}`,
+          { cache: "no-store" }
+        );
+        const batch = await batchRes.json().catch(() => ({}));
+        const st = (batch?.statuses || {}) as Record<string, { status?: string }>;
         const statuses = {
-          notion: (n.status as ConnectorUiStatus) || "available",
-          slack: (sl.status as ConnectorUiStatus) || "available",
-          buffer: (b.status as ConnectorUiStatus) || "available",
-          ideogram: (ig.status as ConnectorUiStatus) || "available",
-          mcp: (m.status as ConnectorUiStatus) || "available",
-          hubspot: (hs.status as ConnectorUiStatus) || "available",
+          notion: (st.notion?.status as ConnectorUiStatus) || "available",
+          slack: (st.slack?.status as ConnectorUiStatus) || "available",
+          buffer: (st.buffer?.status as ConnectorUiStatus) || "available",
+          ideogram: (st.ideogram?.status as ConnectorUiStatus) || "available",
+          mcp: (st.mcp?.status as ConnectorUiStatus) || "available",
+          hubspot: (st.hubspot?.status as ConnectorUiStatus) || "available",
         };
         setNotionStatus(statuses.notion);
         setSlackStatus(statuses.slack);
@@ -124,6 +142,7 @@ function ConnectionsInner() {
         setIdeogramStatus(statuses.ideogram);
         setMcpStatus(statuses.mcp);
         setHubspotStatus(statuses.hubspot);
+        writeStatusCache(statuses);
         // Prefer truth: if any live status is connected, never leave an error banner
         if (Object.values(statuses).some((s) => s === "connected") && connected) {
           setBanner("Connected successfully.");
@@ -138,6 +157,7 @@ function ConnectionsInner() {
       } finally {
         setStatusLoaded(true);
       }
+      void healthP;
     };
     void load();
 
@@ -163,8 +183,8 @@ function ConnectionsInner() {
       if (s === "error") return "error";
       if (s === "unavailable") return "unavailable";
       if (s === "available") return "available";
-      // Not loaded yet — do not flash "Available"
-      return statusLoaded ? "available" : "loading";
+      // Prefer last-known / available over long "Checking…"
+      return statusLoaded ? "available" : "available";
     }
     if (c.id === "local_comfyui") return comfyOk ? "connected" : "available";
     if (c.id === "local_data" || c.id === "vault") return "connected";
@@ -208,7 +228,7 @@ function ConnectionsInner() {
         <div>
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Connections</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Connect tools your AI employees can use. Status comes from live checks — not placeholders.
+            Connect tools your AI employees can use. Status reflects your saved connections.
           </p>
         </div>
 
