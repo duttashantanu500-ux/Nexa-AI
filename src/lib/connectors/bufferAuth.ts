@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "crypto";
 import {
   getConnection,
   saveConnection,
+  deleteConnection,
   type StoredConnection,
 } from "./tokenStore";
 
@@ -108,6 +109,11 @@ async function refreshAccessToken(
   }
 }
 
+/**
+ * Resolve a usable Buffer access token for this user.
+ * On hard auth failure (probe 401 + refresh fail, or missing token), clears the
+ * stored connection so batch status stops showing "Connected" for a dead token.
+ */
 export async function resolveBufferToken(
   userId: string
 ): Promise<{ token: string; meta: StoredConnection } | null> {
@@ -116,19 +122,36 @@ export async function resolveBufferToken(
   if (!conn?.accessToken) return null;
 
   // Lightweight probe; on auth failure try refresh once
-  const probe = await fetch("https://api.buffer.com", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${conn.accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ query: "{ account { id } }" }),
-  });
-  if (probe.status === 401) {
-    const refreshed = await refreshAccessToken(conn);
-    if (!refreshed?.accessToken) return null;
-    conn = refreshed;
+  let probeStatus = 0;
+  try {
+    const probe = await fetch("https://api.buffer.com", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${conn.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query: "{ account { id } }" }),
+    });
+    probeStatus = probe.status;
+  } catch {
+    // Network blip — do not wipe token; let the caller retry later
+    return { token: conn.accessToken, meta: conn };
   }
 
+  if (probeStatus === 401) {
+    const refreshed = await refreshAccessToken(conn);
+    if (refreshed?.accessToken) {
+      return { token: refreshed.accessToken, meta: refreshed };
+    }
+    // Dead token — remove so Connections UI / usage counts stay truthful
+    try {
+      await deleteConnection(userId, "buffer");
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  // Non-401 failures (rate limit, 5xx): keep token, return it for best-effort use
   return { token: conn.accessToken, meta: conn };
 }

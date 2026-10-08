@@ -21,7 +21,8 @@ export async function POST(req: NextRequest) {
     if (!resolved?.token) {
       return NextResponse.json({
         ok: false,
-        message: "Connect your Buffer account under Connections first.",
+        message:
+          "Buffer is not connected or the saved login expired. Connect Buffer under Connections first.",
       });
     }
 
