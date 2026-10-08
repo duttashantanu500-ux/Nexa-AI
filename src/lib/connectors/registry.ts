@@ -280,6 +280,17 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         ...impl(),
       },
       {
+        id: "hubspot.get_contact",
+        connectorId: "hubspot",
+        name: "Get contact",
+        description: "Get a contact by ID.",
+        readOnly: true,
+        requiresApproval: false,
+        riskTier: "low",
+        fields: [{ key: "contactId", label: "Contact ID", type: "text", required: true }],
+        ...impl(),
+      },
+      {
         id: "hubspot.create_contact",
         connectorId: "hubspot",
         name: "Create contact",
@@ -291,6 +302,60 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
           { key: "email", label: "Email", type: "text", required: true },
           { key: "firstname", label: "First name", type: "text", required: false },
           { key: "lastname", label: "Last name", type: "text", required: false },
+          { key: "phone", label: "Phone", type: "text", required: false },
+          { key: "company", label: "Company", type: "text", required: false },
+        ],
+        ...impl(),
+      },
+      {
+        id: "hubspot.update_contact",
+        connectorId: "hubspot",
+        name: "Update contact",
+        description: "Update an existing contact.",
+        readOnly: false,
+        requiresApproval: true,
+        riskTier: "medium",
+        fields: [
+          { key: "contactId", label: "Contact ID", type: "text", required: true },
+          { key: "email", label: "Email", type: "text", required: false },
+          { key: "firstname", label: "First name", type: "text", required: false },
+          { key: "lastname", label: "Last name", type: "text", required: false },
+        ],
+        ...impl(),
+      },
+      {
+        id: "hubspot.list_companies",
+        connectorId: "hubspot",
+        name: "List companies",
+        description: "List recent companies in HubSpot.",
+        readOnly: true,
+        requiresApproval: false,
+        riskTier: "low",
+        fields: [{ key: "limit", label: "Limit", type: "number", required: false, placeholder: "20" }],
+        ...impl(),
+      },
+      {
+        id: "hubspot.search_companies",
+        connectorId: "hubspot",
+        name: "Search companies",
+        description: "Search companies by name or domain.",
+        readOnly: true,
+        requiresApproval: false,
+        riskTier: "low",
+        fields: [{ key: "query", label: "Search", type: "text", required: true }],
+        ...impl(),
+      },
+      {
+        id: "hubspot.create_company",
+        connectorId: "hubspot",
+        name: "Create company",
+        description: "Create a new company in HubSpot.",
+        readOnly: false,
+        requiresApproval: true,
+        riskTier: "medium",
+        fields: [
+          { key: "name", label: "Name", type: "text", required: true },
+          { key: "domain", label: "Domain", type: "text", required: false },
         ],
         ...impl(),
       },
@@ -306,6 +371,17 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         ...impl(),
       },
       {
+        id: "hubspot.search_deals",
+        connectorId: "hubspot",
+        name: "Search deals",
+        description: "Search deals by name.",
+        readOnly: true,
+        requiresApproval: false,
+        riskTier: "low",
+        fields: [{ key: "query", label: "Search", type: "text", required: true }],
+        ...impl(),
+      },
+      {
         id: "hubspot.create_deal",
         connectorId: "hubspot",
         name: "Create deal",
@@ -315,6 +391,22 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         riskTier: "medium",
         fields: [
           { key: "dealname", label: "Deal name", type: "text", required: true },
+          { key: "amount", label: "Amount", type: "text", required: false },
+          { key: "dealstage", label: "Stage", type: "text", required: false },
+        ],
+        ...impl(),
+      },
+      {
+        id: "hubspot.update_deal",
+        connectorId: "hubspot",
+        name: "Update deal",
+        description: "Update an existing deal.",
+        readOnly: false,
+        requiresApproval: true,
+        riskTier: "medium",
+        fields: [
+          { key: "dealId", label: "Deal ID", type: "text", required: true },
+          { key: "dealname", label: "Deal name", type: "text", required: false },
           { key: "amount", label: "Amount", type: "text", required: false },
         ],
         ...impl(),
@@ -407,6 +499,42 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         ...impl(),
       },
       {
+        id: "local_data.filter",
+        connectorId: "local_data",
+        name: "Filter list",
+        description: "Filter list items by keyword.",
+        readOnly: true,
+        requiresApproval: false,
+        riskTier: "low",
+        fields: [
+          { key: "keyword", label: "Keyword", type: "text", required: true },
+          { key: "mode", label: "Mode", type: "select", required: false, options: [{ value: "include", label: "Include" }, { value: "exclude", label: "Exclude" }] },
+        ],
+        ...impl(),
+      },
+      {
+        id: "local_data.limit",
+        connectorId: "local_data",
+        name: "Limit list",
+        description: "Limit list to N items.",
+        readOnly: true,
+        requiresApproval: false,
+        riskTier: "low",
+        fields: [{ key: "count", label: "Count", type: "number", required: false, placeholder: "10" }],
+        ...impl(),
+      },
+      {
+        id: "local_data.note",
+        connectorId: "local_data",
+        name: "Add note",
+        description: "Add a note to the workflow context.",
+        readOnly: true,
+        requiresApproval: false,
+        riskTier: "low",
+        fields: [{ key: "note", label: "Note", type: "textarea", required: true }],
+        ...impl(),
+      },
+      {
         id: "local_data.report",
         connectorId: "local_data",
         name: "Report",
@@ -453,12 +581,19 @@ export function getConnector(id: string): ConnectorDefinition | undefined {
   return CONNECTOR_REGISTRY.find((c) => c.id === id);
 }
 
-export function getAction(actionId: string): (ConnectorAction & { connectionId?: string }) | undefined {
+export function getAction(id: string): ConnectorAction | undefined {
   for (const c of CONNECTOR_REGISTRY) {
-    const a = c.actions.find((x) => x.id === actionId);
-    if (a) return { ...a, connectionId: c.id };
+    const a = c.actions.find((x) => x.id === id);
+    if (a) return a;
   }
   return undefined;
+}
+
+/** Actions safe to add to a runnable agent (implemented + available + connector executable). */
+export function listAvailableActions(): ConnectorAction[] {
+  return CONNECTOR_REGISTRY.flatMap((c) =>
+    c.actions.filter((a) => a.implemented && a.available && c.executable)
+  );
 }
 
 export const WORKFLOW_STARTERS: { id: string; name: string; description: string; actionIds: string[] }[] =
