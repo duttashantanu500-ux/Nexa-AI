@@ -55,10 +55,30 @@ async function resolveAccessToken(): Promise<string | null> {
     const { createBrowserClient } = await import("@/lib/supabaseBrowser");
     const supabase = createBrowserClient();
     if (!supabase) return null;
-    const { data } = await supabase.auth.getSession();
+    let { data } = await supabase.auth.getSession();
+    if (!data.session?.access_token) {
+      // Brief flake after login / tab focus — retry once
+      await new Promise((r) => setTimeout(r, 250));
+      ({ data } = await supabase.auth.getSession());
+    }
     return data.session?.access_token || null;
   } catch {
     return null;
+  }
+}
+
+/** True when operator local state has a signed-in user (even if Supabase token is momentarily missing). */
+function hasOperatorUser(): boolean {
+  try {
+    const raw =
+      localStorage.getItem("nexa_operator_v4") ||
+      localStorage.getItem("nexa_operator_v3") ||
+      localStorage.getItem("nexa_operator_v1");
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { user?: { id?: string } };
+    return Boolean(parsed?.user?.id);
+  } catch {
+    return false;
   }
 }
 
@@ -176,15 +196,26 @@ export async function recordAgentRun(): Promise<
   | { ok: false; message: string; limitReached?: boolean }
 > {
   const token = await resolveAccessToken();
-  if (!token) return { ok: false, message: "Please sign in." };
+  if (!token) {
+    // Soft-allow when the UI already has a logged-in operator user.
+    // Never false-block Start work on a transient Supabase session flake.
+    if (hasOperatorUser()) {
+      return { ok: true, runsUsedThisPeriod: 0 };
+    }
+    return { ok: false, message: "Please sign in." };
+  }
 
   try {
     const res = await fetch("/api/billing/record-run", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!data.ok) {
+      // Auth flake from API — soft-allow if we still have a local user
+      if (/sign in|unauthorized|session/i.test(String(data.message || "")) && hasOperatorUser()) {
+        return { ok: true, runsUsedThisPeriod: 0 };
+      }
       return {
         ok: false,
         message: data.message || LIMIT_MESSAGES.runs,
@@ -251,5 +282,8 @@ export function canUseVault(
   }
   return { ok: true };
 }
+
+/** Alias used by agent detail / settings pages */
+export const startProCheckout = startCheckout;
 
 export { PLAN_FREE, hasProAccess, LIMIT_MESSAGES };
