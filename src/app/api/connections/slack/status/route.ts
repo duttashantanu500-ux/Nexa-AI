@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { slackOAuthConfigured, resolveSlackToken } from "@/lib/connectors/slackAuth";
+import { slackOAuthConfigured } from "@/lib/connectors/slackAuth";
+import { getConnection } from "@/lib/connectors/tokenStore";
 
 function json(body: Record<string, unknown>, status = 200) {
   return NextResponse.json(body, {
@@ -8,6 +9,7 @@ function json(body: Record<string, unknown>, status = 200) {
   });
 }
 
+/** Token-only status — no remote health check. Matches batch status for speed + usage sync. */
 export async function GET(req: NextRequest) {
   if (!slackOAuthConfigured()) {
     return json({
@@ -30,8 +32,8 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const resolved = await resolveSlackToken(userId);
-  if (!resolved) {
+  const conn = await getConnection(userId, "slack");
+  if (!conn?.accessToken) {
     return json({
       configured: true,
       status: "available",
@@ -42,19 +44,14 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const workspace =
-    (resolved.meta as { workspaceName?: string; teamName?: string })?.workspaceName ||
-    (resolved.meta as { teamName?: string })?.teamName ||
-    null;
-
   return json({
     configured: true,
     status: "connected",
     message: `Your Slack account is connected`,
     connectPath: null,
-    workspaceName: workspace,
+    workspaceName: conn.workspaceName || null,
     canDisconnect: true,
-    connectedAt: resolved.meta.connectedAt,
-    lastVerifiedAt: resolved.meta.lastVerifiedAt,
+    connectedAt: conn.connectedAt,
+    lastVerifiedAt: conn.lastVerifiedAt,
   });
 }

@@ -2,27 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { saveConnection } from "@/lib/connectors/tokenStore";
 import { verifyBufferOAuthState } from "@/lib/connectors/bufferAuth";
 import { bufferVerifyToken } from "@/lib/connectors/providers/buffer";
-
-function appOrigin(req: NextRequest): string {
-  if (process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  }
-  return req.nextUrl.origin;
-}
+import { oauthAppOrigin } from "@/lib/oauthOrigin";
 
 export async function GET(req: NextRequest) {
-  const origin = appOrigin(req);
+  const origin = oauthAppOrigin(req);
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
   const err = req.nextUrl.searchParams.get("error");
 
   if (err) {
-    return NextResponse.redirect(`${origin}/connections/buffer?error=cancelled`);
+    return NextResponse.redirect(
+      `${origin}/connections/buffer?error=cancelled`
+    );
   }
 
   const verified = verifyBufferOAuthState(state);
   if (!verified) {
-    return NextResponse.redirect(`${origin}/connections/buffer?error=session`);
+    return NextResponse.redirect(
+      `${origin}/connections/buffer?error=session`
+    );
   }
 
   const clientId = process.env.BUFFER_CLIENT_ID?.trim();
@@ -39,7 +37,6 @@ export async function GET(req: NextRequest) {
       redirect_uri: redirectUri,
       code_verifier: verified.codeVerifier,
     };
-    // Confidential clients only — public clients must omit client_secret
     const clientSecret = process.env.BUFFER_CLIENT_SECRET?.trim();
     if (clientSecret) {
       body.client_secret = clientSecret;
@@ -52,17 +49,31 @@ export async function GET(req: NextRequest) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.access_token) {
-      return NextResponse.redirect(`${origin}/connections/buffer?error=auth`);
+      const hint =
+        typeof data.error_description === "string"
+          ? data.error_description
+          : typeof data.error === "string"
+            ? data.error
+            : "auth";
+      const q = encodeURIComponent(
+        String(hint).slice(0, 80).replace(/\s+/g, "_")
+      );
+      return NextResponse.redirect(
+        `${origin}/connections/buffer?error=auth&detail=${q}`
+      );
     }
 
     const token = data.access_token as string;
     const verify = await bufferVerifyToken(token);
     if (!verify.ok) {
-      return NextResponse.redirect(`${origin}/connections/buffer?error=verify`);
+      return NextResponse.redirect(
+        `${origin}/connections/buffer?error=verify`
+      );
     }
 
     const orgName =
-      (verify.data as { organizationName?: string } | undefined)?.organizationName ||
+      (verify.data as { organizationName?: string } | undefined)
+        ?.organizationName ||
       (verify.data as { email?: string } | undefined)?.email ||
       undefined;
 
@@ -83,11 +94,17 @@ export async function GET(req: NextRequest) {
     });
 
     if (!saved.ok) {
-      return NextResponse.redirect(`${origin}/connections/buffer?error=save_failed`);
+      return NextResponse.redirect(
+        `${origin}/connections/buffer?error=save_failed`
+      );
     }
 
-    return NextResponse.redirect(`${origin}/connections/buffer?connected=1`);
+    return NextResponse.redirect(
+      `${origin}/connections/buffer?connected=1`
+    );
   } catch {
-    return NextResponse.redirect(`${origin}/connections/buffer?error=network`);
+    return NextResponse.redirect(
+      `${origin}/connections/buffer?error=network`
+    );
   }
 }
