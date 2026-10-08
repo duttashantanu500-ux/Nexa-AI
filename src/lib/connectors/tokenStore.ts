@@ -249,6 +249,94 @@ export async function loadConnection(
 /** Alias used by notionAuth / slackAuth / bufferAuth / hubspotAuth */
 export const getConnection = loadConnection;
 
+/**
+ * Load all persisted connections for a user in a single DB round-trip.
+ * Used by the batch status endpoint so the Connections UI never waits on
+ * N sequential token lookups.
+ */
+export async function loadAllConnectionsForUser(
+  userId: string
+): Promise<Map<string, StoredConnection>> {
+  const out = new Map<string, StoredConnection>();
+  if (!userId?.trim()) return out;
+
+  const admin = supabaseAdmin();
+  if (admin) {
+    try {
+      const { data, error } = await admin
+        .from("nexa_oauth_tokens")
+        .select("connector_id, ciphertext")
+        .eq("user_id", userId);
+      if (!error && Array.isArray(data)) {
+        for (const row of data) {
+          const connectorId = String((row as { connector_id?: string }).connector_id || "");
+          const ciphertext = (row as { ciphertext?: string }).ciphertext;
+          if (!connectorId || !ciphertext) continue;
+          try {
+            const parsed = JSON.parse(decryptSecret(ciphertext)) as Omit<
+              StoredConnection,
+              "userId" | "connectorId"
+            >;
+            if (parsed?.accessToken) {
+              out.set(connectorId, {
+                userId,
+                connectorId: connectorId as ConnectorId,
+                accessToken: parsed.accessToken,
+                refreshToken: parsed.refreshToken,
+                workspaceName: parsed.workspaceName,
+                workspaceId: parsed.workspaceId,
+                botId: parsed.botId,
+                scopes: parsed.scopes,
+                connectedAt: parsed.connectedAt,
+                lastVerifiedAt: parsed.lastVerifiedAt,
+              });
+              memory.set(memKey(userId, connectorId), ciphertext);
+            }
+          } catch {
+            /* skip corrupt row */
+          }
+        }
+      }
+    } catch (e) {
+      console.error(
+        "[tokenStore] loadAllConnectionsForUser failed",
+        e instanceof Error ? e.message : e
+      );
+    }
+  }
+
+  // Merge any in-memory-only entries (dev / fallback)
+  for (const [k, ciphertext] of memory.entries()) {
+    if (!k.startsWith(`${userId}::`)) continue;
+    const connectorId = k.slice(userId.length + 2);
+    if (out.has(connectorId)) continue;
+    try {
+      const parsed = JSON.parse(decryptSecret(ciphertext)) as Omit<
+        StoredConnection,
+        "userId" | "connectorId"
+      >;
+      if (parsed?.accessToken) {
+        out.set(connectorId, {
+          userId,
+          connectorId: connectorId as ConnectorId,
+          accessToken: parsed.accessToken,
+          refreshToken: parsed.refreshToken,
+          workspaceName: parsed.workspaceName,
+          workspaceId: parsed.workspaceId,
+          botId: parsed.botId,
+          scopes: parsed.scopes,
+          connectedAt: parsed.connectedAt,
+          lastVerifiedAt: parsed.lastVerifiedAt,
+        });
+      }
+    } catch {
+      /* skip */
+    }
+  }
+
+  return out;
+}
+
 export async function deleteConnection(
   userId: string,
   connectorId: ConnectorId
