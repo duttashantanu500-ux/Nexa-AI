@@ -4,16 +4,7 @@ import {
   generatePkcePair,
   signBufferOAuthState,
 } from "@/lib/connectors/bufferAuth";
-
-function appOrigin(): string {
-  if (process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  }
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
-  }
-  return "http://localhost:3000";
-}
+import { oauthAppOrigin } from "@/lib/oauthOrigin";
 
 export async function GET(req: NextRequest) {
   if (!bufferOAuthConfigured()) {
@@ -32,7 +23,8 @@ export async function GET(req: NextRequest) {
   }
 
   const clientId = process.env.BUFFER_CLIENT_ID!;
-  const redirect = `${appOrigin()}/api/oauth/buffer/callback`;
+  const origin = oauthAppOrigin(req);
+  const redirect = `${origin}/api/oauth/buffer/callback`;
   const { verifier, challenge } = generatePkcePair();
   const state = signBufferOAuthState(userId, verifier);
   const scopes = [
