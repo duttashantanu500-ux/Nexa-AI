@@ -56,16 +56,17 @@ function ConnectionsInner() {
   const [banner, setBanner] = useState("");
   const [storageWarning, setStorageWarning] = useState("");
   const [comfyOk, setComfyOk] = useState(false);
-  const [notionStatus, setNotionStatus] = useState<ConnectorUiStatus | null>(null);
-  const [slackStatus, setSlackStatus] = useState<ConnectorUiStatus | null>(null);
-  const [bufferStatus, setBufferStatus] = useState<ConnectorUiStatus | null>(null);
-  const [ideogramStatus, setIdeogramStatus] = useState<ConnectorUiStatus | null>(null);
-  const [mcpStatus, setMcpStatus] = useState<ConnectorUiStatus | null>(null);
-  const [hubspotStatus, setHubspotStatus] = useState<ConnectorUiStatus | null>(null);
+  // Always start as Available — never null / Checking
+  const [notionStatus, setNotionStatus] = useState<ConnectorUiStatus>("available");
+  const [slackStatus, setSlackStatus] = useState<ConnectorUiStatus>("available");
+  const [bufferStatus, setBufferStatus] = useState<ConnectorUiStatus>("available");
+  const [ideogramStatus, setIdeogramStatus] = useState<ConnectorUiStatus>("available");
+  const [mcpStatus, setMcpStatus] = useState<ConnectorUiStatus>("available");
+  const [hubspotStatus, setHubspotStatus] = useState<ConnectorUiStatus>("available");
   const [statusLoaded, setStatusLoaded] = useState(false);
 
   useEffect(() => {
-    // Seed from session cache so we never flash "Checking…" on revisit
+    // Seed from session cache so we never flash on revisit
     const cached = readStatusCache();
     if (cached.notion) setNotionStatus(cached.notion);
     if (cached.slack) setSlackStatus(cached.slack);
@@ -76,7 +77,6 @@ function ConnectionsInner() {
     if (Object.keys(cached).length > 0) setStatusLoaded(true);
 
     const s = loadOperatorState();
-    // Prefer real session user id so status matches OAuth token storage
     const uid = (s.user?.id || getStableUserId() || "").trim();
     if (!uid) {
       router.replace("/signup");
@@ -95,7 +95,6 @@ function ConnectionsInner() {
     const connected = (search.get("connected") || "").toLowerCase();
     if (connected) {
       setBanner("Connected successfully.");
-      // Optimistic: show Connected immediately for the returned connector
       if (connected.includes("notion")) setNotionStatus("connected");
       if (connected.includes("slack")) setSlackStatus("connected");
       if (connected.includes("buffer")) setBufferStatus("connected");
@@ -113,7 +112,6 @@ function ConnectionsInner() {
         setStatusLoaded(true);
         return;
       }
-      // Parallel: storage health is advisory only; status is the critical path
       const healthP = fetch("/api/connections/storage-health")
         .then((r) => r.json())
         .then((h) => {
@@ -121,7 +119,6 @@ function ConnectionsInner() {
         })
         .catch(() => {});
       try {
-        // Single batch call — persisted tokens only, one DB query, no remote health
         const batchRes = await fetch(
           `/api/connections/status?userId=${encodeURIComponent(uid)}`,
           { cache: "no-store" }
@@ -143,13 +140,7 @@ function ConnectionsInner() {
         setMcpStatus(statuses.mcp);
         setHubspotStatus(statuses.hubspot);
         writeStatusCache(statuses);
-        // Prefer truth: if any live status is connected, never leave an error banner
-        if (Object.values(statuses).some((s) => s === "connected") && connected) {
-          setBanner("Connected successfully.");
-        } else if (
-          Object.values(statuses).some((s) => s === "connected") &&
-          err
-        ) {
+        if (Object.values(statuses).some((s) => s === "connected") && (connected || err)) {
           setBanner("Connected successfully.");
         }
       } catch {
@@ -169,7 +160,7 @@ function ConnectionsInner() {
   }, [router, search]);
 
   const resolveStatus = (c: ConnectorDefinition): ConnectorUiStatus => {
-    const live: Record<string, ConnectorUiStatus | null> = {
+    const live: Record<string, ConnectorUiStatus> = {
       notion: notionStatus,
       slack: slackStatus,
       buffer: bufferStatus,
@@ -182,9 +173,7 @@ function ConnectionsInner() {
       if (s === "connected") return "connected";
       if (s === "error") return "error";
       if (s === "unavailable") return "unavailable";
-      if (s === "available") return "available";
-      // Prefer last-known / available over long "Checking…"
-      return statusLoaded ? "available" : "available";
+      return "available";
     }
     if (c.id === "local_comfyui") return comfyOk ? "connected" : "available";
     if (c.id === "local_data" || c.id === "vault") return "connected";
