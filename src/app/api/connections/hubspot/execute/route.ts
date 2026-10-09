@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthUser } from "@/lib/apiAuth";
 import {
   hubspotListContacts,
   hubspotSearchContacts,
@@ -20,19 +21,21 @@ import { resolveHubspotToken } from "@/lib/connectors/hubspotAuth";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const userId = String(body.userId || "").trim();
-    const actionId = String(body.actionId || "").trim();
-    const input = (body.input || {}) as Record<string, string>;
+    const auth = await requireAuthUser(req);
+    if ("error" in auth) return auth.error;
 
-    if (!userId || !actionId) {
-      return NextResponse.json(
-        { ok: false, message: "Please sign in first." },
-        { status: 400 }
-      );
+    const body = await req.json().catch(() => ({}));
+    const actionId = String((body as { actionId?: string }).actionId || "").trim();
+    const input = ((body as { input?: Record<string, string> }).input || {}) as Record<
+      string,
+      string
+    >;
+
+    if (!actionId) {
+      return NextResponse.json({ ok: false, message: "Please sign in first." }, { status: 400 });
     }
 
-    const resolved = await resolveHubspotToken(userId);
+    const resolved = await resolveHubspotToken(auth.userId);
     if (!resolved?.token) {
       return NextResponse.json({
         ok: false,
@@ -44,7 +47,6 @@ export async function POST(req: NextRequest) {
     let result;
 
     switch (actionId) {
-      // Contacts
       case "hubspot.list_contacts":
         result = await hubspotListContacts({
           accessToken: token,
@@ -87,8 +89,6 @@ export async function POST(req: NextRequest) {
           jobtitle: input.jobtitle || input.jobTitle,
         });
         break;
-
-      // Companies
       case "hubspot.list_companies":
         result = await hubspotListCompanies({
           accessToken: token,
@@ -133,8 +133,6 @@ export async function POST(req: NextRequest) {
           country: input.country,
         });
         break;
-
-      // Deals
       case "hubspot.list_deals":
         result = await hubspotListDeals({
           accessToken: token,
@@ -175,7 +173,6 @@ export async function POST(req: NextRequest) {
           closedate: input.closedate || input.closeDate,
         });
         break;
-
       default:
         return NextResponse.json({
           ok: false,

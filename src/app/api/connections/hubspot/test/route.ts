@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthUser } from "@/lib/apiAuth";
 import { touchVerified } from "@/lib/connectors/tokenStore";
 import { hubspotVerifyToken } from "@/lib/connectors/providers/hubspot";
 import { resolveHubspotToken } from "@/lib/connectors/hubspotAuth";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const userId = String(body.userId || "").trim();
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, message: "Please sign in first." },
-        { status: 400 }
-      );
-    }
+    const auth = await requireAuthUser(req);
+    if ("error" in auth) return auth.error;
+    const userId = auth.userId;
 
     const resolved = await resolveHubspotToken(userId);
     if (!resolved) {

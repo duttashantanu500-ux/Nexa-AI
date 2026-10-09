@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthUser } from "@/lib/apiAuth";
 import { touchVerified } from "@/lib/connectors/tokenStore";
 import { notionVerifyToken } from "@/lib/connectors/providers/notion";
 import { resolveNotionToken } from "@/lib/connectors/notionAuth";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const userId = String(body.userId || "").trim();
-    if (!userId) {
-      return NextResponse.json({ ok: false, message: "Sign in first." }, { status: 400 });
-    }
+    const auth = await requireAuthUser(req);
+    if ("error" in auth) return auth.error;
+    const userId = auth.userId;
 
     const resolved = await resolveNotionToken(userId);
     if (!resolved) {
       return NextResponse.json({
         ok: false,
-        message: "Connect your own Notion account first.",
+        message: "Connect your Notion account first.",
       });
     }
 
@@ -25,12 +24,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: verify.ok,
       message: verify.ok
-        ? "Success — using your Notion account."
+        ? "Success — Nexa can reach your Notion workspace."
         : verify.message || "Could not reach Notion.",
       data: verify.data,
-      source: "oauth",
     });
   } catch {
-    return NextResponse.json({ ok: false, message: "Test failed." }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, message: "Something went wrong. Please try again." },
+      { status: 500 }
+    );
   }
 }
