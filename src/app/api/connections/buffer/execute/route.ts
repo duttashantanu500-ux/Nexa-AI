@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthUser } from "@/lib/apiAuth";
 import {
   bufferCreatePost,
   bufferListChannels,
@@ -8,16 +9,21 @@ import { resolveBufferToken } from "@/lib/connectors/bufferAuth";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const userId = String(body.userId || "").trim();
-    const actionId = String(body.actionId || "").trim();
-    const input = (body.input || {}) as Record<string, string>;
+    const auth = await requireAuthUser(req);
+    if ("error" in auth) return auth.error;
 
-    if (!userId || !actionId) {
+    const body = await req.json().catch(() => ({}));
+    const actionId = String((body as { actionId?: string }).actionId || "").trim();
+    const input = ((body as { input?: Record<string, string> }).input || {}) as Record<
+      string,
+      string
+    >;
+
+    if (!actionId) {
       return NextResponse.json({ ok: false, message: "Please sign in first." }, { status: 400 });
     }
 
-    const resolved = await resolveBufferToken(userId);
+    const resolved = await resolveBufferToken(auth.userId);
     if (!resolved?.token) {
       return NextResponse.json({
         ok: false,

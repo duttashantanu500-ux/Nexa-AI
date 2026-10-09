@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthUser } from "@/lib/apiAuth";
 import {
   notionAppendBlocks,
   notionCreatePage,
@@ -48,21 +49,22 @@ async function resolveParentId(
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const userId = String(body.userId || "").trim();
-    const actionId = String(body.actionId || "").trim();
-    const input = (body.input || {}) as Record<string, string>;
-    const defaultParent = String(body.defaultParent || "").trim();
+    const auth = await requireAuthUser(req);
+    if ("error" in auth) return auth.error;
 
-    if (!userId || !actionId) {
-      return NextResponse.json(
-        { ok: false, message: "Sign in required." },
-        { status: 400 }
-      );
+    const body = await req.json().catch(() => ({}));
+    const actionId = String((body as { actionId?: string }).actionId || "").trim();
+    const input = ((body as { input?: Record<string, string> }).input || {}) as Record<
+      string,
+      string
+    >;
+    const defaultParent = String((body as { defaultParent?: string }).defaultParent || "").trim();
+
+    if (!actionId) {
+      return NextResponse.json({ ok: false, message: "Please sign in first." }, { status: 400 });
     }
 
-    // Only this user's Notion — never a shared admin token
-    const resolved = await resolveNotionToken(userId);
+    const resolved = await resolveNotionToken(auth.userId);
     if (!resolved?.token) {
       return NextResponse.json({
         ok: false,
@@ -114,7 +116,7 @@ export async function POST(req: NextRequest) {
       default:
         return NextResponse.json({
           ok: false,
-          message: `Unknown action: ${actionId}`,
+          message: "This action is not available.",
         });
     }
 
@@ -125,6 +127,6 @@ export async function POST(req: NextRequest) {
       error: result.error,
     });
   } catch {
-    return NextResponse.json({ ok: false, message: "Execution failed" }, { status: 500 });
+    return NextResponse.json({ ok: false, message: "Something went wrong. Please try again." }, { status: 500 });
   }
 }

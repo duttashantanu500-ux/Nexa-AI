@@ -264,6 +264,17 @@ type ActionExecResult = {
   error?: NormalizedProviderError;
 };
 
+async function browserAuthHeaders(): Promise<Record<string, string>> {
+  let headers: Record<string, string> = { "Content-Type": "application/json" };
+  try {
+    const { authHeaders } = await import("./authHeaders");
+    headers = await authHeaders({ "Content-Type": "application/json" });
+  } catch {
+    /* */
+  }
+  return headers;
+}
+
 async function executeAction(
   actionId: string,
   config: Record<string, string>,
@@ -326,7 +337,7 @@ async function executeAction(
       return { ok: true, message: "Report ready", data: { report: ctx.report } };
     }
     case "mcp.call_tool": {
-      if (simulate) return { ok: true, message: "[Simulated] MCP tool" };
+      if (simulate) return { ok: true, message: "Preview only — no tools run." };
       const toolName = (config.tool || config.toolName || "").trim();
       let args: Record<string, unknown> = {};
       try {
@@ -334,14 +345,8 @@ async function executeAction(
       } catch {
         /* */
       }
-      if (typeof window !== "undefined" && connections.userId) {
-        let authHdr: Record<string, string> = { "Content-Type": "application/json" };
-        try {
-          const { authHeaders } = await import("./authHeaders");
-          authHdr = await authHeaders({ "Content-Type": "application/json" });
-        } catch {
-          /* */
-        }
+      if (typeof window !== "undefined") {
+        const authHdr = await browserAuthHeaders();
         const res = await fetch("/api/connections/mcp/execute", {
           method: "POST",
           headers: authHdr,
@@ -382,17 +387,18 @@ async function executeAction(
     }
     default: {
       // Provider actions: call existing API routes when in browser
-      if (simulate) return { ok: true, message: `[Simulated] Would run ${actionId}` };
-      if (typeof window !== "undefined" && connections.userId) {
+      if (simulate) return { ok: true, message: `Preview only — would run ${actionId}` };
+      if (typeof window !== "undefined") {
         const provider = actionId.split(".")[0];
         if (["slack", "notion", "buffer", "hubspot", "ideogram"].includes(provider)) {
+          const authHdr = await browserAuthHeaders();
           const res = await fetch(`/api/connections/${provider}/execute`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: authHdr,
             body: JSON.stringify({
-              userId: connections.userId,
               actionId,
               input: config,
+              defaultParent: connections.notionDefaultParent,
             }),
           });
           const data = await res.json().catch(() => ({}));

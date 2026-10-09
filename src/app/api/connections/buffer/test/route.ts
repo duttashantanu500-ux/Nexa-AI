@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthUser } from "@/lib/apiAuth";
 import { touchVerified } from "@/lib/connectors/tokenStore";
 import { bufferVerifyToken } from "@/lib/connectors/providers/buffer";
 import { resolveBufferToken } from "@/lib/connectors/bufferAuth";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const userId = String(body.userId || "").trim();
-    if (!userId) {
-      return NextResponse.json({ ok: false, message: "Please sign in first." }, { status: 400 });
-    }
+    const auth = await requireAuthUser(req);
+    if ("error" in auth) return auth.error;
+    const userId = auth.userId;
 
     const resolved = await resolveBufferToken(userId);
     if (!resolved) {
