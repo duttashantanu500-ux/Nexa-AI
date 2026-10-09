@@ -55,13 +55,22 @@ async function resolveAccessToken(): Promise<string | null> {
     const { createBrowserClient } = await import("@/lib/supabaseBrowser");
     const supabase = createBrowserClient();
     if (!supabase) return null;
-    let { data } = await supabase.auth.getSession();
-    if (!data.session?.access_token) {
-      // Brief flake after login / tab focus — retry once
-      await new Promise((r) => setTimeout(r, 250));
-      ({ data } = await supabase.auth.getSession());
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.access_token) return data.session.access_token;
+
+      // Try refresh once mid-loop
+      if (attempt === 1) {
+        try {
+          await supabase.auth.refreshSession();
+        } catch {
+          /* ignore */
+        }
+      }
+      await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
     }
-    return data.session?.access_token || null;
+    return null;
   } catch {
     return null;
   }
@@ -195,11 +204,17 @@ export async function recordAgentRun(): Promise<
   | { ok: true; runsUsedThisPeriod: number }
   | { ok: false; message: string; limitReached?: boolean }
 > {
-  const token = await resolveAccessToken();
+  // Prefer a real recorded run; only soft-allow as last resort so free users are not blocked.
+  let token = await resolveAccessToken();
   if (!token) {
-    // Soft-allow when the UI already has a logged-in operator user.
-    // Never false-block Start work on a transient Supabase session flake.
+    // One more full resolve after a short wait (post-login race)
+    await new Promise((r) => setTimeout(r, 400));
+    token = await resolveAccessToken();
+  }
+
+  if (!token) {
     if (hasOperatorUser()) {
+      // Soft-allow execution but do not pretend a run was counted
       return { ok: true, runsUsedThisPeriod: 0 };
     }
     return { ok: false, message: "Please sign in." };
@@ -223,10 +238,13 @@ export async function recordAgentRun(): Promise<
       };
     }
     clearBillingCache();
-    return { ok: true, runsUsedThisPeriod: data.runsUsedThisPeriod || 0 };
+    return { ok: true, runsUsedThisPeriod: Number(data.runsUsedThisPeriod) || 0 };
   } catch {
     // Soft-allow on transient flake when signed in — never block free users on network blip
-    return { ok: true, runsUsedThisPeriod: 0 };
+    if (hasOperatorUser()) {
+      return { ok: true, runsUsedThisPeriod: 0 };
+    }
+    return { ok: false, message: "Could not record run. Please try again." };
   }
 }
 
