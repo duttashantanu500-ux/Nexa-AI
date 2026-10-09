@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthUser } from "@/lib/apiAuth";
 import { resolveIdeogramToken } from "@/lib/connectors/ideogramAuth";
 import { ideogramGenerateImage } from "@/lib/connectors/providers/ideogram";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const userId = String(body.userId || "").trim();
-    const actionId = String(body.actionId || "").trim();
-    const input = (body.input || {}) as Record<string, string>;
+    const auth = await requireAuthUser(req);
+    if ("error" in auth) return auth.error;
 
-    if (!userId) {
-      return NextResponse.json({ ok: false, message: "Please sign in first." }, { status: 400 });
-    }
+    const body = await req.json().catch(() => ({}));
+    const actionId = String((body as { actionId?: string }).actionId || "").trim();
+    const input = ((body as { input?: Record<string, string> }).input || {}) as Record<
+      string,
+      string
+    >;
 
-    const resolved = await resolveIdeogramToken(userId);
+    const resolved = await resolveIdeogramToken(auth.userId);
     if (!resolved) {
       return NextResponse.json({
         ok: false,

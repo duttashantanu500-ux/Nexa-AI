@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuthUser } from "@/lib/apiAuth";
 import { removeIdeogramConnection } from "@/lib/connectors/ideogramAuth";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const userId = String(body.userId || "").trim();
-    if (!userId) {
-      return NextResponse.json({ ok: false, message: "Please sign in first." }, { status: 400 });
-    }
-    await removeIdeogramConnection(userId);
+    const auth = await requireAuthUser(req);
+    if ("error" in auth) return auth.error;
+    await removeIdeogramConnection(auth.userId);
     return NextResponse.json({
       ok: true,
       message: "Ideogram disconnected.",
