@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/react";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { DeployRefresh } from "@/components/DeployRefresh";
 
 const SITE_URL = "https://www.nexaiintelligence.online";
 
@@ -78,11 +79,11 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/icon", type: "image/png", sizes: "32x32" },
-      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icon?v=nexa-mark-2", type: "image/png", sizes: "32x32" },
+      { url: "/icon.svg?v=nexa-mark-2", type: "image/svg+xml" },
     ],
-    apple: [{ url: "/apple-icon", sizes: "180x180", type: "image/png" }],
-    shortcut: ["/icon"],
+    apple: [{ url: "/apple-icon?v=nexa-mark-2", sizes: "180x180", type: "image/png" }],
+    shortcut: ["/icon?v=nexa-mark-2"],
   },
 };
 
@@ -105,7 +106,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} min-h-full antialiased bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50`}
       >
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <DeployRefresh />
+          {children}
+        </ThemeProvider>
         <Analytics />
       </body>
     </html>

@@ -1,1 +1,1 @@
-deploy-ping 2026-09-29T13:15Z free-pro-billing
+deploy-ping nexa-mark-2 auto-refresh 2026-10-10

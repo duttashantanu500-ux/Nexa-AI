@@ -4,7 +4,7 @@ export const runtime = "edge";
 export const size = { width: 180, height: 180 };
 export const contentType = "image/png";
 
-/** Apple / home-screen icon — Nexa mark on clean white */
+/** Apple / home-screen icon — official Nexa mark on clean white */
 export default function AppleIcon() {
   return new ImageResponse(
     (
@@ -36,6 +36,11 @@ export default function AppleIcon() {
         </svg>
       </div>
     ),
-    { ...size }
+    {
+      ...size,
+      headers: {
+        "Cache-Control": "public, max-age=60, must-revalidate",
+      },
+    }
   );
 }

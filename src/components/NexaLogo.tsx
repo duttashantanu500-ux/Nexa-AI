@@ -9,8 +9,8 @@ type Props = {
 };
 
 /**
- * Official Nexa mark — exact brand logo (blue) on clean white.
- * Uses /icon route which serves the official asset.
+ * Official Nexa mark (blue curve) — not the old letter "N".
+ * SVG with a version query so browsers pick up logo changes quickly.
  */
 export function NexaLogo({
   size = 28,
@@ -28,7 +28,7 @@ export function NexaLogo({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/icon"
+          src="/icon.svg?v=nexa-mark-2"
           alt=""
           width={size}
           height={size}
