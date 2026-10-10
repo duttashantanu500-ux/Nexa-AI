@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 
 const STORAGE_KEY = "nexa_build_id";
-const POLL_MS = 45_000;
+const POLL_MS = 20_000;
 
 /**
  * When a new production deploy goes live, soft-reload the tab so users get
@@ -18,6 +18,9 @@ export function DeployRefresh() {
 
     const check = async () => {
       if (checking.current || cancelled) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
       checking.current = true;
       try {
         const res = await fetch(`/api/build-id?t=${Date.now()}`, {
@@ -38,7 +41,7 @@ export function DeployRefresh() {
         }
         if (local !== remote) {
           sessionStorage.setItem(STORAGE_KEY, remote);
-          // Full navigation reload picks up new JS/CSS; auth cookies stay.
+          // Full reload picks up new JS/CSS; auth cookies and local data stay.
           window.location.reload();
         }
       } catch {
@@ -54,12 +57,19 @@ export function DeployRefresh() {
     const onVisible = () => {
       if (document.visibilityState === "visible") void check();
     };
+    const onFocus = () => void check();
+    const onOnline = () => void check();
+
     document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
 
     return () => {
       cancelled = true;
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
     };
   }, []);
 
