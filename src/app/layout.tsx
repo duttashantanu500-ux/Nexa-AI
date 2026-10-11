@@ -79,11 +79,11 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/icon?v=nexa-mark-2", type: "image/png", sizes: "32x32" },
-      { url: "/icon.svg?v=nexa-mark-2", type: "image/svg+xml" },
+      { url: "/icon?v=official-5", type: "image/png", sizes: "32x32" },
+      { url: "/icon.svg?v=official-5", type: "image/svg+xml" },
     ],
-    apple: [{ url: "/apple-icon?v=nexa-mark-2", sizes: "180x180", type: "image/png" }],
-    shortcut: ["/icon?v=nexa-mark-2"],
+    apple: [{ url: "/apple-icon?v=official-5", sizes: "180x180", type: "image/png" }],
+    shortcut: ["/icon?v=official-5"],
   },
 };
 
