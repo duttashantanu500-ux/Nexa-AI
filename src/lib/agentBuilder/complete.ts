@@ -5,7 +5,12 @@ import { registryCatalogForPrompt } from "./validate";
 import { callOpenAICompat, callGemini, callOllama } from "./modelClients";
 
 const OFF_TOPIC =
-  "I'm Nexa's AI Employee Builder. I can only help you create or modify AI employees for your team — not general chat. Describe a role or workflow (for example: research daily, post to Slack, update HubSpot contacts).";
+  "I'm here to help you hire and shape AI employees — roles that use your tools (Notion, Slack, HubSpot, Buffer, and more).\n\n" +
+  "Try something like:\n" +
+  "• Create a Notion page after each meeting\n" +
+  "• List new HubSpot contacts and summarize in Slack\n" +
+  "• Schedule a Buffer post every Monday\n\n" +
+  "What should your next AI employee do?";
 
 function getApiKey(...names: string[]): string | null {
   for (const name of names) {
@@ -24,7 +29,7 @@ function connectionSummary(connections?: Record<string, string>): string {
 }
 
 function buildSystemPrompt(connections?: Record<string, string>): string {
-  return `You are Nexa's AI Employee Builder — not a general chatbot.\nPropose one AI employee using only this registry:\n\n${registryCatalogForPrompt()}\n\n${connectionSummary(connections)}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"create","message":"short note","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nRules: fewest steps; CRM=hubspot.*; Slack=slack.*; Notion=notion.*; social=buffer.*; custom=mcp.call_tool.\nIf connector not connected: still propose, connection required. Never claim work ran. Schedules: once/daily/weekly/monthly only.`;
+  return `You are Nexa's AI Employee Builder — not a general chatbot.\nPropose one AI employee using only this registry:\n\n${registryCatalogForPrompt()}\n\n${connectionSummary(connections)}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"create","message":"short note","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nRules: fewest steps; CRM=hubspot.*; Slack=slack.*; Notion=notion.*; social=buffer.*; custom=mcp.call_tool.\nIf connector not connected: still propose, connection required. Never claim work ran. Schedules: once/daily/weekly/monthly only.\nIf the user is only greeting, joking, or asking general questions unrelated to hiring/configuring an AI employee, respond with {"off_topic":true,"message":"warm redirect toward describing a role or workflow"} — never invent a fake employee for small talk.`;
 }
 
 export type BuilderCompleteResult =
@@ -181,8 +186,6 @@ export async function completeAgentBuilder(params: {
     });
   }
 
-  // Never expose model counts, provider names, or API routing in the user UI.
-  // Provider details stay in server logs only.
   if (attempts.length === 0) {
     console.warn("[agent-builder] no AI API keys configured — using local template");
   } else {
@@ -243,13 +246,33 @@ export async function completeAgentBuilder(params: {
 
 function looksOffTopic(text: string): boolean {
   const t = text.toLowerCase().trim();
-  if (t.length < 2) return false;
-  const employeeHints =
-    /\b(employee|agent|workflow|automate|schedule|notion|slack|buffer|hubspot|crm|post|email|report|research|daily|weekly)\b/i;
-  if (employeeHints.test(t)) return false;
-  const off =
-    /\b(weather|joke|poem|recipe|homework|code this|write a story|who is|what is the capital)\b/i;
-  return off.test(t) && !employeeHints.test(t);
+  if (!t) return false;
+
+  const workHints =
+    /\b(agent|employee|workflow|automat|schedule|connect|slack|notion|github|hubspot|buffer|ideogram|crm|contact|deal|compan(?:y|ies)|list|filter|report|trigger|daily|weekly|hire|post|page|task|step|mcp|oauth|vault|comfy|research|summar|update|create a|build (an? |my )?|make (an? )?)\b/i;
+  if (workHints.test(t)) return false;
+
+  if (
+    /^(hi|hello|hey|yo|sup|howdy|good (morning|afternoon|evening)|thanks|thank you|ok|okay|cool|nice|bye|goodbye)[\s!.?]*$/i.test(
+      t
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    /\b(weather|poem|joke|what time|search the web|capital of|tell me a story|who is|what is|how are you|how's it going|lyrics|recipe|homework|code this|write (me )?a)\b/i.test(
+      t
+    )
+  ) {
+    return true;
+  }
+
+  if (t.length < 12 && !/\b(notion|slack|hubspot|buffer|agent|employee|workflow)\b/i.test(t)) {
+    return true;
+  }
+
+  return false;
 }
 
 function parseModelJson(raw: string): Record<string, unknown> | null {
