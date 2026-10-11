@@ -1,7 +1,9 @@
 /**
  * HubSpot OAuth helpers — tokens stay server-side (tokenStore).
+ * PKCE is required by HubSpot for this app's authorization requests.
  */
 
+import { createHash, randomBytes } from "crypto";
 import {
   getConnection,
   saveConnection,
@@ -25,6 +27,61 @@ export function hubspotOAuthConfigured(): boolean {
     process.env.HUBSPOT_CLIENT_ID?.trim() &&
       process.env.HUBSPOT_CLIENT_SECRET?.trim()
   );
+}
+
+export function generatePkcePair(): { verifier: string; challenge: string } {
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  return { verifier, challenge };
+}
+
+function stateSigningSecret(): string {
+  return (
+    process.env.CONNECTOR_TOKEN_SECRET ||
+    process.env.HUBSPOT_CLIENT_SECRET ||
+    process.env.HUBSPOT_CLIENT_ID ||
+    "nexa-dev-only-change-me"
+  );
+}
+
+/** State embeds userId + PKCE verifier (signed). */
+export function signHubspotOAuthState(userId: string, codeVerifier: string): string {
+  const ts = Date.now().toString(36);
+  const uid = Buffer.from(userId, "utf8").toString("base64url");
+  const ver = Buffer.from(codeVerifier, "utf8").toString("base64url");
+  const payload = `${uid}.${ts}.${ver}`;
+  const secret = stateSigningSecret();
+  const sig = createHash("sha256")
+    .update(payload + createHash("sha256").update(secret).digest("hex"))
+    .digest("base64url")
+    .slice(0, 16);
+  return `${payload}.${sig}`;
+}
+
+export function verifyHubspotOAuthState(
+  state: string | null
+): { userId: string; codeVerifier: string } | null {
+  if (!state) return null;
+  const parts = state.split(".");
+  if (parts.length < 4) return null;
+  const [uidB64, ts, verB64, sig] = parts;
+  const payload = `${uidB64}.${ts}.${verB64}`;
+  const secret = stateSigningSecret();
+  const expected = createHash("sha256")
+    .update(payload + createHash("sha256").update(secret).digest("hex"))
+    .digest("base64url")
+    .slice(0, 16);
+  if (sig !== expected) return null;
+  const age = Date.now() - parseInt(ts, 36);
+  if (Number.isNaN(age) || age > 15 * 60 * 1000) return null;
+  try {
+    return {
+      userId: Buffer.from(uidB64, "base64url").toString("utf8"),
+      codeVerifier: Buffer.from(verB64, "base64url").toString("utf8"),
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function refreshAccessToken(
