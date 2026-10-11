@@ -8,19 +8,19 @@
   "theme_color": "#5B9CF5",
   "icons": [
     {
-      "src": "/icon?v=nexa-mark-2",
+      "src": "/icon?v=official-5",
       "sizes": "32x32",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/apple-icon?v=nexa-mark-2",
+      "src": "/apple-icon?v=official-5",
       "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon.svg?v=nexa-mark-2",
+      "src": "/icon.svg?v=official-5",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
