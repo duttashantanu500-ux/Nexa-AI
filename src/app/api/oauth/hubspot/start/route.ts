@@ -1,16 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { signOAuthState } from "@/lib/connectors/tokenStore";
-import { HUBSPOT_SCOPES, hubspotOAuthConfigured } from "@/lib/connectors/hubspotAuth";
-
-function appOrigin(): string {
-  if (process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  }
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
-  }
-  return "http://localhost:3000";
-}
+import {
+  HUBSPOT_SCOPES,
+  generatePkcePair,
+  hubspotOAuthConfigured,
+  signHubspotOAuthState,
+} from "@/lib/connectors/hubspotAuth";
+import { oauthAppOrigin } from "@/lib/oauthOrigin";
 
 export async function GET(req: NextRequest) {
   if (!hubspotOAuthConfigured()) {
@@ -29,14 +24,19 @@ export async function GET(req: NextRequest) {
   }
 
   const clientId = process.env.HUBSPOT_CLIENT_ID!.trim();
-  const redirect = `${appOrigin()}/api/oauth/hubspot/callback`;
-  const state = signOAuthState(userId);
-  const url =
-    `https://app.hubspot.com/oauth/authorize` +
-    `?client_id=${encodeURIComponent(clientId)}` +
-    `&scope=${encodeURIComponent(HUBSPOT_SCOPES)}` +
-    `&redirect_uri=${encodeURIComponent(redirect)}` +
-    `&state=${encodeURIComponent(state)}`;
+  const origin = oauthAppOrigin(req);
+  const redirect = `${origin}/api/oauth/hubspot/callback`;
+  const { verifier, challenge } = generatePkcePair();
+  const state = signHubspotOAuthState(userId, verifier);
 
-  return NextResponse.redirect(url);
+  const url = new URL("https://app.hubspot.com/oauth/authorize");
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("scope", HUBSPOT_SCOPES);
+  url.searchParams.set("redirect_uri", redirect);
+  url.searchParams.set("state", state);
+  // HubSpot requires PKCE for this authorization request
+  url.searchParams.set("code_challenge", challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+
+  return NextResponse.redirect(url.toString());
 }

@@ -1,19 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { saveConnection, verifyOAuthState } from "@/lib/connectors/tokenStore";
-import { HUBSPOT_SCOPES, hubspotOAuthConfigured } from "@/lib/connectors/hubspotAuth";
-
-function appOrigin(): string {
-  if (process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  }
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
-  }
-  return "http://localhost:3000";
-}
+import { saveConnection } from "@/lib/connectors/tokenStore";
+import {
+  HUBSPOT_SCOPES,
+  hubspotOAuthConfigured,
+  verifyHubspotOAuthState,
+} from "@/lib/connectors/hubspotAuth";
+import { oauthAppOrigin } from "@/lib/oauthOrigin";
 
 export async function GET(req: NextRequest) {
-  const origin = appOrigin();
+  const origin = oauthAppOrigin(req);
   const fail = (msg: string) =>
     NextResponse.redirect(
       `${origin}/connections/hubspot?error=${encodeURIComponent(msg)}`
@@ -39,13 +34,13 @@ export async function GET(req: NextRequest) {
     return fail("Missing authorization code from HubSpot.");
   }
 
-  // verifyOAuthState returns the userId string (or null)
-  const userId = verifyOAuthState(state);
-  if (!userId) {
+  const verified = verifyHubspotOAuthState(state);
+  if (!verified?.userId || !verified.codeVerifier) {
     return fail(
       "This connection link expired or is invalid. Please try Connect again."
     );
   }
+  const { userId, codeVerifier } = verified;
 
   const clientId = process.env.HUBSPOT_CLIENT_ID!.trim();
   const clientSecret = process.env.HUBSPOT_CLIENT_SECRET!.trim();
@@ -61,6 +56,7 @@ export async function GET(req: NextRequest) {
         client_secret: clientSecret,
         redirect_uri: redirectUri,
         code,
+        code_verifier: codeVerifier,
       }),
     });
 
