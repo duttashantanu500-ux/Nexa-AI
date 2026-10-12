@@ -124,3 +124,75 @@ button:active:not(:disabled) {
 .animate-fade-in {
   animation: fade-in 0.25s ease-out;
 }
+
+/* Nexa modular workshop motion */
+@keyframes nexa-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+@keyframes nexa-float-slow {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(2deg);
+  }
+}
+@keyframes nexa-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.nexa-float {
+  animation: nexa-float 4s ease-in-out infinite;
+}
+.nexa-float-slow {
+  animation: nexa-float-slow 5.5s ease-in-out infinite;
+}
+.nexa-float-delayed {
+  animation: nexa-float 4.5s ease-in-out 0.6s infinite;
+}
+.nexa-enter {
+  animation: nexa-enter 0.45s ease-out both;
+}
+
+.nexa-card {
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px rgb(15 23 42 / 0.04);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.nexa-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgb(79 70 229 / 0.08), 0 12px 32px rgb(15 23 42 / 0.06);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nexa-float,
+  .nexa-float-slow,
+  .nexa-float-delayed,
+  .nexa-enter,
+  .animate-fade-in {
+    animation: none !important;
+  }
+  .nexa-card:hover {
+    transform: none;
+  }
+  button:active:not(:disabled) {
+    transform: none;
+  }
+}
