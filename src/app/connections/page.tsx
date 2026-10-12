@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { ConnectorLogo } from "@/components/ConnectorLogo";
+import { PageHeader } from "@/components/PageHeader";
 import { loadOperatorState } from "@/lib/operatorStore";
 import { getStableUserId } from "@/lib/sessionUser";
 import {
@@ -56,7 +57,6 @@ function ConnectionsInner() {
   const [banner, setBanner] = useState("");
   const [storageWarning, setStorageWarning] = useState("");
   const [comfyOk, setComfyOk] = useState(false);
-  // Always start as Available — never null / Checking
   const [notionStatus, setNotionStatus] = useState<ConnectorUiStatus>("available");
   const [slackStatus, setSlackStatus] = useState<ConnectorUiStatus>("available");
   const [bufferStatus, setBufferStatus] = useState<ConnectorUiStatus>("available");
@@ -66,7 +66,6 @@ function ConnectionsInner() {
   const [statusLoaded, setStatusLoaded] = useState(false);
 
   useEffect(() => {
-    // Seed from session cache so we never flash on revisit
     const cached = readStatusCache();
     if (cached.notion) setNotionStatus(cached.notion);
     if (cached.slack) setSlackStatus(cached.slack);
@@ -214,12 +213,11 @@ function ConnectionsInner() {
   return (
     <AppShell>
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Connections</h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            Connect tools your AI employees can use. Status reflects your saved connections.
-          </p>
-        </div>
+        <PageHeader
+          page="connections"
+          title="Connections"
+          subtitle="Connect tools your AI employees can use. Status reflects your saved connections."
+        />
 
         {banner && (
           <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-200">
