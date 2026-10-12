@@ -52,15 +52,17 @@ export function clearBillingCache() {
 
 async function resolveAccessToken(): Promise<string | null> {
   try {
-    const { createBrowserClient } = await import("@/lib/supabaseBrowser");
-    const supabase = createBrowserClient();
+    // Use the shared browser Supabase client (persistSession + localStorage).
+    // Never import a missing module — that always failed with "Please sign in."
+    const { getSupabase } = await import("@/lib/supabase");
+    const supabase = getSupabase();
     if (!supabase) return null;
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const { data } = await supabase.auth.getSession();
       if (data.session?.access_token) return data.session.access_token;
 
-      // Try refresh once mid-loop
+      // Refresh once mid-loop (covers post-login / tab focus races)
       if (attempt === 1) {
         try {
           await supabase.auth.refreshSession();
@@ -149,12 +151,23 @@ export async function startCheckout(): Promise<
   | { ok: true; checkoutUrl: string }
   | { ok: false; message: string }
 > {
-  const token = await resolveAccessToken();
+  let token = await resolveAccessToken();
+  if (!token) {
+    // Brief retry for post-login race
+    await new Promise((r) => setTimeout(r, 350));
+    token = await resolveAccessToken();
+  }
   if (!token) return { ok: false, message: "Please sign in." };
   try {
+    const returnOrigin =
+      typeof window !== "undefined" ? window.location.origin : undefined;
     const res = await fetch("/api/billing/checkout", {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ returnOrigin }),
     });
     const data = await res.json().catch(() => ({}));
     if (!data.ok || !data.checkoutUrl) {
