@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { loadOperatorState } from "@/lib/operatorStore";
+import { getSupabase } from "@/lib/supabase";
 import { startProCheckout } from "@/lib/clientBilling";
 
 const FREE = [
@@ -36,21 +37,45 @@ export default function PlansPage() {
   const [signedIn, setSignedIn] = useState(false);
 
   useEffect(() => {
-    const s = loadOperatorState();
-    setSignedIn(Boolean(s.user?.id));
+    let cancelled = false;
+    (async () => {
+      const op = loadOperatorState();
+      if (op.user?.id) {
+        if (!cancelled) setSignedIn(true);
+        return;
+      }
+      try {
+        const sb = getSupabase();
+        if (sb) {
+          const { data } = await sb.auth.getSession();
+          if (!cancelled) setSignedIn(Boolean(data.session?.user?.id));
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
+      if (!cancelled) setSignedIn(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const upgrade = async () => {
-    if (!signedIn) {
-      router.push("/login");
-      return;
-    }
     setBusy(true);
     setMsg("");
+    // Always attempt checkout with live Supabase session first.
+    // Do not gate only on local operator state (can lag after login).
     const r = await startProCheckout();
     setBusy(false);
     if (!r.ok || !r.checkoutUrl) {
-      setMsg(r.message || "Could not start checkout.");
+      const m = r.message || "Could not start checkout.";
+      if (/sign in/i.test(m)) {
+        // Only redirect when there truly is no session
+        router.push("/login?next=/plans");
+        return;
+      }
+      setMsg(m);
       return;
     }
     window.location.href = r.checkoutUrl;

@@ -1,22 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { createCheckoutSession, isDodoConfigured } from "@/lib/billing";
-import { safeReturnOrigin } from "@/lib/apiAuth";
+import { requireAuthUser, safeReturnOrigin } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
-
-function userClient(req: NextRequest) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) return null;
-  const auth = req.headers.get("authorization") || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (!token) return null;
-  return createClient(url, anon, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,25 +17,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const sb = userClient(req);
-    if (!sb) {
+    const auth = await requireAuthUser(req);
+    if ("error" in auth) {
       return NextResponse.json(
         { ok: false, message: "Please sign in to upgrade." },
         { status: 401 }
       );
     }
 
-    const { data: authData, error: authErr } = await sb.auth.getUser();
-    if (authErr || !authData.user) {
-      return NextResponse.json(
-        { ok: false, message: "Please sign in to upgrade." },
-        { status: 401 }
-      );
-    }
-
-    const user = authData.user;
+    const user = auth.user;
     const body = await req.json().catch(() => ({}));
-    const origin = safeReturnOrigin(body.returnOrigin, req);
+    const origin = safeReturnOrigin(
+      (body as { returnOrigin?: string }).returnOrigin,
+      req
+    );
     const returnUrl = `${origin}/settings?billing=success`;
 
     const result = await createCheckoutSession({
