@@ -42,18 +42,28 @@ export function AppShell({ children }: { children: ReactNode }) {
               Connect · Orchestrate
             </div>
           </div>
-          <nav className="space-y-0.5">
+          <nav className="space-y-1.5">
             {NAV.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`block rounded-lg px-3 py-2 text-sm transition ${
+                className={`nexa-nav-block group flex flex-col items-stretch gap-0.5 rounded-md border border-dashed px-2.5 py-1.5 text-sm transition ${
                   active(item.href)
-                    ? "bg-indigo-50 font-medium text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300"
-                    : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                    ? "border-indigo-400 bg-indigo-50 font-medium text-indigo-700 dark:border-indigo-500 dark:bg-indigo-950/40 dark:text-indigo-300"
+                    : "border-zinc-300 text-zinc-600 hover:border-indigo-300 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-400 dark:hover:border-indigo-600 dark:hover:bg-zinc-800/60"
                 }`}
               >
-                {item.label}
+                <span
+                  className={`flex gap-0.5 ${
+                    active(item.href) ? "opacity-100" : "opacity-50 group-hover:opacity-80"
+                  }`}
+                  aria-hidden
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                </span>
+                <span className="leading-tight tracking-wide">{item.label}</span>
               </Link>
             ))}
           </nav>
@@ -74,17 +84,22 @@ export function AppShell({ children }: { children: ReactNode }) {
               />
               <span className="text-xs text-zinc-500 dark:text-zinc-400">{name}</span>
             </div>
-            <nav className="flex gap-1 overflow-x-auto px-2 pb-2">
+            <nav className="flex gap-1.5 overflow-x-auto px-2 pb-2">
               {NAV.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs ${
+                  className={`flex shrink-0 flex-col items-start gap-0.5 whitespace-nowrap rounded-md border border-dashed px-2.5 py-1 text-xs ${
                     active(item.href)
-                      ? "bg-indigo-600 text-white"
-                      : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                      ? "border-indigo-400 bg-indigo-600 text-white"
+                      : "border-zinc-300 bg-zinc-50 text-zinc-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
                   }`}
                 >
+                  <span className="flex gap-0.5 opacity-70" aria-hidden>
+                    <span className="h-1 w-1 rounded-full bg-current" />
+                    <span className="h-1 w-1 rounded-full bg-current" />
+                    <span className="h-1 w-1 rounded-full bg-current" />
+                  </span>
                   {item.label}
                 </Link>
               ))}
