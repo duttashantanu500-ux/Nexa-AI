@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
+import { PageHeader } from "@/components/PageHeader";
 import { loadOperatorState, saveOperatorState } from "@/lib/operatorStore";
 import { fetchServerAgents } from "@/lib/serverAgentClient";
 import { CONNECTOR_REGISTRY } from "@/lib/connectors/registry";
@@ -128,30 +129,27 @@ export default function HomePage() {
   return (
     <AppShell>
       <div className="mx-auto max-w-3xl space-y-8 px-4 py-8">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {greeting()}
-            {name ? `, ${name}` : ""}.
-          </h1>
-          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-            Connect your tools. Build your AI team. Let them handle the work.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          <Link
-            href="/agents/new"
-            className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500"
-          >
-            Hire AI Employee
-          </Link>
-          <Link
-            href="/connections"
-            className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          >
-            Manage connections
-          </Link>
-        </div>
+        <PageHeader
+          page="home"
+          title={`${greeting()}${name ? `, ${name}` : ""}.`}
+          subtitle="Connect your tools. Build your AI team. Let them handle the work."
+          actions={
+            <>
+              <Link
+                href="/agents/new"
+                className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm shadow-indigo-600/20 hover:bg-indigo-500"
+              >
+                Hire AI Employee
+              </Link>
+              <Link
+                href="/connections"
+                className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              >
+                Manage connections
+              </Link>
+            </>
+          }
+        />
 
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Services</h2>
@@ -160,7 +158,7 @@ export default function HomePage() {
               <Link
                 key={c.id}
                 href={`/connections/${c.id}`}
-                className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
+                className="nexa-card p-3"
               >
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">{c.name}</span>
@@ -192,7 +190,7 @@ export default function HomePage() {
                 <Link
                   key={a.id}
                   href={`/agents/${a.id}`}
-                  className="rounded-xl border border-zinc-200 bg-white p-4 hover:border-indigo-300 dark:border-zinc-800 dark:bg-zinc-900"
+                  className="nexa-card p-4"
                 >
                   <div className="font-medium">{a.name}</div>
                   <p className="mt-1 line-clamp-2 text-xs text-zinc-500">
