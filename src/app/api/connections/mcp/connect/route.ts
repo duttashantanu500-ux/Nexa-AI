@@ -11,7 +11,7 @@ import {
 
 export const runtime = "nodejs";
 
-const EXTERNAL = ["notion", "slack", "buffer", "ideogram", "mcp"] as const;
+const EXTERNAL = ["notion", "slack", "buffer", "hubspot", "ideogram", "mcp"] as const;
 
 async function countConnected(userId: string): Promise<number> {
   let n = 0;
@@ -86,19 +86,21 @@ export async function POST(req: NextRequest) {
     });
 
     if (!result.ok) {
-      return NextResponse.json({ ok: false, message: result.message });
+      return NextResponse.json(
+        { ok: false, message: result.message || "Could not connect MCP." },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json({
       ok: true,
-      message: `Found ${result.tools.length} tool${result.tools.length === 1 ? "" : "s"}. Approve the ones your AI employees may use.`,
-      tools: result.tools,
-      serverName: result.serverName,
+      message: "MCP connected.",
+      tools: result.tools || [],
     });
   } catch (e) {
-    console.error("mcp/connect", e);
+    console.error("[mcp/connect]", e);
     return NextResponse.json(
-      { ok: false, message: "Could not connect. Please try again." },
+      { ok: false, message: "Something went wrong. Please try again." },
       { status: 500 }
     );
   }

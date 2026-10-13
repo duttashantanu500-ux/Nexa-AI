@@ -22,6 +22,15 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const { assertCanAddConnection } = await import("@/lib/serverPlanGate");
+  const gate = await assertCanAddConnection(userId, "buffer");
+  if (!gate.ok) {
+    return NextResponse.json(
+      { error: gate.message, limitReached: true },
+      { status: 403 }
+    );
+  }
+
   const clientId = process.env.BUFFER_CLIENT_ID!;
   const origin = oauthAppOrigin(req);
   const redirect = `${origin}/api/oauth/buffer/callback`;

@@ -23,6 +23,15 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const { assertCanAddConnection } = await import("@/lib/serverPlanGate");
+  const gate = await assertCanAddConnection(userId, "hubspot");
+  if (!gate.ok) {
+    return NextResponse.json(
+      { error: gate.message, limitReached: true },
+      { status: 403 }
+    );
+  }
+
   const clientId = process.env.HUBSPOT_CLIENT_ID!.trim();
   const origin = oauthAppOrigin(req);
   const redirect = `${origin}/api/oauth/hubspot/callback`;
@@ -34,7 +43,6 @@ export async function GET(req: NextRequest) {
   url.searchParams.set("scope", HUBSPOT_SCOPES);
   url.searchParams.set("redirect_uri", redirect);
   url.searchParams.set("state", state);
-  // HubSpot requires PKCE for this authorization request
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
 
