@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { loadOperatorState, setUser } from "@/lib/operatorStore";
 import { PLAN_FREE, PLAN_PRO } from "@/lib/plans";
 import { startProCheckout } from "@/lib/clientBilling";
+import { syncProfileToCloud } from "@/lib/auth";
+import { persistUserProfile } from "@/lib/sessionUser";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -41,22 +43,28 @@ export default function OnboardingPage() {
     }
     const s = loadOperatorState();
     if (!s.user) return;
-    setUser({
+    const next = {
       ...s.user,
       name: n,
       age: a,
-    });
+    };
+    setUser(next);
+    persistUserProfile(next);
+    void syncProfileToCloud(next);
     setStep("plan");
   };
 
   const finishFree = () => {
     const s = loadOperatorState();
     if (!s.user) return;
-    setUser({
+    const next = {
       ...s.user,
       onboardingCompleted: true,
-      plan: "free",
-    });
+      plan: "free" as const,
+    };
+    setUser(next);
+    persistUserProfile(next);
+    void syncProfileToCloud(next);
     router.replace("/home");
   };
 
@@ -68,10 +76,13 @@ export default function OnboardingPage() {
       setUpgrading(false);
       return;
     }
-    setUser({
+    const next = {
       ...s.user,
       onboardingCompleted: true,
-    });
+    };
+    setUser(next);
+    persistUserProfile(next);
+    void syncProfileToCloud(next);
     const r = await startProCheckout();
     setUpgrading(false);
     if (r.ok && r.checkoutUrl) {
