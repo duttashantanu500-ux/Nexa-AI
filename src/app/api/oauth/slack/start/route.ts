@@ -28,9 +28,17 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const { assertCanAddConnection } = await import("@/lib/serverPlanGate");
+  const gate = await assertCanAddConnection(userId, "slack");
+  if (!gate.ok) {
+    return NextResponse.json(
+      { error: gate.message, limitReached: true },
+      { status: 403 }
+    );
+  }
+
   const redirect = `${appOrigin()}/api/oauth/slack/callback`;
   const state = signOAuthState(userId);
-  // Minimum scopes for list channels + send message
   const scopes = ["channels:read", "groups:read", "chat:write"].join(",");
   const url = `https://slack.com/oauth/v2/authorize?client_id=${encodeURIComponent(
     clientId

@@ -31,6 +31,15 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const { assertCanAddConnection } = await import("@/lib/serverPlanGate");
+  const gate = await assertCanAddConnection(userId, "notion");
+  if (!gate.ok) {
+    return NextResponse.json(
+      { error: gate.message, limitReached: true },
+      { status: 403 }
+    );
+  }
+
   const redirect = `${appOrigin()}/api/oauth/notion/callback`;
   const state = signOAuthState(userId);
   const url = `https://api.notion.com/v1/oauth/authorize?client_id=${encodeURIComponent(
