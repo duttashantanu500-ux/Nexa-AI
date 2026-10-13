@@ -208,13 +208,35 @@ export async function hydrateLocalFromCloud(userId: string): Promise<void> {
     .eq("user_id", userId)
     .order("importance", { ascending: false });
 
+  let onboardingCompleted = Boolean(profile?.onboarding_completed);
+
+  // Returning users must not see Name/Age again after password reset or new device.
+  // If the profile already has a name and the account is not brand-new, mark complete.
+  if (!onboardingCompleted && profile?.name && String(profile.name).trim()) {
+    const createdMs = profile.created_at
+      ? new Date(profile.created_at).getTime()
+      : 0;
+    const ageMs = createdMs ? Date.now() - createdMs : 0;
+    if (ageMs > 10 * 60 * 1000) {
+      onboardingCompleted = true;
+      try {
+        await sb
+          .from("profiles")
+          .update({ onboarding_completed: true })
+          .eq("id", userId);
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+
   const user: UserProfile = {
     id: userId,
     email: profile?.email || "",
     name: profile?.name || "",
     userType: (profile?.user_type as UserType) || "founder",
     createdAt: profile?.created_at || new Date().toISOString(),
-    onboardingCompleted: Boolean(profile?.onboarding_completed),
+    onboardingCompleted,
   };
 
   setUser(user);
