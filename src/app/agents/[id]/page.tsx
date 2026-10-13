@@ -32,6 +32,7 @@ import {
 } from "@/lib/clientBilling";
 import { Agent, AgentRun } from "@/types";
 import { EmployeeBuilderChat } from "@/components/EmployeeBuilderChat";
+import { UpgradeLimitModal } from "@/components/UpgradeLimitModal";
 
 const COMFY_KEY = "nexa_comfy_base_url";
 const NOTION_PARENT_KEY = "nexa_notion_default_parent";
@@ -445,21 +446,11 @@ export default function AgentDetailPage() {
           </button>
         </div>
 
-        {limitMessage && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            <p>{limitMessage}</p>
-            {!/sign in/i.test(limitMessage) && (
-              <button
-                type="button"
-                disabled={upgrading}
-                onClick={() => void onUpgrade()}
-                className="mt-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-              >
-                {upgrading ? "Opening…" : "Upgrade to Pro"}
-              </button>
-            )}
-          </div>
-        )}
+        <UpgradeLimitModal
+          open={Boolean(limitMessage) && !/sign in/i.test(limitMessage)}
+          message={limitMessage}
+          onClose={() => setLimitMessage("")}
+        />
 
         {needsSignIn && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
@@ -539,15 +530,15 @@ export default function AgentDetailPage() {
                   <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                     <span className={statusBadgeClass(r.status)}>{runStatusLabel(r.status)}</span>
                     <span className="text-xs text-zinc-500">
-                      {new Date(r.startedAt).toLocaleString()}
+                      {r.startedAt ? new Date(r.startedAt).toLocaleString() : ""}
                     </span>
                   </div>
-                  {r.output && (
-                    <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-xs dark:bg-zinc-950">
-                      {r.output}
-                    </pre>
+                  {r.summary && (
+                    <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{r.summary}</p>
                   )}
-                  {r.error && <p className="mt-1 text-xs text-red-600">{r.error}</p>}
+                  {r.error && (
+                    <p className="mt-1 text-xs text-red-600">{r.error}</p>
+                  )}
                 </li>
               ))}
             </ul>
