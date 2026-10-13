@@ -23,6 +23,7 @@ export type ClientBillingState = {
   runsUsedThisPeriod: number;
   periodEnd?: string | null;
   loading: boolean;
+  cancelAtPeriodEnd?: boolean;
 };
 
 const EXTERNAL_PROVIDERS = ["notion", "slack", "buffer", "hubspot", "ideogram", "mcp"] as const;
@@ -52,8 +53,6 @@ export function clearBillingCache() {
 
 async function resolveAccessToken(): Promise<string | null> {
   try {
-    // Use the shared browser Supabase client (persistSession + localStorage).
-    // Never import a missing module — that always failed with "Please sign in."
     const { getSupabase } = await import("@/lib/supabase");
     const supabase = getSupabase();
     if (!supabase) return null;
@@ -62,7 +61,6 @@ async function resolveAccessToken(): Promise<string | null> {
       const { data } = await supabase.auth.getSession();
       if (data.session?.access_token) return data.session.access_token;
 
-      // Refresh once mid-loop (covers post-login / tab focus races)
       if (attempt === 1) {
         try {
           await supabase.auth.refreshSession();
@@ -78,7 +76,6 @@ async function resolveAccessToken(): Promise<string | null> {
   }
 }
 
-/** True when operator local state has a signed-in user (even if Supabase token is momentarily missing). */
 function hasOperatorUser(): boolean {
   try {
     const raw =
@@ -119,22 +116,12 @@ export async function fetchBillingStatus(
       planName: data.planName || plan.name,
       status: data.status || "active",
       priceLabel: data.priceLabel || plan.priceLabel,
-      limits: {
-        maxAgents: data.limits?.maxAgents ?? plan.limits.maxAgents,
-        maxConnections:
-          data.limits?.maxConnections == null
-            ? plan.limits.maxConnections
-            : data.limits.maxConnections,
-        maxRunsPerMonth:
-          data.limits?.maxRunsPerMonth ?? plan.limits.maxRunsPerMonth,
-        vaultBytes: data.limits?.vaultBytes ?? plan.limits.vaultBytes,
-        advancedWorkflow: Boolean(data.limits?.advancedWorkflow),
-        priorityExecution: Boolean(data.limits?.priorityExecution),
-      },
+      limits: data.limits || plan.limits,
       features: data.features || plan.features,
       runsUsedThisPeriod: Number(data.runsUsedThisPeriod) || 0,
       periodEnd: data.periodEnd || null,
       loading: false,
+      cancelAtPeriodEnd: Boolean(data.cancelAtPeriodEnd),
     };
     cachedBilling = state;
     cacheTs = Date.now();
@@ -153,7 +140,6 @@ export async function startCheckout(): Promise<
 > {
   let token = await resolveAccessToken();
   if (!token) {
-    // Brief retry for post-login race
     await new Promise((r) => setTimeout(r, 350));
     token = await resolveAccessToken();
   }
@@ -188,7 +174,6 @@ export async function startCheckout(): Promise<
 export async function getConnectedExternalCount(userId: string): Promise<number> {
   if (!userId) return 0;
   try {
-    // Single batch call — same source of truth as Connections UI (token presence only)
     const res = await fetch(
       `/api/connections/status?userId=${encodeURIComponent(userId)}`,
       { cache: "no-store" }
@@ -217,17 +202,14 @@ export async function recordAgentRun(): Promise<
   | { ok: true; runsUsedThisPeriod: number }
   | { ok: false; message: string; limitReached?: boolean }
 > {
-  // Prefer a real recorded run; only soft-allow as last resort so free users are not blocked.
   let token = await resolveAccessToken();
   if (!token) {
-    // One more full resolve after a short wait (post-login race)
     await new Promise((r) => setTimeout(r, 400));
     token = await resolveAccessToken();
   }
 
   if (!token) {
     if (hasOperatorUser()) {
-      // Soft-allow execution but do not pretend a run was counted
       return { ok: true, runsUsedThisPeriod: 0 };
     }
     return { ok: false, message: "Please sign in." };
@@ -240,7 +222,6 @@ export async function recordAgentRun(): Promise<
     });
     const data = await res.json().catch(() => ({}));
     if (!data.ok) {
-      // Auth flake from API — soft-allow if we still have a local user
       if (/sign in|unauthorized|session/i.test(String(data.message || "")) && hasOperatorUser()) {
         return { ok: true, runsUsedThisPeriod: 0 };
       }
@@ -253,7 +234,6 @@ export async function recordAgentRun(): Promise<
     clearBillingCache();
     return { ok: true, runsUsedThisPeriod: Number(data.runsUsedThisPeriod) || 0 };
   } catch {
-    // Soft-allow on transient flake when signed in — never block free users on network blip
     if (hasOperatorUser()) {
       return { ok: true, runsUsedThisPeriod: 0 };
     }
@@ -313,6 +293,9 @@ export function canUseVault(
   }
   return { ok: true };
 }
+
+/** Alias used by vaultStore */
+export const canAddVaultBytes = canUseVault;
 
 /** Alias used by agent detail / settings pages */
 export const startProCheckout = startCheckout;
