@@ -57,14 +57,9 @@ export default function LoginPage() {
       });
     }
 
+    // Never persist passwords in localStorage.
     try {
-      localStorage.setItem(
-        "nexa_auth",
-        JSON.stringify({
-          email: email.toLowerCase().trim(),
-          password,
-        })
-      );
+      localStorage.removeItem("nexa_auth");
     } catch {
       /* */
     }
