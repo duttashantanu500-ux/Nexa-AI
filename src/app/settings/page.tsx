@@ -20,6 +20,8 @@ import {
 } from "@/lib/clientBilling";
 import { totalVaultBytes, formatSize } from "@/lib/vaultStore";
 import { PLAN_FREE, PLAN_PRO } from "@/lib/plans";
+import { getStableUserId } from "@/lib/sessionUser";
+import { fetchServerAgents } from "@/lib/serverAgentClient";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -56,15 +58,41 @@ export default function SettingsPage() {
     setThemeLocal(t);
     applyTheme(t);
 
-    const agents = s.agents.filter((a) => a.userId === s.user!.id).length;
-    const vaultBytes = totalVaultBytes(s.user.id);
-    setUsage((u) => ({ ...u, agents, vaultBytes }));
+    // Same identity used by Connections / OAuth token ownership
+    const uid = (getStableUserId() || s.user.id || "").trim();
+    const localAgents = (s.agents || []).filter(
+      (a) =>
+        String(a.status) !== "archived" &&
+        (!a.userId || !uid || a.userId === uid || a.userId === s.user!.id)
+    );
+    const vaultBytes = totalVaultBytes(uid || s.user.id);
+    setUsage((u) => ({ ...u, agents: localAgents.length, vaultBytes }));
 
     void (async () => {
       const b = await fetchBillingStatus(true);
       setBilling(b);
-      const connections = await getConnectedExternalCount(s.user!.id);
+
+      // Same status API + user id as Connections page (token presence)
+      const connections = await getConnectedExternalCount(uid || s.user!.id);
       setUsage((u) => ({ ...u, connections }));
+
+      // Prefer server agent list so Settings matches AI Team after hire
+      try {
+        const remote = await fetchServerAgents();
+        if (remote.ok && Array.isArray(remote.agents)) {
+          const serverCount = remote.agents.filter(
+            (a) => String(a.status || "active") !== "archived"
+          ).length;
+          if (serverCount > 0 || remote.agents.length === 0) {
+            setUsage((u) => ({
+              ...u,
+              agents: Math.max(serverCount, localAgents.length),
+            }));
+          }
+        }
+      } catch {
+        /* keep local count */
+      }
     })();
   }, [router]);
 
