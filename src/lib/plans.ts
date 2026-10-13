@@ -113,16 +113,19 @@ export function formatBytesLimit(bytes: number): string {
   return `${bytes} B`;
 }
 
-/** User-facing messages for limit blocks */
+/** User-facing messages for limit blocks (shown with UpgradeLimitModal) */
 export const LIMIT_MESSAGES = {
-  agents: "You've reached the Free plan limit of 3 AI employees. Upgrade to Pro for up to 20 AI employees.",
+  agents:
+    "Uh oh — you don't have enough space for another AI employee. Unlock more by upgrading to Pro.",
   connections:
-    "You've reached the Free plan limit of 3 connections. Upgrade to Pro for unlimited connections.",
-  runs: "You've used all work runs for this month on the Free plan. Upgrade to Pro for 1,000 runs per month.",
+    "Uh oh — you don't have enough space for another connection. Unlock more by upgrading to Pro.",
+  runs: "Uh oh — you've used all work runs for this month. Unlock more by upgrading to Pro.",
   vault:
-    "Your Vault is full on the Free plan (500 MB). Upgrade to Pro for 5 GB of storage.",
+    "Uh oh — your Vault is full. Unlock more storage by upgrading to Pro.",
   advancedWorkflow:
-    "Advanced workflow options are available on Pro. Upgrade to unlock them.",
+    "Uh oh — advanced workflow options need Pro. Unlock them by upgrading.",
   priorityExecution:
-    "Priority execution is available on Pro. Upgrade to unlock it.",
+    "Uh oh — priority execution needs Pro. Unlock it by upgrading.",
 } as const;
+
+export type LimitKind = keyof typeof LIMIT_MESSAGES;
