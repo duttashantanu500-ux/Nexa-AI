@@ -19,6 +19,9 @@ import {
   type ClientBillingState,
 } from "@/lib/clientBilling";
 import type { AgentProposal } from "@/lib/agentBuilder/types";
+import { UpgradeLimitModal } from "@/components/UpgradeLimitModal";
+import { LIMIT_MESSAGES } from "@/lib/plans";
+import { fetchServerAgents } from "@/lib/serverAgentClient";
 
 type ChatLine = { role: "user" | "assistant"; content: string; thinking?: string[] };
 
@@ -37,6 +40,7 @@ export default function NewAgentPage() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   const [billing, setBilling] = useState<ClientBillingState | null>(null);
+  const [limitOpen, setLimitOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -154,9 +158,26 @@ export default function NewAgentPage() {
         return;
       }
       const bill = billing || (await fetchBillingStatus());
-      const check = canCreateAgent(s.agents.length, bill);
+      let agentCount = (s.agents || []).filter(
+        (a) => String(a.status) !== "archived"
+      ).length;
+      try {
+        const remote = await fetchServerAgents();
+        if (remote.ok && Array.isArray(remote.agents)) {
+          agentCount = Math.max(
+            agentCount,
+            remote.agents.filter(
+              (a) => String(a.status || "active") !== "archived"
+            ).length
+          );
+        }
+      } catch {
+        /* local count */
+      }
+      const check = canCreateAgent(agentCount, bill);
       if (!check.ok) {
-        setError(check.message || "Limit reached.");
+        setError(check.message || LIMIT_MESSAGES.agents);
+        setLimitOpen(true);
         setCreating(false);
         return;
       }
@@ -335,6 +356,11 @@ export default function NewAgentPage() {
           </p>
         </div>
       </div>
+      <UpgradeLimitModal
+        open={limitOpen}
+        message={error || LIMIT_MESSAGES.agents}
+        onClose={() => setLimitOpen(false)}
+      />
     </AppShell>
   );
 }
