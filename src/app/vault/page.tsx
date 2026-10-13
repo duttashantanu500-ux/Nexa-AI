@@ -15,6 +15,8 @@ import {
   searchVaultFiles,
   type VaultFile,
 } from "@/lib/vaultStore";
+import { UpgradeLimitModal } from "@/components/UpgradeLimitModal";
+import { LIMIT_MESSAGES } from "@/lib/plans";
 
 export default function VaultPage() {
   const router = useRouter();
@@ -25,6 +27,8 @@ export default function VaultPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [limitOpen, setLimitOpen] = useState(false);
+  const [limitMsg, setLimitMsg] = useState(LIMIT_MESSAGES.vault);
 
   const refresh = useCallback((uid: string) => {
     setFiles(listVaultFiles(uid));
@@ -60,7 +64,13 @@ export default function VaultPage() {
     }
     refresh(userId);
     if (okCount) setMessage(okCount === 1 ? "File added." : `${okCount} files added.`);
-    if (lastError) setMessage(lastError);
+    if (lastError) {
+      setMessage(lastError);
+      if (/uh oh|vault is full|upgrade/i.test(lastError)) {
+        setLimitMsg(lastError || LIMIT_MESSAGES.vault);
+        setLimitOpen(true);
+      }
+    }
     setBusy(false);
     if (inputRef.current) inputRef.current.value = "";
   };
@@ -129,8 +139,8 @@ export default function VaultPage() {
               </div>
               <button
                 type="button"
-                className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
                 onClick={() => setSelectedId(null)}
+                className="text-xs text-zinc-500"
               >
                 Close
               </button>
@@ -140,18 +150,17 @@ export default function VaultPage() {
               <img
                 src={selected.previewDataUrl}
                 alt={selected.name}
-                className="max-h-64 rounded-lg border border-zinc-100 object-contain dark:border-zinc-800"
+                className="max-h-64 rounded-lg border border-zinc-200 object-contain dark:border-zinc-700"
               />
             )}
-            {selected.textContent &&
-              (selected.kind === "text" || selected.kind === "markdown") && (
-                <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-xs text-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
-                  {selected.textContent.slice(0, 12000)}
-                </pre>
-              )}
-            {(selected.kind === "pdf" || selected.kind === "doc") && (
-              <p className="text-sm text-zinc-500">
-                This file is saved in your Vault. Preview for this type is limited on this device.
+            {selected.textContent && (
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-xs text-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
+                {selected.textContent.slice(0, 8000)}
+              </pre>
+            )}
+            {!selected.textContent && !selected.previewDataUrl && (
+              <p className="text-xs text-zinc-500">
+                Preview is limited on this device.
               </p>
             )}
             <button
@@ -209,6 +218,11 @@ export default function VaultPage() {
           )}
         </section>
       </div>
+      <UpgradeLimitModal
+        open={limitOpen}
+        message={limitMsg}
+        onClose={() => setLimitOpen(false)}
+      />
     </AppShell>
   );
 }
