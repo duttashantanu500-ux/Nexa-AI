@@ -189,9 +189,14 @@ function ConnectionsInner() {
 
   const Card = ({ c }: { c: ConnectorDefinition }) => {
     const status = resolveStatus(c);
+    // Pass status in URL so detail page paints the badge with zero wait
+    const href =
+      status === "connected" || status === "available" || status === "error"
+        ? `/connections/${c.id}?s=${status}`
+        : `/connections/${c.id}`;
     return (
       <Link
-        href={`/connections/${c.id}`}
+        href={href}
         className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3 transition hover:border-indigo-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-indigo-700"
       >
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-50 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
