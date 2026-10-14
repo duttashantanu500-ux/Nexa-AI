@@ -42,28 +42,32 @@ export function AppShell({ children }: { children: ReactNode }) {
               Connect · Orchestrate
             </div>
           </div>
-          <nav className="space-y-1.5">
+          <nav className="space-y-2">
             {NAV.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`nexa-nav-block group flex flex-col items-stretch gap-0.5 rounded-md border border-dashed px-2.5 py-1.5 text-sm transition ${
+                className={`nexa-nav-brick relative block rounded-lg px-3 py-2.5 text-sm tracking-wide transition ${
                   active(item.href)
-                    ? "border-indigo-400 bg-indigo-50 font-medium text-indigo-700 dark:border-indigo-500 dark:bg-indigo-950/40 dark:text-indigo-300"
-                    : "border-zinc-300 text-zinc-600 hover:border-indigo-300 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-400 dark:hover:border-indigo-600 dark:hover:bg-zinc-800/60"
+                    ? "bg-indigo-50 font-semibold text-indigo-700 shadow-sm ring-1 ring-indigo-200 dark:bg-indigo-950/50 dark:text-indigo-300 dark:ring-indigo-800"
+                    : "text-zinc-600 ring-1 ring-dashed ring-zinc-300 hover:bg-zinc-50 hover:text-zinc-900 hover:ring-indigo-300 dark:text-zinc-400 dark:ring-zinc-600 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-100 dark:hover:ring-indigo-700"
                 }`}
               >
+                {/* LEGO stud row — pure CSS circles, not text symbols */}
                 <span
-                  className={`flex gap-0.5 ${
-                    active(item.href) ? "opacity-100" : "opacity-50 group-hover:opacity-80"
+                  className={`mb-1.5 flex gap-1 ${
+                    active(item.href)
+                      ? "text-indigo-400 dark:text-indigo-500"
+                      : "text-zinc-300 dark:text-zinc-600"
                   }`}
                   aria-hidden
                 >
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
                 </span>
-                <span className="leading-tight tracking-wide">{item.label}</span>
+                <span className="block leading-none">{item.label}</span>
               </Link>
             ))}
           </nav>
@@ -84,21 +88,26 @@ export function AppShell({ children }: { children: ReactNode }) {
               />
               <span className="text-xs text-zinc-500 dark:text-zinc-400">{name}</span>
             </div>
-            <nav className="flex gap-1.5 overflow-x-auto px-2 pb-2">
+            <nav className="flex gap-2 overflow-x-auto px-2 pb-2">
               {NAV.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex shrink-0 flex-col items-start gap-0.5 whitespace-nowrap rounded-md border border-dashed px-2.5 py-1 text-xs ${
+                  className={`flex shrink-0 flex-col items-start gap-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs tracking-wide ${
                     active(item.href)
-                      ? "border-indigo-400 bg-indigo-600 text-white"
-                      : "border-zinc-300 bg-zinc-50 text-zinc-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                      ? "bg-indigo-600 font-semibold text-white shadow-sm"
+                      : "bg-zinc-50 text-zinc-600 ring-1 ring-dashed ring-zinc-300 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-600"
                   }`}
                 >
-                  <span className="flex gap-0.5 opacity-70" aria-hidden>
-                    <span className="h-1 w-1 rounded-full bg-current" />
-                    <span className="h-1 w-1 rounded-full bg-current" />
-                    <span className="h-1 w-1 rounded-full bg-current" />
+                  <span
+                    className={`flex gap-0.5 ${
+                      active(item.href) ? "text-white/70" : "text-zinc-400"
+                    }`}
+                    aria-hidden
+                  >
+                    <span className="inline-block h-1 w-1 rounded-full bg-current" />
+                    <span className="inline-block h-1 w-1 rounded-full bg-current" />
+                    <span className="inline-block h-1 w-1 rounded-full bg-current" />
                   </span>
                   {item.label}
                 </Link>
