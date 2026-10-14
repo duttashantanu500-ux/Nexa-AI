@@ -47,27 +47,32 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`nexa-nav-brick relative block rounded-lg px-3 py-2.5 text-sm tracking-wide transition ${
+                className={`block rounded-xl px-3 py-2.5 text-sm font-medium tracking-wide transition ${
                   active(item.href)
-                    ? "bg-indigo-50 font-semibold text-indigo-700 shadow-sm ring-1 ring-indigo-200 dark:bg-indigo-950/50 dark:text-indigo-300 dark:ring-indigo-800"
-                    : "text-zinc-600 ring-1 ring-dashed ring-zinc-300 hover:bg-zinc-50 hover:text-zinc-900 hover:ring-indigo-300 dark:text-zinc-400 dark:ring-zinc-600 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-100 dark:hover:ring-indigo-700"
+                    ? "bg-indigo-50 text-indigo-700 shadow-[inset_0_0_0_1.5px_rgba(99,102,241,0.45)] dark:bg-indigo-950/50 dark:text-indigo-300 dark:shadow-[inset_0_0_0_1.5px_rgba(129,140,248,0.4)]"
+                    : "text-zinc-600 shadow-[inset_0_0_0_1.5px_rgba(212,212,216,1)] [border-style:dashed] hover:bg-zinc-50 hover:text-zinc-900 hover:shadow-[inset_0_0_0_1.5px_rgba(165,180,252,0.8)] dark:text-zinc-400 dark:shadow-[inset_0_0_0_1.5px_rgba(82,82,91,1)] dark:hover:bg-zinc-800/50 dark:hover:text-zinc-100 dark:hover:shadow-[inset_0_0_0_1.5px_rgba(99,102,241,0.5)]"
                 }`}
+                style={
+                  active(item.href)
+                    ? undefined
+                    : {
+                        backgroundImage:
+                          "radial-gradient(circle, currentColor 0.55px, transparent 0.65px)",
+                        backgroundSize: "6px 6px",
+                        backgroundPosition: "0 0",
+                        opacity: 1,
+                      }
+                }
               >
-                {/* LEGO stud row — pure CSS circles, not text symbols */}
                 <span
-                  className={`mb-1.5 flex gap-1 ${
+                  className={
                     active(item.href)
-                      ? "text-indigo-400 dark:text-indigo-500"
-                      : "text-zinc-300 dark:text-zinc-600"
-                  }`}
-                  aria-hidden
+                      ? ""
+                      : "[background-image:none] relative z-[1]"
+                  }
                 >
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
+                  {item.label}
                 </span>
-                <span className="block leading-none">{item.label}</span>
               </Link>
             ))}
           </nav>
@@ -93,22 +98,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex shrink-0 flex-col items-start gap-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs tracking-wide ${
+                  className={`shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-medium tracking-wide ${
                     active(item.href)
-                      ? "bg-indigo-600 font-semibold text-white shadow-sm"
-                      : "bg-zinc-50 text-zinc-600 ring-1 ring-dashed ring-zinc-300 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-600"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "bg-zinc-50 text-zinc-600 shadow-[inset_0_0_0_1px_rgba(212,212,216,1)] dark:bg-zinc-800 dark:text-zinc-300 dark:shadow-[inset_0_0_0_1px_rgba(82,82,91,1)]"
                   }`}
                 >
-                  <span
-                    className={`flex gap-0.5 ${
-                      active(item.href) ? "text-white/70" : "text-zinc-400"
-                    }`}
-                    aria-hidden
-                  >
-                    <span className="inline-block h-1 w-1 rounded-full bg-current" />
-                    <span className="inline-block h-1 w-1 rounded-full bg-current" />
-                    <span className="inline-block h-1 w-1 rounded-full bg-current" />
-                  </span>
                   {item.label}
                 </Link>
               ))}
