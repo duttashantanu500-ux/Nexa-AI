@@ -22,6 +22,10 @@ import type { AgentProposal } from "@/lib/agentBuilder/types";
 import { UpgradeLimitModal } from "@/components/UpgradeLimitModal";
 import { LIMIT_MESSAGES } from "@/lib/plans";
 import { fetchServerAgents } from "@/lib/serverAgentClient";
+import {
+  ROLE_TEMPLATES,
+  type RoleTemplate,
+} from "@/lib/roleTemplates";
 
 type ChatLine = { role: "user" | "assistant"; content: string; thinking?: string[] };
 
@@ -41,6 +45,8 @@ export default function NewAgentPage() {
   const [error, setError] = useState("");
   const [billing, setBilling] = useState<ClientBillingState | null>(null);
   const [limitOpen, setLimitOpen] = useState(false);
+  const [pickedRole, setPickedRole] = useState<RoleTemplate | null>(null);
+  const [showDesk, setShowDesk] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,7 +57,9 @@ export default function NewAgentPage() {
     }
     const scope = draftScopeId(s.user.id);
     scopeRef.current = scope;
-    setLines(loadBuilderChat(scope) as ChatLine[]);
+    const existing = loadBuilderChat(scope) as ChatLine[];
+    setLines(existing);
+    if (existing.length > 0) setShowDesk(false);
     setChatReady(true);
     void fetchBillingStatus().then(setBilling);
   }, [router]);
@@ -65,14 +73,14 @@ export default function NewAgentPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [lines, proposal, thinkingLive]);
 
-  const send = async () => {
-    const text = input.trim();
-    if (!text || busy) return;
-    setInput("");
+  const sendText = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || busy) return;
     setError("");
     setProposal(null);
     setRequiredConnectors([]);
-    const nextLines = [...lines, { role: "user" as const, content: text }];
+    setShowDesk(false);
+    const nextLines = [...lines, { role: "user" as const, content: trimmed }];
     setLines(nextLines);
     setBusy(true);
     setThinkingLive([
@@ -147,6 +155,20 @@ export default function NewAgentPage() {
     setBusy(false);
   };
 
+  const send = async () => {
+    const text = input.trim();
+    if (!text || busy) return;
+    setInput("");
+    await sendText(text);
+  };
+
+  const pickTemplate = (t: RoleTemplate) => {
+    setPickedRole(t);
+    setShowDesk(false);
+    setInput(t.builderPrompt);
+    void sendText(t.builderPrompt);
+  };
+
   const confirmHire = async () => {
     if (!proposal || creating) return;
     setCreating(true);
@@ -191,9 +213,10 @@ export default function NewAgentPage() {
       }));
       const agent = createAgent({
         userId: s.user.id,
-        name: proposal.name || "AI Employee",
+        name: proposal.name || pickedRole?.name || "AI Employee",
         purpose: proposal.purpose || proposal.description || "",
         description: proposal.description || proposal.purpose || "",
+        templateType: pickedRole?.id,
         steps,
         status: "active",
         schedule: {
@@ -223,18 +246,59 @@ export default function NewAgentPage() {
       >
         <div className="mb-4">
           <Link href="/agents" className="text-xs text-zinc-500 hover:text-indigo-600">
-            ← AI Team
+            ← Digital team
           </Link>
           <h1 className="mt-1 text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-            AI Employee Builder
+            Hiring Desk
           </h1>
           <p className="mt-0.5 text-sm text-zinc-500">
-            Build one employee at a time — structured answers after you describe the job.
+            Pick a role template or describe the job — hire once, reuse for ongoing work.
           </p>
         </div>
 
+        {showDesk && lines.length === 0 && !busy && (
+          <section className="mb-6 space-y-3">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+              Role templates
+            </h2>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {ROLE_TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => pickTemplate(t)}
+                  className="rounded-xl border border-zinc-200 bg-white p-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50/40 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-indigo-700"
+                >
+                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                    {t.name}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-indigo-600 dark:text-indigo-400">
+                    {t.jobTitle} · {t.department}
+                  </div>
+                  <p className="mt-1.5 text-xs text-zinc-500 line-clamp-2">{t.summary}</p>
+                  <p className="mt-2 text-[10px] text-zinc-400">{t.limitations}</p>
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-zinc-500">
+              Or describe a custom role below. Templates only use tools Nexa already supports.
+            </p>
+          </section>
+        )}
+
+        {!showDesk && lines.length === 0 && !busy && (
+          <button
+            type="button"
+            className="mb-3 text-left text-xs text-indigo-600"
+            onClick={() => setShowDesk(true)}
+          >
+            ← Back to role templates
+          </button>
+        )}
+
         <div className="flex flex-1 flex-col gap-3 overflow-y-auto pb-4">
-          {lines.length === 0 && !busy && (
+          {lines.length === 0 && !busy && !showDesk && (
             <p className="px-1 text-sm text-zinc-500">What should this employee do?</p>
           )}
 
@@ -283,6 +347,11 @@ export default function NewAgentPage() {
           {proposal && (
             <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 dark:border-indigo-900 dark:bg-indigo-950/30">
               <h2 className="text-sm font-semibold">{proposal.name || "Proposed AI employee"}</h2>
+              {pickedRole && (
+                <p className="mt-0.5 text-[11px] text-indigo-600 dark:text-indigo-400">
+                  Template: {pickedRole.name}
+                </p>
+              )}
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
                 {proposal.purpose || proposal.description}
               </p>
@@ -338,7 +407,7 @@ export default function NewAgentPage() {
                   void send();
                 }
               }}
-              placeholder='e.g. "Summarize Slack every morning" or "Review HubSpot deals weekly"'
+              placeholder='Describe a role, or pick a template above — e.g. "Weekly Slack summary"'
               className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               disabled={busy}
             />
@@ -352,7 +421,7 @@ export default function NewAgentPage() {
             </button>
           </div>
           <p className="mt-2 text-xs text-zinc-500">
-            One conversation per employee. Structured answers appear after your message.
+            Hire once. Reuse the same employee for ongoing work — no need to rehire for every task.
           </p>
         </div>
       </div>
