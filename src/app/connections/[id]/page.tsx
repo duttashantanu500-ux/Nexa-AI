@@ -22,8 +22,43 @@ import { LIMIT_MESSAGES } from "@/lib/plans";
 
 const COMFY_KEY = "nexa_comfy_base_url";
 const NOTION_PARENT_KEY = "nexa_notion_default_parent";
+/** Same cache key as Connections list — instant badge on detail open */
+const STATUS_CACHE_KEY = "nexa_conn_status_v1";
 
 type Provider = "notion" | "slack" | "buffer" | "hubspot" | "ideogram";
+
+function readCachedStatus(providerId: string): ConnectorUiStatus | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(STATUS_CACHE_KEY);
+    if (!raw) return null;
+    const map = JSON.parse(raw) as Partial<Record<string, ConnectorUiStatus>>;
+    const s = map[providerId];
+    if (
+      s === "connected" ||
+      s === "available" ||
+      s === "error" ||
+      s === "unavailable" ||
+      s === "coming_soon"
+    ) {
+      return s;
+    }
+  } catch {
+    /* */
+  }
+  return null;
+}
+
+function writeCachedStatus(providerId: string, status: ConnectorUiStatus) {
+  try {
+    const raw = sessionStorage.getItem(STATUS_CACHE_KEY);
+    const map = (raw ? JSON.parse(raw) : {}) as Record<string, ConnectorUiStatus>;
+    map[providerId] = status;
+    sessionStorage.setItem(STATUS_CACHE_KEY, JSON.stringify(map));
+  } catch {
+    /* */
+  }
+}
 
 export default function ConnectorDetailPage() {
   return (
@@ -45,10 +80,17 @@ function ConnectorDetailInner() {
   const search = useSearchParams();
   const connector = getConnector(id);
 
+  // Instant seed from list-page cache or ?s= query — no blank Available flash
+  const seeded =
+    (search.get("s") as ConnectorUiStatus | null) ||
+    (id ? readCachedStatus(id) : null);
+
   const [userId, setUserId] = useState("");
   const [banner, setBanner] = useState("");
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<ConnectorUiStatus>("available");
+  const [status, setStatus] = useState<ConnectorUiStatus>(
+    seeded || "available"
+  );
   const [workspace, setWorkspace] = useState<string | null>(null);
   const [connectPath, setConnectPath] = useState<string | null>(null);
   const [limitOpen, setLimitOpen] = useState(false);
@@ -64,21 +106,53 @@ function ConnectorDetailInner() {
   const refreshStatus = useCallback(async (uid: string, provider: string) => {
     if (!uid || !provider) return;
     try {
+      // Prefer batch endpoint (same as list) — one round-trip, shared cache
+      const batchRes = await fetch(
+        `/api/connections/status?userId=${encodeURIComponent(uid)}`,
+        { cache: "no-store" }
+      );
+      const batch = await batchRes.json().catch(() => ({}));
+      const st = (batch?.statuses || {}) as Record<
+        string,
+        { status?: string; workspaceName?: string | null; message?: string; connectPath?: string }
+      >;
+      const row = st[provider];
+      if (row?.status) {
+        const next = row.status as ConnectorUiStatus;
+        setStatus(next);
+        writeCachedStatus(provider, next);
+        if (row.workspaceName) setWorkspace(row.workspaceName);
+        if (row.message) setMsg(row.message);
+        if (row.connectPath) setConnectPath(row.connectPath);
+        return;
+      }
+      // Fallback per-provider status
       const res = await fetch(
         `/api/connections/${provider}/status?userId=${encodeURIComponent(uid)}`,
         { cache: "no-store" }
       );
       const data = await res.json().catch(() => ({}));
-      setStatus((data.status as ConnectorUiStatus) || "available");
+      const next = (data.status as ConnectorUiStatus) || "available";
+      setStatus(next);
+      writeCachedStatus(provider, next);
       setWorkspace(data.workspaceName || null);
       setConnectPath(data.connectPath || null);
       setMsg(data.message || "");
     } catch {
-      setStatus("available");
+      // Keep seeded / previous status — do not flash Available on network blip
     }
   }, []);
 
   useEffect(() => {
+    // Re-seed if navigating between connectors without remount
+    const fromQuery = search.get("s") as ConnectorUiStatus | null;
+    const fromCache = id ? readCachedStatus(id) : null;
+    if (fromQuery === "connected" || fromCache === "connected") {
+      setStatus("connected");
+    } else if (fromQuery || fromCache) {
+      setStatus((fromQuery || fromCache) as ConnectorUiStatus);
+    }
+
     const s = loadOperatorState();
     const uid = (s.user?.id || getStableUserId() || "").trim();
     if (!uid) {
@@ -96,14 +170,13 @@ function ConnectorDetailInner() {
     } catch {
       /* */
     }
-    if (isProvider) void refreshStatus(uid, id);
 
     const err = search.get("error");
     const connected = search.get("connected");
     if (connected && isProvider) {
       setStatus("connected");
+      writeCachedStatus(id, "connected");
       setBanner(`${connector?.name || "Account"} is connected.`);
-      void refreshStatus(uid, id);
     } else if (err) {
       setBanner(
         err === "save_failed"
@@ -111,6 +184,9 @@ function ConnectorDetailInner() {
           : "Something went wrong. Please try connecting again."
       );
     }
+
+    // Background confirm — UI already shows cached status
+    if (isProvider) void refreshStatus(uid, id);
   }, [router, id, search, refreshStatus, isProvider, connector?.name]);
 
   if (!connector) {
@@ -172,6 +248,8 @@ function ConnectorDetailInner() {
       });
       const data = await res.json().catch(() => ({}));
       setBanner(data.message || "Disconnected.");
+      setStatus("available");
+      writeCachedStatus(id, "available");
       await refreshStatus(userId, id);
     } catch {
       setBanner("Could not disconnect.");
@@ -252,7 +330,10 @@ function ConnectorDetailInner() {
         {connector.id === "mcp" && (
           <McpConnectionPanel
             userId={userId}
-            onStatus={(s) => setStatus(s as ConnectorUiStatus)}
+            onStatus={(s) => {
+              setStatus(s as ConnectorUiStatus);
+              writeCachedStatus("mcp", s as ConnectorUiStatus);
+            }}
           />
         )}
 
