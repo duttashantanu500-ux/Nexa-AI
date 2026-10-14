@@ -98,7 +98,7 @@ export default function AgentsPage() {
   const onDelete = async (id: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm("Delete this AI employee? This cannot be undone.")) return;
+    if (!confirm("Remove this AI employee from your team? This cannot be undone.")) return;
     setBusyId(id);
     try {
       deleteAgent(id);
@@ -153,14 +153,14 @@ export default function AgentsPage() {
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
         <PageHeader
           page="agents"
-          title="Your AI Team"
-          subtitle="Modular AI employees — each with a role, tools, and schedule."
+          title="Your digital team"
+          subtitle="Hire AI employees once. Assign work, review results, and reuse them — like a real workforce."
           actions={
             <Link
               href="/agents/new"
               className="rounded-xl bg-indigo-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm shadow-indigo-600/20"
             >
-              Hire AI Employee
+              Hire role
             </Link>
           }
         />
@@ -174,9 +174,14 @@ export default function AgentsPage() {
         {agents.length === 0 ? (
           <div className="nexa-card border-dashed p-10 text-center">
             <RobotAvatar id="violet" size="lg" className="mx-auto mb-3" />
-            <p className="text-sm text-zinc-500">No AI employees yet.</p>
+            <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+              No employees on your team yet
+            </p>
+            <p className="mt-1 text-sm text-zinc-500">
+              Open the Hiring Desk, pick a role template, and hire once for ongoing work.
+            </p>
             <Link href="/agents/new" className="mt-3 inline-block text-sm text-indigo-600">
-              Hire your first AI employee
+              Open Hiring Desk →
             </Link>
           </div>
         ) : (
@@ -184,6 +189,10 @@ export default function AgentsPage() {
             {agents.map((a) => {
               const avatar = resolveAgentAvatar(a.id);
               void avatarTick;
+              const roleLine =
+                a.purpose ||
+                a.description ||
+                `${a.steps?.length || 0} responsibilities · ${a.schedule?.frequency || "once"}`;
               return (
                 <li key={a.id}>
                   <div className="nexa-card flex items-center gap-3 px-4 py-3">
@@ -193,9 +202,12 @@ export default function AgentsPage() {
                         <div className="truncate font-medium text-zinc-900 dark:text-zinc-50">
                           {a.name}
                         </div>
-                        <p className="text-xs text-zinc-500">
-                          {a.steps?.length || 0} steps · {a.schedule?.frequency || "once"}
-                        </p>
+                        <p className="truncate text-xs text-zinc-500">{roleLine}</p>
+                        {a.lastRunStatus && (
+                          <p className="mt-0.5 text-[11px] text-zinc-400">
+                            Last work: {String(a.lastRunStatus).replace(/_/g, " ")}
+                          </p>
+                        )}
                       </div>
                     </Link>
                     <span className={statusBadgeClass(String(a.status))}>
@@ -214,7 +226,7 @@ export default function AgentsPage() {
                       onClick={(e) => void onDelete(a.id, e)}
                       className="rounded-lg px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950/30"
                     >
-                      Delete
+                      Remove
                     </button>
                   </div>
                 </li>
@@ -230,7 +242,7 @@ export default function AgentsPage() {
                 Edit employee
               </h2>
               <p className="mt-1 text-xs text-zinc-500">
-                Change the display name and robot avatar. Identity and workflows stay the same.
+                Change the display name and avatar. Role, tools, and work history stay the same.
               </p>
               <label className="mt-4 block text-xs font-medium text-zinc-600 dark:text-zinc-300">
                 Name
