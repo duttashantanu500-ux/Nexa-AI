@@ -15,6 +15,10 @@ const NAV = [
   { href: "/settings", label: "Settings" },
 ];
 
+/** LEGO-style font — only for nav labels */
+const LEGO_FONT =
+  "font-[family-name:var(--font-lego)] font-semibold tracking-wide";
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [name, setName] = useState("");
@@ -47,7 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`block rounded-xl border-2 border-dashed px-3 py-2.5 text-sm font-medium tracking-wide transition ${
+                className={`block rounded-xl border-2 border-dashed px-3 py-2.5 text-[15px] transition ${LEGO_FONT} ${
                   active(item.href)
                     ? "border-solid border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-indigo-500 dark:bg-indigo-950/40 dark:text-indigo-300"
                     : "border-zinc-300 bg-white text-zinc-600 hover:border-indigo-300 hover:bg-zinc-50 hover:text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:border-indigo-600 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-100"
@@ -79,7 +83,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`shrink-0 whitespace-nowrap rounded-xl border-2 border-dashed px-3 py-1.5 text-xs font-medium tracking-wide ${
+                  className={`shrink-0 whitespace-nowrap rounded-xl border-2 border-dashed px-3 py-1.5 text-xs transition ${LEGO_FONT} ${
                     active(item.href)
                       ? "border-solid border-indigo-500 bg-indigo-600 text-white"
                       : "border-zinc-300 bg-zinc-50 text-zinc-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
