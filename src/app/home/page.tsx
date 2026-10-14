@@ -132,14 +132,14 @@ export default function HomePage() {
         <PageHeader
           page="home"
           title={`${greeting()}${name ? `, ${name}` : ""}.`}
-          subtitle="Connect your tools. Build your AI team. Let them handle the work."
+          subtitle="Hire digital talent. Assign real work. Manage your AI company."
           actions={
             <>
               <Link
                 href="/agents/new"
                 className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm shadow-indigo-600/20 hover:bg-indigo-500"
               >
-                Hire AI Employee
+                Hire role
               </Link>
               <Link
                 href="/connections"
@@ -173,15 +173,15 @@ export default function HomePage() {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              AI Team ({agents.length})
+              Digital team ({agents.length})
             </h2>
             <span className="text-xs text-zinc-500">{active.length} active</span>
           </div>
           {agents.length === 0 ? (
             <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-700">
-              <p className="text-sm text-zinc-600">No AI employees yet.</p>
+              <p className="text-sm text-zinc-600">No AI employees on your team yet.</p>
               <Link href="/agents/new" className="mt-2 inline-block text-sm text-indigo-600">
-                Hire an AI employee →
+                Open Hiring Desk →
               </Link>
             </div>
           ) : (
