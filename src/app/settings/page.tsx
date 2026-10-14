@@ -58,8 +58,8 @@ export default function SettingsPage() {
     setThemeLocal(t);
     applyTheme(t);
 
-    // Same identity used by Connections / OAuth token ownership
-    const uid = (getStableUserId() || s.user.id || "").trim();
+    // Same identity order as Connections page (token ownership)
+    const uid = (s.user?.id || getStableUserId() || "").trim();
     const localAgents = (s.agents || []).filter(
       (a) =>
         String(a.status) !== "archived" &&
@@ -72,11 +72,28 @@ export default function SettingsPage() {
       const b = await fetchBillingStatus(true);
       setBilling(b);
 
-      // Same status API + user id as Connections page (token presence)
-      const connections = await getConnectedExternalCount(uid || s.user!.id);
-      setUsage((u) => ({ ...u, connections }));
+      // Prefer sessionStorage cache written by Connections list (instant + accurate)
+      try {
+        const raw = sessionStorage.getItem("nexa_conn_status_v1");
+        if (raw) {
+          const map = JSON.parse(raw) as Record<string, string>;
+          let n = 0;
+          for (const p of ["notion", "slack", "buffer", "hubspot", "ideogram", "mcp"]) {
+            if (map[p] === "connected") n += 1;
+          }
+          if (n > 0) setUsage((u) => ({ ...u, connections: n }));
+        }
+      } catch {
+        /* */
+      }
 
-      // Prefer server agent list so Settings matches AI Team after hire
+      const connections = await getConnectedExternalCount(uid);
+      setUsage((u) => ({
+        ...u,
+        // Never drop a higher cache count if API briefly returns 0
+        connections: Math.max(connections, u.connections),
+      }));
+
       try {
         const remote = await fetchServerAgents();
         if (remote.ok && Array.isArray(remote.agents)) {
