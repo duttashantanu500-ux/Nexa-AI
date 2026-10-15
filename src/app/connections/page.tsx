@@ -189,7 +189,6 @@ function ConnectionsInner() {
 
   const Card = ({ c }: { c: ConnectorDefinition }) => {
     const status = resolveStatus(c);
-    // Pass status in URL so detail page paints the badge with zero wait
     const href =
       status === "connected" || status === "available" || status === "error"
         ? `/connections/${c.id}?s=${status}`
@@ -215,6 +214,12 @@ function ConnectionsInner() {
     );
   };
 
+  const bufferNeedsReconnect =
+    statusLoaded &&
+    (bufferStatus === "available" ||
+      bufferStatus === "error" ||
+      bufferStatus === "unavailable");
+
   return (
     <AppShell>
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
@@ -232,6 +237,12 @@ function ConnectionsInner() {
         {storageWarning && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
             {storageWarning}
+          </div>
+        )}
+        {bufferNeedsReconnect && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+            <span className="font-medium">Buffer needs a reconnect.</span>{" "}
+            Tokens can expire — open Buffer and connect again so employees can schedule posts.
           </div>
         )}
 
