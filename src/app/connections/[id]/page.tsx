@@ -39,7 +39,8 @@ function readCachedStatus(providerId: string): ConnectorUiStatus | null {
       s === "available" ||
       s === "error" ||
       s === "unavailable" ||
-      s === "coming_soon"
+      s === "coming_soon" ||
+      s === "loading"
     ) {
       return s;
     }
@@ -58,6 +59,11 @@ function writeCachedStatus(providerId: string, status: ConnectorUiStatus) {
   } catch {
     /* */
   }
+}
+
+function badgeLabel(s: ConnectorUiStatus): string {
+  if (s === "loading") return "Checking…";
+  return statusLabel(s);
 }
 
 export default function ConnectorDetailPage() {
@@ -80,7 +86,7 @@ function ConnectorDetailInner() {
   const search = useSearchParams();
   const connector = getConnector(id);
 
-  // Instant seed from list-page cache or ?s= query — no blank Available flash
+  // Instant seed from list-page cache or ?s= query — never default to Available
   const seeded =
     (search.get("s") as ConnectorUiStatus | null) ||
     (id ? readCachedStatus(id) : null);
@@ -89,7 +95,10 @@ function ConnectorDetailInner() {
   const [banner, setBanner] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<ConnectorUiStatus>(
-    seeded || "available"
+    seeded && seeded !== "loading" ? seeded : "loading"
+  );
+  const [statusReady, setStatusReady] = useState(
+    Boolean(seeded && seeded !== "loading")
   );
   const [workspace, setWorkspace] = useState<string | null>(null);
   const [connectPath, setConnectPath] = useState<string | null>(null);
@@ -106,7 +115,6 @@ function ConnectorDetailInner() {
   const refreshStatus = useCallback(async (uid: string, provider: string) => {
     if (!uid || !provider) return;
     try {
-      // Prefer batch endpoint (same as list) — one round-trip, shared cache
       const batchRes = await fetch(
         `/api/connections/status?userId=${encodeURIComponent(uid)}`,
         { cache: "no-store" }
@@ -120,13 +128,13 @@ function ConnectorDetailInner() {
       if (row?.status) {
         const next = row.status as ConnectorUiStatus;
         setStatus(next);
+        setStatusReady(true);
         writeCachedStatus(provider, next);
         if (row.workspaceName) setWorkspace(row.workspaceName);
         if (row.message) setMsg(row.message);
         if (row.connectPath) setConnectPath(row.connectPath);
         return;
       }
-      // Fallback per-provider status
       const res = await fetch(
         `/api/connections/${provider}/status?userId=${encodeURIComponent(uid)}`,
         { cache: "no-store" }
@@ -134,23 +142,26 @@ function ConnectorDetailInner() {
       const data = await res.json().catch(() => ({}));
       const next = (data.status as ConnectorUiStatus) || "available";
       setStatus(next);
+      setStatusReady(true);
       writeCachedStatus(provider, next);
       setWorkspace(data.workspaceName || null);
       setConnectPath(data.connectPath || null);
       setMsg(data.message || "");
     } catch {
-      // Keep seeded / previous status — do not flash Available on network blip
+      // Keep seeded status — do not flash Available on network blip
+      setStatusReady(true);
     }
   }, []);
 
   useEffect(() => {
-    // Re-seed if navigating between connectors without remount
     const fromQuery = search.get("s") as ConnectorUiStatus | null;
     const fromCache = id ? readCachedStatus(id) : null;
     if (fromQuery === "connected" || fromCache === "connected") {
       setStatus("connected");
+      setStatusReady(true);
     } else if (fromQuery || fromCache) {
       setStatus((fromQuery || fromCache) as ConnectorUiStatus);
+      setStatusReady(true);
     }
 
     const s = loadOperatorState();
@@ -175,6 +186,7 @@ function ConnectorDetailInner() {
     const connected = search.get("connected");
     if (connected && isProvider) {
       setStatus("connected");
+      setStatusReady(true);
       writeCachedStatus(id, "connected");
       setBanner(`${connector?.name || "Account"} is connected.`);
     } else if (err) {
@@ -185,7 +197,6 @@ function ConnectorDetailInner() {
       );
     }
 
-    // Background confirm — UI already shows cached status
     if (isProvider) void refreshStatus(uid, id);
   }, [router, id, search, refreshStatus, isProvider, connector?.name]);
 
@@ -249,6 +260,7 @@ function ConnectorDetailInner() {
       const data = await res.json().catch(() => ({}));
       setBanner(data.message || "Disconnected.");
       setStatus("available");
+      setStatusReady(true);
       writeCachedStatus(id, "available");
       await refreshStatus(userId, id);
     } catch {
@@ -284,6 +296,11 @@ function ConnectorDetailInner() {
     }
   };
 
+  const showBufferReconnect =
+    connector.id === "buffer" &&
+    statusReady &&
+    (uiStatus === "available" || uiStatus === "error" || uiStatus === "unavailable");
+
   return (
     <AppShell>
       <div className="mx-auto max-w-2xl space-y-6 px-4 py-8">
@@ -300,7 +317,9 @@ function ConnectorDetailInner() {
                 <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
                   {connector.name}
                 </h1>
-                <span className={statusBadgeClass(uiStatus)}>{statusLabel(uiStatus)}</span>
+                <span className={statusBadgeClass(uiStatus === "loading" ? "available" : uiStatus)}>
+                  {badgeLabel(uiStatus)}
+                </span>
               </div>
               <p className="mt-1 text-sm text-zinc-500">
                 {connector.detailDescription || connector.description}
@@ -308,7 +327,7 @@ function ConnectorDetailInner() {
               {workspace && uiStatus === "connected" && (
                 <p className="mt-1 text-xs text-zinc-400">{workspace}</p>
               )}
-              {msg && isProvider && (
+              {msg && isProvider && uiStatus !== "loading" && (
                 <p className="mt-1 text-xs text-zinc-400">{msg}</p>
               )}
             </div>
@@ -318,6 +337,17 @@ function ConnectorDetailInner() {
         {banner && connector.id !== "mcp" && (
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
             {banner}
+          </div>
+        )}
+
+        {showBufferReconnect && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+            <p className="font-medium">Buffer is not connected</p>
+            <p className="mt-1 text-xs opacity-90">
+              Buffer access tokens can expire after a while. Click <strong>Connect Buffer</strong>{\" \"}
+              below to sign in again — your AI employees can then view channels and schedule posts
+              (with your approval).
+            </p>
           </div>
         )}
 
@@ -332,12 +362,13 @@ function ConnectorDetailInner() {
             userId={userId}
             onStatus={(s) => {
               setStatus(s as ConnectorUiStatus);
+              setStatusReady(true);
               writeCachedStatus("mcp", s as ConnectorUiStatus);
             }}
           />
         )}
 
-        {isProvider && uiStatus !== "coming_soon" && (
+        {isProvider && uiStatus !== "coming_soon" && uiStatus !== "loading" && (
           <div className="flex flex-wrap gap-2">
             {uiStatus !== "connected" && connectHref && (
               <button
@@ -359,7 +390,7 @@ function ConnectorDetailInner() {
                   })();
                 }}
               >
-                Connect {connector.name}
+                {connector.id === "buffer" ? "Connect Buffer" : `Connect ${connector.name}`}
               </button>
             )}
             {uiStatus === "connected" && (
@@ -391,6 +422,10 @@ function ConnectorDetailInner() {
               </a>
             )}
           </div>
+        )}
+
+        {isProvider && uiStatus === "loading" && (
+          <p className="text-sm text-zinc-500">Checking connection status…</p>
         )}
 
         <UpgradeLimitModal
