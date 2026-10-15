@@ -43,14 +43,15 @@ export default function LandingPage() {
           <div className="nexa-enter space-y-6">
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-white px-3 py-1 text-xs font-medium text-indigo-700 shadow-sm dark:border-indigo-900 dark:bg-zinc-900 dark:text-indigo-300">
               <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
-              Modular AI employees for real work
+              AI employees · AI team · AI agents
             </div>
             <h1 className="max-w-xl text-4xl font-semibold leading-[1.08] tracking-tight md:text-5xl lg:text-[3.25rem]">
-              Build your AI team in a digital workshop
+              Nexa — hire AI employees and build your AI team
             </h1>
             <p className="max-w-lg text-base text-zinc-600 dark:text-zinc-400 md:text-lg">
-              Hire friendly AI employees that connect to Notion, Slack, HubSpot,
-              Buffer, and more — then let routine work run itself.
+              Nexa is an AI employee platform. Create AI agents that connect to
+              Notion, Slack, HubSpot, and Buffer — then assign real work with
+              approvals, schedules, and a shared Work Board.
             </p>
             <div className="flex flex-wrap gap-3">
               <Link
@@ -70,8 +71,11 @@ export default function LandingPage() {
           <RobotHeroScene />
         </section>
 
-        <section className="mt-20 space-y-6">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
+        <section className="mt-20 space-y-6" aria-labelledby="how-nexa-works">
+          <h2
+            id="how-nexa-works"
+            className="text-sm font-semibold uppercase tracking-wide text-zinc-400"
+          >
             How Nexa works
           </h2>
           <div className="grid gap-4 md:grid-cols-3">
@@ -79,17 +83,17 @@ export default function LandingPage() {
               {
                 avatar: "moss" as const,
                 title: "Connect your tools",
-                body: "Notion, Slack, Buffer, HubSpot, Vault, and more — your team works where you already do.",
+                body: "Notion, Slack, Buffer, HubSpot, Vault, and more — your AI team works where you already do.",
               },
               {
                 avatar: "violet" as const,
                 title: "Build your AI team",
-                body: "Describe the role. Nexa turns it into steps your AI employees can run, with approvals when needed.",
+                body: "Describe the role. Nexa turns it into steps your AI employees and AI agents can run, with approvals when needed.",
               },
               {
                 avatar: "ember" as const,
                 title: "Run and schedule",
-                body: "Run once or on a schedule. See history, outputs, and what still needs your attention.",
+                body: "Run once or on a schedule. Track every AI agent on the Work Board — history, outputs, and what needs you.",
               },
             ].map((card) => (
               <div key={card.title} className="nexa-card p-5">
@@ -105,21 +109,65 @@ export default function LandingPage() {
           </div>
         </section>
 
+        <section className="mt-16 space-y-4" aria-labelledby="what-is-nexa">
+          <h2
+            id="what-is-nexa"
+            className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
+          >
+            What is Nexa?
+          </h2>
+          <div className="max-w-3xl space-y-3 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+            <p>
+              <strong className="font-medium text-zinc-800 dark:text-zinc-200">
+                Nexa
+              </strong>{" "}
+              is a digital workforce platform for hiring and managing{" "}
+              <strong className="font-medium text-zinc-800 dark:text-zinc-200">
+                AI employees
+              </strong>
+              . Each AI employee is an AI agent you configure once — role,
+              tools, and workflow — then reuse for ongoing work instead of
+              starting from scratch every time.
+            </p>
+            <p>
+              Build an{" "}
+              <strong className="font-medium text-zinc-800 dark:text-zinc-200">
+                AI team
+              </strong>{" "}
+              for research, marketing, sales, or operations. Connect the tools
+              your company already uses. Nexa runs the steps, asks for approval
+              when something is sensitive, and keeps a clear work history.
+            </p>
+            <p>
+              Whether you search for an AI agent platform, AI team software, or
+              a place to hire AI employees, Nexa is built for founders and
+              operators who want real work done — not another chat demo.
+            </p>
+          </div>
+        </section>
+
         <section className="mt-16 grid gap-4 md:grid-cols-2">
           <div className="nexa-card p-6">
-            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Free</div>
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+              Free
+            </div>
             <div className="mt-1 text-2xl font-semibold">$0</div>
             <p className="mt-2 text-sm text-zinc-500">
               Up to 3 AI employees, core connections, and monthly work runs.
             </p>
           </div>
           <div className="nexa-card border-indigo-200 bg-indigo-50/40 p-6 dark:border-indigo-900 dark:bg-indigo-950/30">
-            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Pro</div>
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+              Pro
+            </div>
             <div className="mt-1 text-2xl font-semibold">$9/mo</div>
             <p className="mt-2 text-sm text-zinc-500">
               Higher limits for AI employees, work runs, connections, and Vault.
             </p>
-            <Link href="/plans" className="mt-3 inline-block text-sm text-indigo-600 hover:underline">
+            <Link
+              href="/plans"
+              className="mt-3 inline-block text-sm text-indigo-600 hover:underline"
+            >
               Compare Free and Pro →
             </Link>
           </div>
@@ -131,9 +179,12 @@ export default function LandingPage() {
             <RobotAvatar id="pearl" size="sm" />
             <RobotAvatar id="sun" size="sm" />
           </div>
-          <h2 className="text-xl font-semibold tracking-tight">Start your workshop free</h2>
+          <h2 className="text-xl font-semibold tracking-tight">
+            Start your AI team free
+          </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-zinc-500">
-            Create your account, connect a tool, and hire your first AI employee in minutes.
+            Create your Nexa account, connect a tool, and hire your first AI
+            employee in minutes.
           </p>
           <Link
             href="/signup"
@@ -147,33 +198,19 @@ export default function LandingPage() {
       <footer className="border-t border-zinc-200 py-8 dark:border-zinc-800">
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 text-sm text-zinc-500 md:flex-row md:items-center md:justify-between">
           <p>
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">Nexa</span>
-            {" — "}Build your AI Team
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              Nexa
+            </span>
+            {" — "}AI employees & AI team platform
           </p>
-          <div className="flex gap-4">
+          <nav className="flex gap-4" aria-label="Footer">
             <Link href="/plans">Plans</Link>
             <Link href="/login">Sign in</Link>
             <Link href="/signup">Sign up</Link>
-          </div>
+          </nav>
           <p>© {new Date().getFullYear()} Nexa</p>
         </div>
       </footer>
-
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{
-          __html: JSON.stringify({
-            "@context": "https://schema.org",
-            "@type": "SoftwareApplication",
-            name: "Nexa",
-            applicationCategory: "BusinessApplication",
-            operatingSystem: "Web",
-            description:
-              "Nexa is where you build your AI team — hire AI employees, connect their tools, and let them handle the work.",
-            url: "https://www.nexaiintelligence.online",
-          }),
-        }}
-      />
     </div>
   );
 }
