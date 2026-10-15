@@ -38,8 +38,18 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "Share updates in Slack when connected",
     ],
     suggestedTools: ["notion", "slack", "buffer"],
-    builderPrompt:
-      "Hire a Marketing Employee. Job title: Marketing Specialist. Department: Marketing. Responsibilities: organize marketing notes in Notion, draft social posts for Buffer when available, and post status updates to Slack when connected. Prefer approval before publishing. Schedule: weekly if useful.",
+    builderPrompt: [
+      "Hire a Marketing Employee.",
+      "Job title: Marketing Specialist. Department: Marketing.",
+      "Build a reusable workflow with these concrete steps (use only real Nexa actions):",
+      "1) local_data.note — capture the campaign brief or topic from my input",
+      "2) local_data.report — draft a short marketing summary",
+      "3) notion.create_page — save the summary to Notion (requires approval)",
+      "4) buffer.create_post — draft a social post for Buffer when connected (requires approval)",
+      "5) slack.post_message — optionally notify a Slack channel (requires approval)",
+      "Prefer approval before any publish or CRM write. Skip Buffer/Slack steps if not connected.",
+      "Schedule: weekly if useful.",
+    ].join(" "),
     limitations:
       "Cannot invent brand strategy or post without your connected tools and approvals.",
   },
@@ -56,8 +66,18 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "Flag items that need human outreach",
     ],
     suggestedTools: ["hubspot", "slack"],
-    builderPrompt:
-      "Hire a Sales Employee. Job title: Sales Operations. Department: Sales. Responsibilities: review HubSpot deals, summarize pipeline changes, draft follow-up notes, and optionally notify Slack. Require approval before changing CRM records. Schedule: daily or weekly as fits.",
+    builderPrompt: [
+      "Hire a Sales Employee.",
+      "Job title: Sales Operations. Department: Sales.",
+      "Build a reusable workflow with these concrete steps (use only real Nexa actions):",
+      "1) hubspot.list_deals — load recent deals",
+      "2) hubspot.list_contacts — load recent contacts for context",
+      "3) local_data.report — write a pipeline summary and follow-up list",
+      "4) notion.create_page — save the summary to Notion when connected (requires approval)",
+      "5) slack.post_message — optionally post a short update to Slack (requires approval)",
+      "Do not create or update HubSpot records in the default hire unless I ask; require approval for any CRM write.",
+      "Schedule: daily or weekly as fits.",
+    ].join(" "),
     limitations:
       "Does not send cold outreach or change deals without your approval and a connected HubSpot account.",
   },
@@ -69,15 +89,26 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     summary:
       "Runs structured research missions and produces reports you can reuse.",
     responsibilities: [
-      "Search and read public web sources",
-      "Produce structured research reports",
-      "Save findings to Notion when connected",
+      "Turn a research brief into structured notes",
+      "Filter and organize findings",
+      "Produce a clear report and save to Notion when connected",
     ],
     suggestedTools: ["notion", "local_data"],
-    builderPrompt:
-      "Hire a Research Employee. Job title: Research Analyst. Department: Strategy. Responsibilities: run research on topics I specify, filter results, produce a clear report, and optionally save notes to Notion. Use only public web and connected tools.",
+    builderPrompt: [
+      "Hire a Research Employee.",
+      "Job title: Research Analyst. Department: Strategy.",
+      "Build a reusable multi-step research workflow (use only real Nexa actions — not a single Filter list step):",
+      "1) local_data.list_from_text — turn my research brief / sources into a working list",
+      "2) local_data.filter — keep only relevant items by keyword",
+      "3) local_data.limit — keep the top findings",
+      "4) local_data.note — capture key insights and caveats",
+      "5) local_data.report — produce a structured research report with title and sections",
+      "6) notion.create_page — save the report to Notion when connected (requires approval)",
+      "Name: Research Analyst. Purpose: Provide actionable insights for strategy decisions.",
+      "Do not invent licensed data; use only public input I provide and connected tools.",
+    ].join(" "),
     limitations:
-      "Research quality depends on public sources; not a substitute for licensed data providers.",
+      "Research quality depends on the brief and public sources; not a substitute for licensed data providers.",
   },
   {
     id: "operations",
@@ -92,8 +123,17 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "Turn checklists into clear summaries",
     ],
     suggestedTools: ["notion", "slack"],
-    builderPrompt:
-      "Hire an Operations Employee. Job title: Operations Coordinator. Department: Operations. Responsibilities: maintain internal notes and checklists in Notion, summarize status, and post routine updates to Slack when connected. Prefer read-and-summarize first; require approval for external posts.",
+    builderPrompt: [
+      "Hire an Operations Employee.",
+      "Job title: Operations Coordinator. Department: Operations.",
+      "Build a reusable workflow with these concrete steps (use only real Nexa actions):",
+      "1) local_data.list_from_text — turn my checklist or status notes into a list",
+      "2) local_data.filter — highlight items that need attention",
+      "3) local_data.report — produce a clear status summary",
+      "4) notion.create_page — save operating notes to Notion when connected (requires approval)",
+      "5) slack.post_message — post a short routine update to Slack when connected (requires approval)",
+      "Prefer read-and-summarize first; require approval for external posts.",
+    ].join(" "),
     limitations:
       "Does not manage payroll, legal, or systems outside connected tools.",
   },
