@@ -24,27 +24,40 @@ const fredoka = Fredoka({
   weight: ["500", "600", "700"],
 });
 
+const SEO_DESCRIPTION =
+  "Nexa is the AI employee and AI team platform. Hire AI agents, connect Notion, Slack, HubSpot, and Buffer, then run real work with approvals, schedules, and a Work Board.";
+
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Nexa — Build your AI Team",
+    default: "Nexa — AI Employees & AI Team Platform | Hire AI Agents",
     template: "%s · Nexa",
   },
-  description:
-    "Nexa is where you build your AI team. Hire AI employees, connect their tools, and let them handle the work — with Vault, schedules, and work history.",
+  description: SEO_DESCRIPTION,
   keywords: [
     "Nexa",
+    "Nexa AI",
+    "AI employee",
     "AI employees",
     "AI team",
-    "workflow automation",
-    "AI automation",
-    "connect tools",
-    "Notion Slack Buffer",
+    "AI agent",
+    "AI agents",
+    "digital workforce",
+    "hire AI employees",
     "AI employee builder",
+    "AI workflow automation",
+    "AI agent platform",
+    "Notion AI automation",
+    "Slack AI agent",
+    "HubSpot AI",
+    "Buffer AI",
   ],
-  authors: [{ name: "Nexa" }],
+  authors: [{ name: "Nexa", url: SITE_URL }],
   creator: "Nexa",
+  publisher: "Nexa",
   applicationName: "Nexa",
+  category: "technology",
+  classification: "Business Software",
   manifest: "/site.webmanifest",
   alternates: {
     canonical: "/",
@@ -54,23 +67,21 @@ export const metadata: Metadata = {
     locale: "en_US",
     url: SITE_URL,
     siteName: "Nexa",
-    title: "Nexa — Build your AI Team",
-    description:
-      "Connect your tools. Build your AI team. Let them handle the work.",
+    title: "Nexa — AI Employees & AI Team Platform",
+    description: SEO_DESCRIPTION,
     images: [
       {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "Nexa — Build your AI Team",
+        alt: "Nexa — Hire AI employees and build your AI team",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Nexa — Build your AI Team",
-    description:
-      "Connect your tools. Build your AI team. Let them handle the work.",
+    title: "Nexa — AI Employees & AI Team Platform",
+    description: SEO_DESCRIPTION,
     images: ["/twitter-image"],
   },
   robots: {
@@ -92,6 +103,9 @@ export const metadata: Metadata = {
     apple: [{ url: "/apple-icon?v=official-5", sizes: "180x180", type: "image/png" }],
     shortcut: ["/icon?v=official-5"],
   },
+  other: {
+    "google-site-verification": process.env.GOOGLE_SITE_VERIFICATION || "",
+  },
 };
 
 export const viewport: Viewport = {
@@ -101,6 +115,62 @@ export const viewport: Viewport = {
   ],
   width: "device-width",
   initialScale: 1,
+};
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": `${SITE_URL}/#organization`,
+      name: "Nexa",
+      url: SITE_URL,
+      logo: `${SITE_URL}/icon?v=official-5`,
+      description: SEO_DESCRIPTION,
+      sameAs: [],
+    },
+    {
+      "@type": "WebSite",
+      "@id": `${SITE_URL}/#website`,
+      name: "Nexa",
+      url: SITE_URL,
+      description: SEO_DESCRIPTION,
+      publisher: { "@id": `${SITE_URL}/#organization` },
+      inLanguage: "en-US",
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": `${SITE_URL}/#app`,
+      name: "Nexa",
+      applicationCategory: "BusinessApplication",
+      applicationSubCategory: "AI Employee Platform",
+      operatingSystem: "Web",
+      description: SEO_DESCRIPTION,
+      url: SITE_URL,
+      offers: [
+        {
+          "@type": "Offer",
+          price: "0",
+          priceCurrency: "USD",
+          name: "Nexa Free",
+        },
+        {
+          "@type": "Offer",
+          price: "9",
+          priceCurrency: "USD",
+          name: "Nexa Pro",
+        },
+      ],
+      featureList: [
+        "AI employees",
+        "AI team management",
+        "AI agent builder",
+        "Notion, Slack, HubSpot, Buffer connections",
+        "Work Board and approvals",
+        "Scheduling and work history",
+      ],
+    },
+  ],
 };
 
 export default function RootLayout({
@@ -113,6 +183,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${fredoka.variable} min-h-full antialiased bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50`}
       >
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
         <ThemeProvider>
           <DeployRefresh />
           {children}
