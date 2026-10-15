@@ -103,9 +103,6 @@ export const metadata: Metadata = {
     apple: [{ url: "/apple-icon?v=official-5", sizes: "180x180", type: "image/png" }],
     shortcut: ["/icon?v=official-5"],
   },
-  other: {
-    "google-site-verification": process.env.GOOGLE_SITE_VERIFICATION || "",
-  },
 };
 
 export const viewport: Viewport = {
