@@ -242,7 +242,7 @@ function ConnectionsInner() {
         {bufferNeedsReconnect && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
             <span className="font-medium">Buffer needs a reconnect.</span>{" "}
-            Tokens can expire — open Buffer and connect again so employees can schedule posts.
+            Open Buffer and connect again so your AI employees can schedule posts.
           </div>
         )}
 
