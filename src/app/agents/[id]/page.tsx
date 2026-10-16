@@ -37,6 +37,11 @@ import { UpgradeLimitModal } from "@/components/UpgradeLimitModal";
 const COMFY_KEY = "nexa_comfy_base_url";
 const NOTION_PARENT_KEY = "nexa_notion_default_parent";
 
+function isNotionParentSetupError(msg: string | undefined | null): boolean {
+  if (!msg) return false;
+  return /default page|parent page|set a default page/i.test(msg);
+}
+
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -48,6 +53,8 @@ export default function AgentDetailPage() {
   const [upgrading, setUpgrading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [needsSignIn, setNeedsSignIn] = useState(false);
+  const [notionParentInput, setNotionParentInput] = useState("");
+  const [notionParentSaved, setNotionParentSaved] = useState(false);
 
   const refresh = useCallback(() => {
     const a = getAgent(id);
@@ -62,6 +69,11 @@ export default function AgentDetailPage() {
       return;
     }
     refresh();
+    try {
+      setNotionParentInput(localStorage.getItem(NOTION_PARENT_KEY) || "");
+    } catch {
+      /* */
+    }
   }, [router, refresh]);
 
   const getComfy = () => {
@@ -272,6 +284,8 @@ export default function AgentDetailPage() {
       });
       if (finalStatus === "waiting_for_approval") {
         setError("Another step needs approval.");
+      } else if (finalStatus === "failed" || finalStatus === "succeeded_with_errors") {
+        setError(result.error || runStatusLabel(finalStatus));
       }
     } catch (e: unknown) {
       updateAgentRun(run.id, {
@@ -314,6 +328,24 @@ export default function AgentDetailPage() {
     if (sch.frequency === "monthly") return `Every month at ${time}`;
     return String(sch.frequency);
   })();
+
+  const latestRun = realRuns[0];
+  const needsNotionParent =
+    isNotionParentSetupError(error) ||
+    isNotionParentSetupError(latestRun?.error) ||
+    Boolean(latestRun?.stepResults?.some((s) => isNotionParentSetupError(s.error)));
+
+  const saveNotionParent = () => {
+    const v = notionParentInput.trim();
+    try {
+      localStorage.setItem(NOTION_PARENT_KEY, v);
+      setNotionParentSaved(true);
+      setError("");
+      setTimeout(() => setNotionParentSaved(false), 2500);
+    } catch {
+      setError("Could not save on this device.");
+    }
+  };
 
   return (
     <AppShell>
@@ -461,9 +493,39 @@ export default function AgentDetailPage() {
           </div>
         )}
 
-        {error && !needsSignIn && (
+        {error && !needsSignIn && !needsNotionParent && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
             {error}
+          </div>
+        )}
+
+        {needsNotionParent && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+            <p className="font-medium">Set a default Notion page</p>
+            <p className="mt-1 text-xs opacity-90">
+              This work needs a Notion page to save into. Paste a Notion page link once — your AI
+              employees will use it for new pages (still with your approval).
+            </p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                value={notionParentInput}
+                onChange={(e) => setNotionParentInput(e.target.value)}
+                placeholder="https://www.notion.so/..."
+                className="min-w-0 flex-1 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-100"
+              />
+              <button
+                type="button"
+                onClick={saveNotionParent}
+                className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white"
+              >
+                Save on this device
+              </button>
+            </div>
+            {notionParentSaved && (
+              <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
+                Saved. Start work again when you are ready.
+              </p>
+            )}
           </div>
         )}
 
