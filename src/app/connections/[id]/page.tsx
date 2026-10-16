@@ -329,9 +329,9 @@ function ConnectorDetailInner() {
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
             <p className="font-medium">Buffer is not connected</p>
             <p className="mt-1 text-xs opacity-90">
-              Buffer access tokens can expire after a while. Click <strong>Connect Buffer</strong>{" "}
-              below to sign in again — your AI employees can then view channels and schedule posts
-              (with your approval).
+              Your Buffer login may have expired. Click <strong>Connect Buffer</strong> below to
+              sign in again — your AI employees can then view channels and schedule posts (with your
+              approval).
             </p>
           </div>
         )}
