@@ -57,7 +57,6 @@ export const metadata: Metadata = {
   publisher: "Nexa",
   applicationName: "Nexa",
   category: "technology",
-  classification: "Business Software",
   manifest: "/site.webmanifest",
   alternates: {
     canonical: "/",
