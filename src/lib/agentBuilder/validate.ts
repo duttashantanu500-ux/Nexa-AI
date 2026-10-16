@@ -48,6 +48,7 @@ function repairStepActionId(actionId: string, name: string): string {
   if (/(list|load).*(text|item)/.test(blob) || /local_data\.list/.test(a)) return "local_data.list_from_text";
   if (/filter/.test(blob)) return "local_data.filter";
   if (/report/.test(blob)) return "local_data.report";
+  if (/note/.test(blob) && /local|brief|capture/.test(blob)) return "local_data.note";
 
   // MCP
   if (/mcp|custom tool/.test(blob)) return "mcp.call_tool";
@@ -73,7 +74,22 @@ export function validateProposal(
   if (!hasAnyKnown) {
     const blob = `${proposal.name} ${proposal.description} ${proposal.purpose || ""}`.toLowerCase();
     const injected: ProposedStep[] = [];
-    if (/slack/.test(blob)) {
+    if (/marketing/.test(blob)) {
+      injected.push({ actionId: "local_data.note", name: "Add note", config: {}, onError: "stop" });
+      injected.push({
+        actionId: "local_data.report",
+        name: "Report",
+        config: { title: "Marketing summary" },
+        onError: "stop",
+      });
+      injected.push({
+        actionId: "notion.create_page",
+        name: "Create page",
+        config: { title: "", content: "" },
+        requiresApproval: true,
+        onError: "stop",
+      });
+    } else if (/slack/.test(blob)) {
       injected.push({ actionId: "slack.list_channels", name: "List Slack channels", config: {}, onError: "stop" });
       if (/notion/.test(blob)) {
         injected.push({
@@ -123,7 +139,7 @@ export function validateProposal(
 
   const required = new Map<string, { id: string; name: string; status: string }>();
   const approvalSteps: string[] = [];
-  const validSteps: ProposedStep[] = [];
+  let validSteps: ProposedStep[] = [];
 
   for (const step of proposal.steps) {
     const def = getAction(step.actionId);
@@ -214,6 +230,35 @@ export function validateProposal(
       requiresApproval: def.requiresApproval,
       onError: step.onError || "stop",
     });
+  }
+
+  // Marketing roles must keep local note + report even when Buffer/Slack are offline
+  const roleBlob = `${proposal.name} ${proposal.description} ${proposal.purpose || ""}`.toLowerCase();
+  if (/marketing/.test(roleBlob)) {
+    const hasNote = validSteps.some((s) => s.actionId === "local_data.note");
+    const hasReport = validSteps.some((s) => s.actionId === "local_data.report");
+    const prefix: ProposedStep[] = [];
+    if (!hasNote) {
+      prefix.push({
+        actionId: "local_data.note",
+        name: "Add note",
+        config: {},
+        requiresApproval: false,
+        onError: "stop",
+      });
+    }
+    if (!hasReport) {
+      prefix.push({
+        actionId: "local_data.report",
+        name: "Report",
+        config: { title: "Marketing summary" },
+        requiresApproval: false,
+        onError: "stop",
+      });
+    }
+    if (prefix.length) {
+      validSteps = [...prefix, ...validSteps];
+    }
   }
 
   proposal.steps = validSteps;
