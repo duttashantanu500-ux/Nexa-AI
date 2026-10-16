@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
@@ -22,7 +22,6 @@ import { LIMIT_MESSAGES } from "@/lib/plans";
 
 const COMFY_KEY = "nexa_comfy_base_url";
 const NOTION_PARENT_KEY = "nexa_notion_default_parent";
-/** Same cache key as Connections list — instant badge on detail open */
 const STATUS_CACHE_KEY = "nexa_conn_status_v1";
 
 type Provider = "notion" | "slack" | "buffer" | "hubspot" | "ideogram";
@@ -61,13 +60,20 @@ function writeCachedStatus(providerId: string, status: ConnectorUiStatus) {
   }
 }
 
-/** Resolve status with zero wait: URL ?s= → session cache → available */
-function resolveSeed(id: string, search: URLSearchParams): ConnectorUiStatus {
-  const fromQuery = search.get("s");
-  if (isUiStatus(fromQuery)) return fromQuery;
+function seedFromQueryAndCache(
+  id: string,
+  queryStatus: string | null
+): ConnectorUiStatus {
+  if (isUiStatus(queryStatus)) return queryStatus;
   const fromCache = readCachedStatus(id);
   if (fromCache) return fromCache;
   return "available";
+}
+
+function paramId(raw: string | string[] | undefined): string {
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw) && raw[0]) return raw[0];
+  return "";
 }
 
 export default function ConnectorDetailPage() {
@@ -85,15 +91,13 @@ export default function ConnectorDetailPage() {
 }
 
 function ConnectorDetailInner() {
-  const { id } = useParams<{ id: string }>();
+  const params = useParams();
+  const id = useMemo(() => paramId(params?.id as string | string[] | undefined), [params]);
   const router = useRouter();
   const search = useSearchParams();
-  const connector = getConnector(id);
+  const connector = id ? getConnector(id) : undefined;
 
-  // Instant first paint — Connected or Available from list (?s=) or cache
-  const [status, setStatus] = useState<ConnectorUiStatus>(() =>
-    id ? resolveSeed(id, search) : "available"
-  );
+  const [status, setStatus] = useState<ConnectorUiStatus>("available");
   const [userId, setUserId] = useState("");
   const [banner, setBanner] = useState("");
   const [busy, setBusy] = useState(false);
@@ -142,15 +146,15 @@ function ConnectorDetailInner() {
       setConnectPath(data.connectPath || null);
       setMsg(data.message || "");
     } catch {
-      // Keep seeded status — never flash the wrong badge
+      /* keep seeded status */
     }
   }, []);
 
   useEffect(() => {
-    // Re-seed immediately when switching connectors / query changes
-    if (id) {
-      setStatus(resolveSeed(id, search));
-    }
+    if (!id) return;
+
+    // Instant Connected / Available from list (?s=) or session cache — never flash wrong badge
+    setStatus(seedFromQueryAndCache(id, search.get("s")));
 
     const s = loadOperatorState();
     const uid = (s.user?.id || getStableUserId() || "").trim();
@@ -184,7 +188,6 @@ function ConnectorDetailInner() {
       );
     }
 
-    // Silent background confirm — UI already shows list status
     if (isProvider) void refreshStatus(uid, id);
   }, [router, id, search, refreshStatus, isProvider, connector?.name]);
 
@@ -210,7 +213,7 @@ function ConnectorDetailInner() {
       return comfyUrl.trim() ? "connected" : "available";
     }
     if (!connector.executable) return "coming_soon";
-    return connector.defaultStatus;
+    return connector.defaultStatus === "loading" ? "available" : connector.defaultStatus;
   };
 
   const uiStatus = resolveStatus();
@@ -311,9 +314,7 @@ function ConnectorDetailInner() {
               {workspace && uiStatus === "connected" && (
                 <p className="mt-1 text-xs text-zinc-400">{workspace}</p>
               )}
-              {msg && isProvider && (
-                <p className="mt-1 text-xs text-zinc-400">{msg}</p>
-              )}
+              {msg && isProvider && <p className="mt-1 text-xs text-zinc-400">{msg}</p>}
             </div>
           </div>
         </div>
@@ -328,7 +329,7 @@ function ConnectorDetailInner() {
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
             <p className="font-medium">Buffer is not connected</p>
             <p className="mt-1 text-xs opacity-90">
-              Buffer access tokens can expire after a while. Click <strong>Connect Buffer</strong>{\" \"}
+              Buffer access tokens can expire after a while. Click <strong>Connect Buffer</strong>{" "}
               below to sign in again — your AI employees can then view channels and schedule posts
               (with your approval).
             </p>
