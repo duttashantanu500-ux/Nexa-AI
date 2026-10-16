@@ -24,6 +24,12 @@ export default function LandingPage() {
         <NexaLogo size={28} href="/" />
         <div className="flex items-center gap-3 text-sm">
           <Link
+            href="/blog"
+            className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+          >
+            Blog
+          </Link>
+          <Link
             href="/login"
             className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
           >
@@ -141,7 +147,11 @@ export default function LandingPage() {
             <p>
               Whether you search for an AI agent platform, AI team software, or
               a place to hire AI employees, Nexa is built for founders and
-              operators who want real work done — not another chat demo.
+              operators who want real work done — not another chat demo.{" "}
+              <Link href="/blog" className="text-indigo-600 hover:underline">
+                Read the blog
+              </Link>
+              .
             </p>
           </div>
         </section>
@@ -204,6 +214,7 @@ export default function LandingPage() {
             {" — "}AI employees & AI team platform
           </p>
           <nav className="flex gap-4" aria-label="Footer">
+            <Link href="/blog">Blog</Link>
             <Link href="/plans">Plans</Link>
             <Link href="/login">Sign in</Link>
             <Link href="/signup">Sign up</Link>
