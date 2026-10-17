@@ -6,6 +6,30 @@ export type ConnectorUiStatus =
   | "error"
   | "loading";
 
+/** Primary niche for Connections filtering */
+export type ConnectorCategory =
+  | "Productivity"
+  | "Documents & Knowledge"
+  | "Communication"
+  | "Marketing"
+  | "Sales & CRM"
+  | "Design & Media"
+  | "Voice & Telephony"
+  | "Developer Tools"
+  | "AI & Automation";
+
+export const CONNECTOR_CATEGORIES: ConnectorCategory[] = [
+  "Productivity",
+  "Documents & Knowledge",
+  "Communication",
+  "Marketing",
+  "Sales & CRM",
+  "Design & Media",
+  "Voice & Telephony",
+  "Developer Tools",
+  "AI & Automation",
+];
+
 export type ActionField = {
   key: string;
   label: string;
@@ -47,6 +71,8 @@ export type ConnectorDefinition = {
   name: string;
   provider: string;
   icon: string;
+  /** Primary business niche for filtering */
+  category: ConnectorCategory;
   description: string;
   detailDescription?: string;
   shortDescription?: string;
@@ -67,6 +93,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     name: "Notion",
     provider: "notion",
     icon: "N",
+    category: "Documents & Knowledge",
     description: "Notes & docs",
     shortDescription: "Notes & docs",
     detailDescription: "Connect your Notion workspace so your AI employees can search and write pages.",
@@ -125,6 +152,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     name: "Slack",
     provider: "slack",
     icon: "S",
+    category: "Communication",
     description: "Team messages",
     shortDescription: "Team messages",
     detailDescription: "Connect your Slack workspace so your AI employees can list channels and send messages.",
@@ -168,6 +196,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     name: "Buffer",
     provider: "buffer",
     icon: "B",
+    category: "Marketing",
     description: "Social scheduling",
     shortDescription: "Social scheduling",
     detailDescription:
@@ -245,6 +274,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     name: "HubSpot",
     provider: "hubspot",
     icon: "H",
+    category: "Sales & CRM",
     description: "CRM",
     shortDescription: "CRM",
     detailDescription:
@@ -418,6 +448,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     name: "Ideogram",
     provider: "ideogram",
     icon: "I",
+    category: "Design & Media",
     description: "AI images",
     shortDescription: "AI images",
     detailDescription: "Connect your Ideogram account. Your AI employees can create images from text prompts.",
@@ -449,6 +480,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     name: "MCP",
     provider: "mcp",
     icon: "M",
+    category: "Developer Tools",
     description: "Custom tools",
     shortDescription: "Custom tools",
     detailDescription: "Connect a Model Context Protocol server for custom tools.",
@@ -475,10 +507,91 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     ],
   },
   {
+    id: "vapi",
+    name: "Vapi",
+    provider: "vapi",
+    icon: "Vp",
+    category: "Voice & Telephony",
+    description: "Voice agents & calls",
+    shortDescription: "Voice agents & calls",
+    detailDescription:
+      "Connect your own Vapi account so AI employees can list assistants and numbers, prepare calls, and manage voice workflows using your account. Usage is billed by Vapi — not by Nexa.",
+    connectionMethod: "api_key",
+    costLabel: "user_paid",
+    costNote: "Uses your Vapi account and telephony providers. Nexa does not fund calls.",
+    configurable: true,
+    executable: true,
+    defaultStatus: "available",
+    scopes: [
+      "List assistants",
+      "List phone numbers",
+      "List recent calls",
+      "Start outbound calls (with your approval)",
+    ],
+    actions: [
+      {
+        id: "vapi.list_assistants",
+        connectorId: "vapi",
+        name: "List assistants",
+        description: "List voice assistants in your Vapi account.",
+        readOnly: true,
+        requiresApproval: false,
+        riskTier: "low",
+        fields: [],
+        ...impl(),
+      },
+      {
+        id: "vapi.list_phone_numbers",
+        connectorId: "vapi",
+        name: "List phone numbers",
+        description: "List phone numbers in your Vapi account.",
+        readOnly: true,
+        requiresApproval: false,
+        riskTier: "low",
+        fields: [],
+        ...impl(),
+      },
+      {
+        id: "vapi.list_calls",
+        connectorId: "vapi",
+        name: "List calls",
+        description: "List recent calls from your Vapi account.",
+        readOnly: true,
+        requiresApproval: false,
+        riskTier: "low",
+        fields: [{ key: "limit", label: "Limit", type: "number", required: false, placeholder: "20" }],
+        ...impl(),
+      },
+      {
+        id: "vapi.create_outbound_call",
+        connectorId: "vapi",
+        name: "Start outbound call",
+        description:
+          "Start an outbound call using your Vapi assistant and phone number. Requires your approval.",
+        readOnly: false,
+        requiresApproval: true,
+        riskTier: "high",
+        fields: [
+          { key: "assistantId", label: "Assistant ID", type: "text", required: true },
+          { key: "phoneNumberId", label: "Phone number ID", type: "text", required: true },
+          {
+            key: "customerNumber",
+            label: "Customer number (E.164)",
+            type: "text",
+            required: true,
+            placeholder: "+15551234567",
+          },
+        ],
+        ...impl(),
+      },
+    ],
+  },
+  {
     id: "local_data",
     name: "Local data",
     provider: "local",
     icon: "L",
+    category: "Productivity",
     description: "Lists & notes",
     shortDescription: "Lists & notes",
     connectionMethod: "local",
@@ -552,6 +665,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     name: "ComfyUI",
     provider: "local",
     icon: "C",
+    category: "Design & Media",
     description: "Local images",
     shortDescription: "Local images",
     connectionMethod: "local",
@@ -566,6 +680,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     name: "Vault",
     provider: "local",
     icon: "V",
+    category: "Productivity",
     description: "Secure storage",
     shortDescription: "Secure storage",
     connectionMethod: "local",
