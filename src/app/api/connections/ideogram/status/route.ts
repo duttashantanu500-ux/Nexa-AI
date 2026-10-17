@@ -10,6 +10,7 @@ export async function GET(req: NextRequest) {
         status: "available",
         message: "Sign in, then connect your Ideogram account.",
         canDisconnect: false,
+        connectPath: "/connections/ideogram/setup",
       },
       { headers: { "Cache-Control": "no-store, max-age=0" } }
     );
@@ -23,6 +24,7 @@ export async function GET(req: NextRequest) {
         status: "available",
         message: "Connect your Ideogram account to create images with your AI employees.",
         canDisconnect: false,
+        connectPath: "/connections/ideogram/setup",
       },
       { headers: { "Cache-Control": "no-store, max-age=0" } }
     );
@@ -37,6 +39,7 @@ export async function GET(req: NextRequest) {
       workspaceName: resolved.meta.workspaceName || "Ideogram",
       connectedAt: resolved.meta.connectedAt,
       lastVerifiedAt: resolved.meta.lastVerifiedAt,
+      connectPath: "/connections/ideogram/setup",
     },
     { headers: { "Cache-Control": "no-store, max-age=0" } }
   );

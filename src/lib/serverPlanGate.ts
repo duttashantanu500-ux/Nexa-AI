@@ -14,6 +14,7 @@ const EXTERNAL = [
   "buffer",
   "hubspot",
   "ideogram",
+  "vapi",
   "mcp",
 ] as const;
 
