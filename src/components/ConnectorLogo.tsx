@@ -148,6 +148,21 @@ export function ConnectorLogo({
           />
         </svg>
       );
+    case "vapi":
+      return (
+        <svg {...common} viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="9" fill="#0A0A0A" />
+          <path
+            d="M8 13.5c1.2 1.8 2.5 2.7 4 2.7s2.8-.9 4-2.7"
+            stroke="#fff"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            fill="none"
+          />
+          <circle cx="9.2" cy="10" r="1.1" fill="#fff" />
+          <circle cx="14.8" cy="10" r="1.1" fill="#fff" />
+        </svg>
+      );
     default:
       return (
         <span
