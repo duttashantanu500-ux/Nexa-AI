@@ -58,40 +58,30 @@ export default function SettingsPage() {
     setThemeLocal(t);
     applyTheme(t);
 
-    // Same identity order as Connections page (token ownership)
-    const uid = (s.user?.id || getStableUserId() || "").trim();
+    // Same identity order as Connections: stable/pinned id owns tokens
+    const stableId = (getStableUserId() || "").trim();
+    const opId = (s.user?.id || "").trim();
+    const uid = stableId || opId;
     const localAgents = (s.agents || []).filter(
       (a) =>
         String(a.status) !== "archived" &&
-        (!a.userId || !uid || a.userId === uid || a.userId === s.user!.id)
+        (!a.userId || !uid || a.userId === uid || a.userId === opId)
     );
-    const vaultBytes = totalVaultBytes(uid || s.user.id);
+    const vaultBytes = totalVaultBytes(uid || opId);
     setUsage((u) => ({ ...u, agents: localAgents.length, vaultBytes }));
 
     void (async () => {
       const b = await fetchBillingStatus(true);
       setBilling(b);
 
-      // Prefer sessionStorage cache written by Connections list (instant + accurate)
-      try {
-        const raw = sessionStorage.getItem("nexa_conn_status_v1");
-        if (raw) {
-          const map = JSON.parse(raw) as Record<string, string>;
-          let n = 0;
-          for (const p of ["notion", "slack", "buffer", "hubspot", "ideogram", "mcp"]) {
-            if (map[p] === "connected") n += 1;
-          }
-          if (n > 0) setUsage((u) => ({ ...u, connections: n }));
-        }
-      } catch {
-        /* */
-      }
-
-      const connections = await getConnectedExternalCount(uid);
+      // Prefer live status API (tries stable + operator ids); never under-count vs Connections
+      const connections = await getConnectedExternalCount(
+        uid,
+        opId && opId !== uid ? [opId] : []
+      );
       setUsage((u) => ({
         ...u,
-        // Never drop a higher cache count if API briefly returns 0
-        connections: Math.max(connections, u.connections),
+        connections,
       }));
 
       try {
@@ -111,6 +101,15 @@ export default function SettingsPage() {
         /* keep local count */
       }
     })();
+
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      void getConnectedExternalCount(uid, opId && opId !== uid ? [opId] : []).then(
+        (connections) => setUsage((u) => ({ ...u, connections }))
+      );
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
   }, [router]);
 
   useEffect(() => {
@@ -170,6 +169,15 @@ export default function SettingsPage() {
     clearBillingCache();
     const b = await fetchBillingStatus(true);
     setBilling(b);
+    const s = loadOperatorState();
+    const stableId = (getStableUserId() || "").trim();
+    const opId = (s.user?.id || "").trim();
+    const uid = stableId || opId;
+    const connections = await getConnectedExternalCount(
+      uid,
+      opId && opId !== uid ? [opId] : []
+    );
+    setUsage((u) => ({ ...u, connections }));
     setBillingBusy(false);
     setBillingMsg(
       b.planId === "pro"
