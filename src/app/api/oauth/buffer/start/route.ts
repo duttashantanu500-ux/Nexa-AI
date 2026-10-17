@@ -7,50 +7,72 @@ import {
 import { oauthAppOrigin } from "@/lib/oauthOrigin";
 
 export async function GET(req: NextRequest) {
-  if (!bufferOAuthConfigured()) {
+  try {
+    if (!bufferOAuthConfigured()) {
+      return NextResponse.json(
+        { error: "Buffer is not set up on this site yet." },
+        { status: 503 }
+      );
+    }
+
+    const userId = req.nextUrl.searchParams.get("userId")?.trim();
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Please sign in and try Connect again." },
+        { status: 400 }
+      );
+    }
+
+    try {
+      const { assertCanAddConnection } = await import("@/lib/serverPlanGate");
+      const gate = await assertCanAddConnection(userId, "buffer");
+      if (!gate.ok) {
+        return NextResponse.json(
+          { error: gate.message, limitReached: true },
+          { status: 403 }
+        );
+      }
+    } catch {
+      // Plan gate must not block OAuth when billing is briefly unavailable
+    }
+
+    const clientId = (process.env.BUFFER_CLIENT_ID || "").trim();
+    if (!clientId) {
+      return NextResponse.json(
+        { error: "Buffer is not set up on this site yet." },
+        { status: 503 }
+      );
+    }
+
+    const origin = oauthAppOrigin(req);
+    const redirect = `${origin}/api/oauth/buffer/callback`;
+    const { verifier, challenge } = generatePkcePair();
+    const state = signBufferOAuthState(userId, verifier);
+    const scopes = [
+      "posts:read",
+      "posts:write",
+      "account:read",
+      "offline_access",
+    ].join(" ");
+
+    const url = new URL("https://auth.buffer.com/auth");
+    url.searchParams.set("client_id", clientId);
+    url.searchParams.set("redirect_uri", redirect);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("scope", scopes);
+    url.searchParams.set("state", state);
+    url.searchParams.set("code_challenge", challenge);
+    url.searchParams.set("code_challenge_method", "S256");
+
+    return NextResponse.redirect(url.toString());
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Could not start Buffer login.";
     return NextResponse.json(
-      { error: "Buffer is not set up on this site yet." },
-      { status: 503 }
+      {
+        error: "Could not start Buffer connection. Please try again.",
+        detail: msg,
+      },
+      { status: 500 }
     );
   }
-
-  const userId = req.nextUrl.searchParams.get("userId")?.trim();
-  if (!userId) {
-    return NextResponse.json(
-      { error: "Please sign in and try Connect again." },
-      { status: 400 }
-    );
-  }
-
-  const { assertCanAddConnection } = await import("@/lib/serverPlanGate");
-  const gate = await assertCanAddConnection(userId, "buffer");
-  if (!gate.ok) {
-    return NextResponse.json(
-      { error: gate.message, limitReached: true },
-      { status: 403 }
-    );
-  }
-
-  const clientId = process.env.BUFFER_CLIENT_ID!;
-  const origin = oauthAppOrigin(req);
-  const redirect = `${origin}/api/oauth/buffer/callback`;
-  const { verifier, challenge } = generatePkcePair();
-  const state = signBufferOAuthState(userId, verifier);
-  const scopes = [
-    "posts:read",
-    "posts:write",
-    "account:read",
-    "offline_access",
-  ].join(" ");
-
-  const url = new URL("https://auth.buffer.com/auth");
-  url.searchParams.set("client_id", clientId);
-  url.searchParams.set("redirect_uri", redirect);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", scopes);
-  url.searchParams.set("state", state);
-  url.searchParams.set("code_challenge", challenge);
-  url.searchParams.set("code_challenge_method", "S256");
-
-  return NextResponse.redirect(url.toString());
 }

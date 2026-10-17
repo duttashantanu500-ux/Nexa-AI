@@ -8,43 +8,65 @@ import {
 import { oauthAppOrigin } from "@/lib/oauthOrigin";
 
 export async function GET(req: NextRequest) {
-  if (!hubspotOAuthConfigured()) {
+  try {
+    if (!hubspotOAuthConfigured()) {
+      return NextResponse.json(
+        { error: "HubSpot is not set up on this site yet." },
+        { status: 503 }
+      );
+    }
+
+    const userId = req.nextUrl.searchParams.get("userId")?.trim();
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Please sign in and try Connect again." },
+        { status: 400 }
+      );
+    }
+
+    try {
+      const { assertCanAddConnection } = await import("@/lib/serverPlanGate");
+      const gate = await assertCanAddConnection(userId, "hubspot");
+      if (!gate.ok) {
+        return NextResponse.json(
+          { error: gate.message, limitReached: true },
+          { status: 403 }
+        );
+      }
+    } catch {
+      // Plan gate must not block OAuth when billing is briefly unavailable
+    }
+
+    const clientId = (process.env.HUBSPOT_CLIENT_ID || "").trim();
+    if (!clientId) {
+      return NextResponse.json(
+        { error: "HubSpot is not set up on this site yet." },
+        { status: 503 }
+      );
+    }
+
+    const origin = oauthAppOrigin(req);
+    const redirect = `${origin}/api/oauth/hubspot/callback`;
+    const { verifier, challenge } = generatePkcePair();
+    const state = signHubspotOAuthState(userId, verifier);
+
+    const url = new URL("https://app.hubspot.com/oauth/authorize");
+    url.searchParams.set("client_id", clientId);
+    url.searchParams.set("scope", HUBSPOT_SCOPES);
+    url.searchParams.set("redirect_uri", redirect);
+    url.searchParams.set("state", state);
+    url.searchParams.set("code_challenge", challenge);
+    url.searchParams.set("code_challenge_method", "S256");
+
+    return NextResponse.redirect(url.toString());
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Could not start HubSpot login.";
     return NextResponse.json(
-      { error: "HubSpot is not set up on this site yet." },
-      { status: 503 }
+      {
+        error: "Could not start HubSpot connection. Please try again.",
+        detail: msg,
+      },
+      { status: 500 }
     );
   }
-
-  const userId = req.nextUrl.searchParams.get("userId")?.trim();
-  if (!userId) {
-    return NextResponse.json(
-      { error: "Please sign in and try Connect again." },
-      { status: 400 }
-    );
-  }
-
-  const { assertCanAddConnection } = await import("@/lib/serverPlanGate");
-  const gate = await assertCanAddConnection(userId, "hubspot");
-  if (!gate.ok) {
-    return NextResponse.json(
-      { error: gate.message, limitReached: true },
-      { status: 403 }
-    );
-  }
-
-  const clientId = process.env.HUBSPOT_CLIENT_ID!.trim();
-  const origin = oauthAppOrigin(req);
-  const redirect = `${origin}/api/oauth/hubspot/callback`;
-  const { verifier, challenge } = generatePkcePair();
-  const state = signHubspotOAuthState(userId, verifier);
-
-  const url = new URL("https://app.hubspot.com/oauth/authorize");
-  url.searchParams.set("client_id", clientId);
-  url.searchParams.set("scope", HUBSPOT_SCOPES);
-  url.searchParams.set("redirect_uri", redirect);
-  url.searchParams.set("state", state);
-  url.searchParams.set("code_challenge", challenge);
-  url.searchParams.set("code_challenge_method", "S256");
-
-  return NextResponse.redirect(url.toString());
 }
