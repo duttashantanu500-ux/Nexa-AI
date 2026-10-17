@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
@@ -9,9 +9,11 @@ import { PageHeader } from "@/components/PageHeader";
 import { loadOperatorState } from "@/lib/operatorStore";
 import { getStableUserId } from "@/lib/sessionUser";
 import {
+  CONNECTOR_CATEGORIES,
   CONNECTOR_REGISTRY,
   statusBadgeClass,
   statusLabel,
+  type ConnectorCategory,
   type ConnectorDefinition,
   type ConnectorUiStatus,
 } from "@/lib/connectors/registry";
@@ -63,7 +65,9 @@ function ConnectionsInner() {
   const [ideogramStatus, setIdeogramStatus] = useState<ConnectorUiStatus>("available");
   const [mcpStatus, setMcpStatus] = useState<ConnectorUiStatus>("available");
   const [hubspotStatus, setHubspotStatus] = useState<ConnectorUiStatus>("available");
+  const [vapiStatus, setVapiStatus] = useState<ConnectorUiStatus>("available");
   const [statusLoaded, setStatusLoaded] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<ConnectorCategory | "All">("All");
 
   useEffect(() => {
     const cached = readStatusCache();
@@ -73,6 +77,7 @@ function ConnectionsInner() {
     if (cached.ideogram) setIdeogramStatus(cached.ideogram);
     if (cached.mcp) setMcpStatus(cached.mcp);
     if (cached.hubspot) setHubspotStatus(cached.hubspot);
+    if (cached.vapi) setVapiStatus(cached.vapi);
     if (Object.keys(cached).length > 0) setStatusLoaded(true);
 
     const s = loadOperatorState();
@@ -100,6 +105,7 @@ function ConnectionsInner() {
       if (connected.includes("hubspot")) setHubspotStatus("connected");
       if (connected.includes("ideogram")) setIdeogramStatus("connected");
       if (connected.includes("mcp")) setMcpStatus("connected");
+      if (connected.includes("vapi")) setVapiStatus("connected");
     } else if (err) {
       setBanner(
         "Could not finish connecting. If the tool still shows Connected below, you are fine."
@@ -131,6 +137,7 @@ function ConnectionsInner() {
           ideogram: (st.ideogram?.status as ConnectorUiStatus) || "available",
           mcp: (st.mcp?.status as ConnectorUiStatus) || "available",
           hubspot: (st.hubspot?.status as ConnectorUiStatus) || "available",
+          vapi: (st.vapi?.status as ConnectorUiStatus) || "available",
         };
         setNotionStatus(statuses.notion);
         setSlackStatus(statuses.slack);
@@ -138,6 +145,7 @@ function ConnectionsInner() {
         setIdeogramStatus(statuses.ideogram);
         setMcpStatus(statuses.mcp);
         setHubspotStatus(statuses.hubspot);
+        setVapiStatus(statuses.vapi);
         writeStatusCache(statuses);
         if (Object.values(statuses).some((s) => s === "connected") && (connected || err)) {
           setBanner("Connected successfully.");
@@ -166,6 +174,7 @@ function ConnectionsInner() {
       ideogram: ideogramStatus,
       mcp: mcpStatus,
       hubspot: hubspotStatus,
+      vapi: vapiStatus,
     };
     if (c.id in live) {
       const s = live[c.id];
@@ -180,12 +189,25 @@ function ConnectionsInner() {
     return c.defaultStatus;
   };
 
-  const services = CONNECTOR_REGISTRY.filter(
-    (c) => !["local_data", "local_comfyui", "vault"].includes(c.id)
+  const services = useMemo(
+    () =>
+      CONNECTOR_REGISTRY.filter(
+        (c) => !["local_data", "local_comfyui", "vault"].includes(c.id)
+      ),
+    []
   );
-  const local = CONNECTOR_REGISTRY.filter((c) =>
-    ["local_data", "local_comfyui", "vault"].includes(c.id)
+  const local = useMemo(
+    () =>
+      CONNECTOR_REGISTRY.filter((c) =>
+        ["local_data", "local_comfyui", "vault"].includes(c.id)
+      ),
+    []
   );
+
+  const filteredServices = useMemo(() => {
+    if (categoryFilter === "All") return services;
+    return services.filter((c) => c.category === categoryFilter);
+  }, [services, categoryFilter]);
 
   const Card = ({ c }: { c: ConnectorDefinition }) => {
     const status = resolveStatus(c);
@@ -208,7 +230,12 @@ function ConnectionsInner() {
             </span>
             <span className={statusBadgeClass(status)}>{statusLabel(status)}</span>
           </div>
-          <p className="mt-0.5 truncate text-xs text-zinc-500">{c.shortDescription}</p>
+          <p className="mt-0.5 truncate text-xs text-zinc-500">
+            {c.shortDescription}
+            {c.category ? (
+              <span className="ml-1 text-zinc-400">· {c.category}</span>
+            ) : null}
+          </p>
         </div>
       </Link>
     );
@@ -246,14 +273,47 @@ function ConnectionsInner() {
           </div>
         )}
 
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => setCategoryFilter("All")}
+            className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
+              categoryFilter === "All"
+                ? "bg-indigo-600 text-white"
+                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+            }`}
+          >
+            All
+          </button>
+          {CONNECTOR_CATEGORIES.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => setCategoryFilter(cat)}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
+                categoryFilter === cat
+                  ? "bg-indigo-600 text-white"
+                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+
         <section className="space-y-2">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
             Connected services
           </h2>
           <div className="grid gap-2 sm:grid-cols-2">
-            {services.map((c) => (
+            {filteredServices.map((c) => (
               <Card key={c.id} c={c} />
             ))}
+            {filteredServices.length === 0 && (
+              <p className="col-span-full text-sm text-zinc-500">
+                No connectors in this category yet.
+              </p>
+            )}
           </div>
         </section>
 
