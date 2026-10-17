@@ -27,6 +27,7 @@ export type ClientBillingState = {
 };
 
 const EXTERNAL_PROVIDERS = ["notion", "slack", "buffer", "hubspot", "ideogram", "mcp"] as const;
+const STATUS_CACHE_KEY = "nexa_conn_status_v1";
 
 let cachedBilling: ClientBillingState | null = null;
 let cacheTs = 0;
@@ -171,7 +172,47 @@ export async function startCheckout(): Promise<
   }
 }
 
-export async function getConnectedExternalCount(userId: string): Promise<number> {
+function countConnectedFromStatuses(
+  statuses: Record<string, { status?: string }>
+): number {
+  let n = 0;
+  for (const p of EXTERNAL_PROVIDERS) {
+    if (statuses[p]?.status === "connected") n += 1;
+  }
+  return n;
+}
+
+function writeStatusCache(statuses: Record<string, { status?: string }>) {
+  try {
+    const map: Record<string, string> = {};
+    for (const p of EXTERNAL_PROVIDERS) {
+      const s = statuses[p]?.status;
+      if (s) map[p] = s;
+    }
+    if (Object.keys(map).length) {
+      sessionStorage.setItem(STATUS_CACHE_KEY, JSON.stringify(map));
+    }
+  } catch {
+    /* */
+  }
+}
+
+function readStatusCacheCount(): number {
+  try {
+    const raw = sessionStorage.getItem(STATUS_CACHE_KEY);
+    if (!raw) return 0;
+    const map = JSON.parse(raw) as Record<string, string>;
+    let n = 0;
+    for (const p of EXTERNAL_PROVIDERS) {
+      if (map[p] === "connected") n += 1;
+    }
+    return n;
+  } catch {
+    return 0;
+  }
+}
+
+async function fetchConnectedCountForUser(userId: string): Promise<number> {
   if (!userId) return 0;
   try {
     const res = await fetch(
@@ -180,14 +221,34 @@ export async function getConnectedExternalCount(userId: string): Promise<number>
     );
     const data = await res.json().catch(() => ({}));
     const statuses = (data?.statuses || {}) as Record<string, { status?: string }>;
-    let n = 0;
-    for (const p of EXTERNAL_PROVIDERS) {
-      if (statuses[p]?.status === "connected") n += 1;
-    }
+    const n = countConnectedFromStatuses(statuses);
+    if (n > 0) writeStatusCache(statuses);
     return n;
   } catch {
     return 0;
   }
+}
+
+/**
+ * Count external connections for Settings / plan gates.
+ * Tries primary userId then optional alternate ids (pinned vs operator mismatch).
+ * Never under-reports vs session cache written by Connections list.
+ */
+export async function getConnectedExternalCount(
+  userId: string,
+  alternateUserIds: string[] = []
+): Promise<number> {
+  const ids = [userId, ...alternateUserIds]
+    .map((id) => (id || "").trim())
+    .filter(Boolean);
+  const unique = [...new Set(ids)];
+
+  let best = readStatusCacheCount();
+  for (const id of unique) {
+    const n = await fetchConnectedCountForUser(id);
+    if (n > best) best = n;
+  }
+  return best;
 }
 
 export async function assertCanConnect(
