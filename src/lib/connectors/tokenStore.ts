@@ -16,7 +16,8 @@ export type ConnectorId =
   | "buffer"
   | "ideogram"
   | "mcp"
-  | "hubspot";
+  | "hubspot"
+  | "vapi";
 
 export interface StoredConnection {
   userId: string;
