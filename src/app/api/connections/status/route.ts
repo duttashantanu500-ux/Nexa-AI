@@ -86,6 +86,7 @@ export async function GET(req: NextRequest) {
     hubspot: one("HubSpot", "hubspot", hubspotOAuthConfigured()),
     ideogram: one("Ideogram", "ideogram", true),
     mcp: one("MCP", "mcp", true),
+    vapi: one("Vapi", "vapi", true),
   };
 
   return json({
