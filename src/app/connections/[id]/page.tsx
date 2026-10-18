@@ -302,10 +302,6 @@ function ConnectorDetailInner() {
     }
   };
 
-  const showBufferReconnect =
-    connector.id === "buffer" &&
-    (uiStatus === "available" || uiStatus === "error" || uiStatus === "unavailable");
-
   return (
     <AppShell>
       <div className="mx-auto max-w-2xl space-y-6 px-4 py-8">
@@ -338,17 +334,6 @@ function ConnectorDetailInner() {
         {banner && connector.id !== "mcp" && (
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
             {banner}
-          </div>
-        )}
-
-        {showBufferReconnect && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-            <p className="font-medium">Buffer is not connected</p>
-            <p className="mt-1 text-xs opacity-90">
-              Your Buffer login may have expired. Click <strong>Connect Buffer</strong> below to
-              sign in again — your AI employees can then view channels and schedule posts (with your
-              approval).
-            </p>
           </div>
         )}
 
