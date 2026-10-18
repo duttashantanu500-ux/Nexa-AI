@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { createAgent, loadOperatorState, stepId } from "@/lib/operatorStore";
@@ -24,6 +24,7 @@ import { LIMIT_MESSAGES } from "@/lib/plans";
 import { fetchServerAgents } from "@/lib/serverAgentClient";
 import {
   ROLE_TEMPLATES,
+  getRoleTemplate,
   type RoleTemplate,
 } from "@/lib/roleTemplates";
 
@@ -31,9 +32,11 @@ type ChatLine = { role: "user" | "assistant"; content: string; thinking?: string
 
 export default function NewAgentPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [chatReady, setChatReady] = useState(false);
   const scopeRef = useRef("");
+  const roleAutoStarted = useRef(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [thinkingLive, setThinkingLive] = useState<string[]>([]);
@@ -168,6 +171,33 @@ export default function NewAgentPage() {
     setInput(t.builderPrompt);
     void sendText(t.builderPrompt);
   };
+
+  // Auto-start from onboarding: /agents/new?role=marketing
+  useEffect(() => {
+    if (!chatReady || roleAutoStarted.current || busy) return;
+    if (lines.length > 0) return;
+    const roleId =
+      searchParams.get("role") ||
+      (() => {
+        try {
+          return sessionStorage.getItem("nexa_onboard_role") || "";
+        } catch {
+          return "";
+        }
+      })();
+    if (!roleId) return;
+    const t = getRoleTemplate(roleId);
+    if (!t) return;
+    roleAutoStarted.current = true;
+    try {
+      sessionStorage.removeItem("nexa_onboard_role");
+    } catch {
+      /* */
+    }
+    const timer = setTimeout(() => pickTemplate(t), 80);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatReady, lines.length, searchParams]);
 
   const confirmHire = async () => {
     if (!proposal || creating) return;
