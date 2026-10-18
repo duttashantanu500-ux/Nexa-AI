@@ -179,8 +179,17 @@ export default function HomePage() {
           </div>
           {agents.length === 0 ? (
             <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-700">
-              <p className="text-sm text-zinc-600">No AI employees on your team yet.</p>
-              <Link href="/agents/new" className="mt-2 inline-block text-sm text-indigo-600">
+              <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                Your digital team is empty
+              </p>
+              <p className="mt-1 text-sm text-zinc-500">
+                Hire your first AI employee to assign real work — research, marketing,
+                sales, or operations.
+              </p>
+              <Link
+                href="/agents/new"
+                className="mt-3 inline-block rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+              >
                 Open Hiring Desk →
               </Link>
             </div>
