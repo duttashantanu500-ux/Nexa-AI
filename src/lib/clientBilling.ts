@@ -26,7 +26,7 @@ export type ClientBillingState = {
   cancelAtPeriodEnd?: boolean;
 };
 
-const EXTERNAL_PROVIDERS = ["notion", "slack", "buffer", "hubspot", "ideogram", "mcp"] as const;
+const EXTERNAL_PROVIDERS = ["notion", "slack", "buffer", "hubspot", "ideogram", "mcp", "vapi"] as const;
 const STATUS_CACHE_KEY = "nexa_conn_status_v1";
 
 let cachedBilling: ClientBillingState | null = null;
