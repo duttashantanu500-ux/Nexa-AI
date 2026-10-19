@@ -137,9 +137,15 @@ export default function PlansPage() {
         </div>
 
         <p className="text-center text-xs text-zinc-500">
-          <Link href="/settings" className="text-indigo-600 hover:underline">
-            Back to Settings
-          </Link>
+          {signedIn ? (
+            <Link href="/settings" className="text-indigo-600 hover:underline">
+              Back to Settings
+            </Link>
+          ) : (
+            <Link href="/" className="text-indigo-600 hover:underline">
+              ← Back to home
+            </Link>
+          )}
         </p>
       </div>
     </AppShell>

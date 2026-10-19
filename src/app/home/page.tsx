@@ -73,8 +73,12 @@ export default function HomePage() {
     let cancelled = false;
     const run = async () => {
       const s = loadOperatorState();
-      if (!s.user?.onboardingCompleted) {
-        router.replace("/signup");
+      if (!s.user) {
+        router.replace("/login");
+        return;
+      }
+      if (!s.user.onboardingCompleted) {
+        router.replace("/onboarding");
         return;
       }
       const uid = s.user.id || "";
