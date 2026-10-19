@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
@@ -31,6 +31,22 @@ import {
 type ChatLine = { role: "user" | "assistant"; content: string; thinking?: string[] };
 
 export default function NewAgentPage() {
+  return (
+    <Suspense
+      fallback={
+        <AppShell>
+          <div className="px-4 py-12 text-center text-sm text-zinc-500">
+            Loading Hiring Desk…
+          </div>
+        </AppShell>
+      }
+    >
+      <NewAgentInner />
+    </Suspense>
+  );
+}
+
+function NewAgentInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [lines, setLines] = useState<ChatLine[]>([]);
