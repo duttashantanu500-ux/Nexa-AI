@@ -47,8 +47,12 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const s = loadOperatorState();
-    if (!s.user?.onboardingCompleted) {
-      router.replace("/signup");
+    if (!s.user) {
+      router.replace("/login");
+      return;
+    }
+    if (!s.user.onboardingCompleted) {
+      router.replace("/onboarding");
       return;
     }
     setName(s.user.name || "");
