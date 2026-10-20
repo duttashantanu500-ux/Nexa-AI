@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { ConnectorLogo } from "@/components/ConnectorLogo";
+import { McpConnectionPanel } from "@/components/McpConnectionPanel";
 import { loadOperatorState } from "@/lib/operatorStore";
 import { getStableUserId } from "@/lib/sessionUser";
 import {
@@ -209,8 +210,9 @@ function DetailInner() {
   };
 
   const isOAuth = ["notion", "slack", "buffer", "hubspot", "github"].includes(def.id);
-  const isApiKey = ["ideogram", "vapi", "mcp"].includes(def.id);
+  const isApiKey = ["ideogram", "vapi"].includes(def.id);
   const isComfy = def.id === "local_comfyui";
+  const isMcp = def.id === "mcp";
 
   return (
     <AppShell>
@@ -276,6 +278,15 @@ function DetailInner() {
           </div>
         )}
 
+        {isMcp && (
+          <McpConnectionPanel
+            userId={(loadOperatorState().user?.id || getStableUserId() || "").trim()}
+            status={status}
+            onStatusChange={setStatus}
+            onMessage={setMsg}
+          />
+        )}
+
         {isComfy && (
           <div className="space-y-3">
             <label className="block space-y-1">
@@ -297,7 +308,7 @@ function DetailInner() {
           </div>
         )}
 
-        {!isOAuth && !isApiKey && !isComfy && (
+        {!isOAuth && !isApiKey && !isComfy && !isMcp && (
           <p className="text-sm text-zinc-500">
             This connection is available to your AI employees without extra setup.
           </p>
