@@ -83,7 +83,7 @@ function ConnectionsInner() {
     const s = loadOperatorState();
     const uid = (s.user?.id || getStableUserId() || "").trim();
     if (!uid) {
-      router.replace("/signup");
+      router.replace("/login");
       return;
     }
     if (s.user && !s.user.onboardingCompleted) {
