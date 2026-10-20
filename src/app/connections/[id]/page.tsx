@@ -1,1 +1,331 @@
-PLACEHOLDER
+"use client";
+
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { AppShell } from "@/components/AppShell";
+import { ConnectorLogo } from "@/components/ConnectorLogo";
+import { loadOperatorState } from "@/lib/operatorStore";
+import { getStableUserId } from "@/lib/sessionUser";
+import {
+  CONNECTOR_REGISTRY,
+  statusBadgeClass,
+  statusLabel,
+  type ConnectorDefinition,
+  type ConnectorUiStatus,
+} from "@/lib/connectors/registry";
+import { assertCanConnect } from "@/lib/clientBilling";
+import { UpgradeLimitModal } from "@/components/UpgradeLimitModal";
+import { LIMIT_MESSAGES } from "@/lib/plans";
+
+const COMFY_KEY = "nexa_comfy_base_url";
+
+function DetailInner() {
+  const router = useRouter();
+  const params = useParams();
+  const search = useSearchParams();
+  const id = String(params?.id || "");
+  const [status, setStatus] = useState<ConnectorUiStatus>("available");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [limitOpen, setLimitOpen] = useState(false);
+  const [limitMsg, setLimitMsg] = useState(LIMIT_MESSAGES.connections);
+  const [comfyUrl, setComfyUrl] = useState("");
+
+  const def = useMemo(
+    () => CONNECTOR_REGISTRY.find((c) => c.id === id) as ConnectorDefinition | undefined,
+    [id]
+  );
+
+  const loadStatus = useCallback(async () => {
+    const s = loadOperatorState();
+    const uid = (s.user?.id || getStableUserId() || "").trim();
+    if (!uid) {
+      router.replace("/login");
+      return;
+    }
+    if (s.user && !s.user.onboardingCompleted) {
+      router.replace("/onboarding");
+      return;
+    }
+    if (!def) return;
+    if (def.id === "local_comfyui") {
+      try {
+        const u = localStorage.getItem(COMFY_KEY)?.trim() || "";
+        setComfyUrl(u);
+        setStatus(u ? "connected" : "available");
+      } catch {
+        setStatus("available");
+      }
+      return;
+    }
+    if (def.id === "local_data" || def.id === "vault") {
+      setStatus("connected");
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/connections/status?userId=${encodeURIComponent(uid)}`,
+        { cache: "no-store" }
+      );
+      const data = await res.json().catch(() => ({}));
+      const st = (data?.statuses || {})[id]?.status as ConnectorUiStatus | undefined;
+      setStatus(st || "available");
+    } catch {
+      setStatus("available");
+    }
+  }, [def, id, router]);
+
+  useEffect(() => {
+    void loadStatus();
+    const q = (search.get("s") || "").toLowerCase();
+    if (q === "connected" || q === "available" || q === "error") {
+      setStatus(q as ConnectorUiStatus);
+    }
+    if (search.get("connected")) {
+      setMsg("Connected successfully.");
+      setStatus("connected");
+    }
+    if (search.get("error")) {
+      setMsg("Could not finish connecting. Try again or check the tool is still linked.");
+    }
+  }, [loadStatus, search]);
+
+  if (!def) {
+    return (
+      <AppShell>
+        <div className="mx-auto max-w-lg px-4 py-12 text-center">
+          <p className="text-sm text-zinc-500">Unknown connection.</p>
+          <Link href="/connections" className="mt-3 inline-block text-sm text-indigo-600">
+            ← Back to Connections
+          </Link>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const startOAuth = async () => {
+    const s = loadOperatorState();
+    const uid = (s.user?.id || getStableUserId() || "").trim();
+    if (!uid) {
+      router.push("/login");
+      return;
+    }
+    setBusy(true);
+    setMsg("");
+    const gate = await assertCanConnect(uid);
+    if (!gate.ok) {
+      setLimitMsg(gate.message);
+      setLimitOpen(true);
+      setBusy(false);
+      return;
+    }
+    const path =
+      def.id === "notion"
+        ? `/api/oauth/notion?userId=${encodeURIComponent(uid)}`
+        : def.id === "slack"
+          ? `/api/oauth/slack?userId=${encodeURIComponent(uid)}`
+          : def.id === "buffer"
+            ? `/api/oauth/buffer?userId=${encodeURIComponent(uid)}`
+            : def.id === "hubspot"
+              ? `/api/oauth/hubspot?userId=${encodeURIComponent(uid)}`
+              : def.id === "github"
+                ? `/api/oauth/github?userId=${encodeURIComponent(uid)}`
+                : "";
+    if (!path) {
+      setMsg("This connection does not use OAuth here.");
+      setBusy(false);
+      return;
+    }
+    window.location.href = path;
+  };
+
+  const saveApiKey = async () => {
+    const s = loadOperatorState();
+    const uid = (s.user?.id || getStableUserId() || "").trim();
+    if (!uid) {
+      router.push("/login");
+      return;
+    }
+    const key = apiKey.trim();
+    if (!key) {
+      setMsg("Enter an API key.");
+      return;
+    }
+    setBusy(true);
+    setMsg("");
+    const gate = await assertCanConnect(uid);
+    if (!gate.ok) {
+      setLimitMsg(gate.message);
+      setLimitOpen(true);
+      setBusy(false);
+      return;
+    }
+    try {
+      const endpoint =
+        def.id === "ideogram"
+          ? "/api/connections/ideogram"
+          : def.id === "vapi"
+            ? "/api/connections/vapi"
+            : def.id === "mcp"
+              ? "/api/connections/mcp"
+              : "";
+      if (!endpoint) {
+        setMsg("API key save is not available for this tool.");
+        setBusy(false);
+        return;
+      }
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: uid, apiKey: key }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) {
+        setMsg(data.message || "Could not save key.");
+        setBusy(false);
+        return;
+      }
+      setStatus("connected");
+      setMsg("Connected.");
+      setApiKey("");
+    } catch {
+      setMsg("Could not save. Try again.");
+    }
+    setBusy(false);
+  };
+
+  const saveComfy = () => {
+    const u = comfyUrl.trim();
+    try {
+      if (u) localStorage.setItem(COMFY_KEY, u);
+      else localStorage.removeItem(COMFY_KEY);
+      setStatus(u ? "connected" : "available");
+      setMsg(u ? "ComfyUI URL saved." : "ComfyUI URL cleared.");
+    } catch {
+      setMsg("Could not save locally.");
+    }
+  };
+
+  const isOAuth = ["notion", "slack", "buffer", "hubspot", "github"].includes(def.id);
+  const isApiKey = ["ideogram", "vapi", "mcp"].includes(def.id);
+  const isComfy = def.id === "local_comfyui";
+
+  return (
+    <AppShell>
+      <div className="mx-auto max-w-lg space-y-6 px-4 py-8">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-800">
+            <ConnectorLogo id={def.id} size={28} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">{def.name}</h1>
+            <span className={statusBadgeClass(status)}>{statusLabel(status)}</span>
+          </div>
+        </div>
+
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">{def.description}</p>
+
+        {msg && (
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+            {msg}
+          </div>
+        )}
+
+        {isOAuth && (
+          <div className="space-y-3">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void startOAuth()}
+              className="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {busy
+                ? "Redirecting…"
+                : status === "connected"
+                  ? "Reconnect"
+                  : `Connect ${def.name}`}
+            </button>
+            <p className="text-xs text-zinc-500">
+              You will authorize Nexa in {def.name}, then return here.
+            </p>
+          </div>
+        )}
+
+        {isApiKey && (
+          <div className="space-y-3">
+            <label className="block space-y-1">
+              <span className="text-xs text-zinc-500">API key</span>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Paste your API key"
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void saveApiKey()}
+              className="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {busy ? "Saving…" : status === "connected" ? "Update key" : "Save and connect"}
+            </button>
+          </div>
+        )}
+
+        {isComfy && (
+          <div className="space-y-3">
+            <label className="block space-y-1">
+              <span className="text-xs text-zinc-500">ComfyUI base URL</span>
+              <input
+                value={comfyUrl}
+                onChange={(e) => setComfyUrl(e.target.value)}
+                placeholder="http://127.0.0.1:8188"
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={saveComfy}
+              className="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white"
+            >
+              Save URL
+            </button>
+          </div>
+        )}
+
+        {!isOAuth && !isApiKey && !isComfy && (
+          <p className="text-sm text-zinc-500">
+            This connection is available to your AI employees without extra setup.
+          </p>
+        )}
+
+        <Link href="/connections" className="inline-block text-sm text-indigo-600">
+          ← Back to Connections
+        </Link>
+      </div>
+      <UpgradeLimitModal
+        open={limitOpen}
+        message={limitMsg}
+        onClose={() => setLimitOpen(false)}
+      />
+    </AppShell>
+  );
+}
+
+export default function ConnectionDetailPage() {
+  return (
+    <Suspense
+      fallback={
+        <AppShell>
+          <div className="px-4 py-12 text-center text-sm text-zinc-500">Loading…</div>
+        </AppShell>
+      }
+    >
+      <DetailInner />
+    </Suspense>
+  );
+}
