@@ -281,9 +281,7 @@ function DetailInner() {
         {isMcp && (
           <McpConnectionPanel
             userId={(loadOperatorState().user?.id || getStableUserId() || "").trim()}
-            status={status}
-            onStatusChange={setStatus}
-            onMessage={setMsg}
+            onStatus={(s) => setStatus(s === "loading" ? "available" : s)}
           />
         )}
 
