@@ -122,23 +122,14 @@ function DetailInner() {
       setBusy(false);
       return;
     }
-    const path =
-      def.id === "notion"
-        ? `/api/oauth/notion?userId=${encodeURIComponent(uid)}`
-        : def.id === "slack"
-          ? `/api/oauth/slack?userId=${encodeURIComponent(uid)}`
-          : def.id === "buffer"
-            ? `/api/oauth/buffer?userId=${encodeURIComponent(uid)}`
-            : def.id === "hubspot"
-              ? `/api/oauth/hubspot?userId=${encodeURIComponent(uid)}`
-              : def.id === "github"
-                ? `/api/oauth/github?userId=${encodeURIComponent(uid)}`
-                : "";
-    if (!path) {
+    // Routes live at /api/oauth/{provider}/start (not /api/oauth/{provider})
+    const oauthProviders = ["notion", "slack", "buffer", "hubspot", "github"] as const;
+    if (!oauthProviders.includes(def.id as (typeof oauthProviders)[number])) {
       setMsg("This connection does not use OAuth here.");
       setBusy(false);
       return;
     }
+    const path = `/api/oauth/${def.id}/start?userId=${encodeURIComponent(uid)}`;
     window.location.href = path;
   };
 
@@ -166,11 +157,11 @@ function DetailInner() {
     try {
       const endpoint =
         def.id === "ideogram"
-          ? "/api/connections/ideogram"
+          ? "/api/connections/ideogram/connect"
           : def.id === "vapi"
-            ? "/api/connections/vapi"
+            ? "/api/connections/vapi/connect"
             : def.id === "mcp"
-              ? "/api/connections/mcp"
+              ? "/api/connections/mcp/connect"
               : "";
       if (!endpoint) {
         setMsg("API key save is not available for this tool.");
