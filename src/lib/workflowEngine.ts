@@ -56,6 +56,28 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function mapNormError(err?: unknown): NormalizedProviderError | undefined {
+  if (!err || typeof err !== "object") return undefined;
+  const e = err as { category?: string; providerStatusCode?: number; providerMessage?: string };
+  const allowed = new Set([
+    "auth",
+    "rate_limit",
+    "validation",
+    "server_error",
+    "unknown",
+    "mapping_error",
+    "not_configured",
+  ]);
+  const category = allowed.has(String(e.category || ""))
+    ? (e.category as NormalizedProviderError["category"])
+    : "unknown";
+  return {
+    category,
+    providerStatusCode: e.providerStatusCode,
+    providerMessage: e.providerMessage,
+  };
+}
+
 function failResult(
   step: WorkflowStep,
   started: string,
@@ -328,7 +350,7 @@ async function executeProviderAction(
         ok: Boolean(data.ok),
         message: data.message || (data.ok ? "Done" : "Tool failed"),
         data: data.data,
-        error: data.ok ? undefined : { category: "provider" },
+        error: data.ok ? undefined : { category: "unknown" },
       };
     }
 
@@ -347,7 +369,7 @@ async function executeProviderAction(
       ok: Boolean(data.ok),
       message: data.message || (data.ok ? "OK" : "Failed"),
       data: data.data,
-      error: data.error,
+      error: mapNormError(data.error),
     };
   }
 
@@ -374,7 +396,7 @@ async function executeProviderAction(
         ok: Boolean(data.ok),
         message: data.message || (data.ok ? "OK" : "Failed"),
         data: data.data,
-        error: data.error,
+        error: mapNormError(data.error),
       };
     } catch {
       // fall through to direct server executor
