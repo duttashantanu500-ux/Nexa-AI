@@ -8,12 +8,17 @@ import {
   type BuilderLine,
 } from "@/lib/agentBuilder/chatStore";
 import type { AgentProposal } from "@/lib/agentBuilder/types";
-import { loadOperatorState, updateAgent, stepId } from "@/lib/operatorStore";
+import {
+  getAgent,
+  loadOperatorState,
+  updateAgent,
+  stepId,
+} from "@/lib/operatorStore";
 import { patchServerAgent } from "@/lib/serverAgentClient";
 
 /**
- * One persistent structured chat for an existing AI employee.
- * Same Employee Builder format — not a general chatbot.
+ * Persistent chat for an EXISTING AI employee.
+ * Uses edit mode — does not act as the new-hire builder.
  */
 export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
   const [lines, setLines] = useState<BuilderLine[]>([]);
@@ -26,7 +31,6 @@ export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
 
   useEffect(() => {
     void loadBuilderChatHydrated(scope).then((msgs) => {
-      // Never invent a pre-chat card — wait for the user
       setLines(msgs.length ? msgs : []);
       setReady(true);
     });
@@ -83,11 +87,28 @@ export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
     setBusy(true);
     try {
       const s = loadOperatorState();
+      const agent = getAgent(agentId);
+      const existingAgent = agent
+        ? {
+            name: agent.name,
+            purpose: agent.purpose,
+            description: agent.description,
+            steps: (agent.steps || []).map((st) => ({
+              actionId: st.actionId,
+              name: st.name,
+              config: st.config || {},
+            })),
+            schedule: agent.schedule,
+          }
+        : undefined;
+
       const res = await fetch("/api/agent-builder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: s.user?.id || "",
+          mode: "edit",
+          existingAgent,
           messages: next.map((l) => ({ role: l.role, content: l.content })),
         }),
       });
@@ -95,7 +116,7 @@ export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
       const content =
         data.message ||
         (data.declined
-          ? "I can only help update this AI employee."
+          ? "I can only help update this AI employee — schedule, tools, or steps."
           : "Could not update this employee.");
       setLines((prev) => [
         ...prev,
@@ -114,15 +135,17 @@ export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
     <section className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
       <div className="border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-          Employee builder
+          Configure this employee
         </h2>
         <p className="text-xs text-zinc-500">
-          One conversation for this employee — change schedule, tools, or workflow.
+          Change schedule, tools, or workflow for this employee only.
         </p>
       </div>
       <div className="flex max-h-80 flex-col gap-2 overflow-y-auto px-4 py-3">
         {lines.length === 0 && !busy && (
-          <p className="text-sm text-zinc-500">Describe a change, or ask what this employee does.</p>
+          <p className="text-sm text-zinc-500">
+            Describe a change, or ask what this employee does.
+          </p>
         )}
         {lines.map((l, i) => (
           <div
