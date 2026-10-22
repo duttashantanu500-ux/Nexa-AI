@@ -1,5 +1,7 @@
 /**
  * Deterministic workflow runner.
+ * Browser: calls /api/connections/{provider}/execute with user JWT.
+ * Server: dispatches through provider modules using the userId from connections.
  */
 
 import { getAction } from "./actionRegistry";
@@ -42,6 +44,10 @@ export interface RuntimeConnectionConfig {
   githubToken?: string;
   userId?: string;
   notionDefaultParent?: string;
+  /** Absolute origin for server-side self-fetch when needed */
+  origin?: string;
+  /** Bearer token for server-side calls to execute routes */
+  accessToken?: string;
 }
 
 function emptyContext(): WorkflowContext {
@@ -275,6 +281,200 @@ async function browserAuthHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
+async function executeProviderAction(
+  actionId: string,
+  config: Record<string, string>,
+  connections: RuntimeConnectionConfig
+): Promise<ActionExecResult> {
+  const provider = actionId.split(".")[0];
+  if (!["slack", "notion", "buffer", "hubspot", "ideogram", "vapi"].includes(provider)) {
+    return {
+      ok: false,
+      message: "This action is not available.",
+      error: { category: "validation" },
+    };
+  }
+
+  // Browser: use live session JWT
+  if (typeof window !== "undefined") {
+    const authHdr = await browserAuthHeaders();
+    const res = await fetch(`/api/connections/${provider}/execute`, {
+      method: "POST",
+      headers: authHdr,
+      body: JSON.stringify({
+        actionId,
+        input: config,
+        defaultParent: connections.notionDefaultParent,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return {
+      ok: Boolean(data.ok),
+      message: data.message || (data.ok ? "OK" : "Failed"),
+      data: data.data,
+      error: data.error,
+    };
+  }
+
+  // Server: prefer bearer + origin self-call when available
+  if (connections.accessToken && connections.origin) {
+    try {
+      const res = await fetch(
+        `${connections.origin.replace(/\/$/, "")}/api/connections/${provider}/execute`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${connections.accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            actionId,
+            input: config,
+            defaultParent: connections.notionDefaultParent,
+          }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      return {
+        ok: Boolean(data.ok),
+        message: data.message || (data.ok ? "OK" : "Failed"),
+        data: data.data,
+        error: data.error,
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "Provider call failed",
+        error: { category: "server_error" },
+      };
+    }
+  }
+
+  // Server without JWT: require userId and use token store + provider modules
+  const userId = (connections.userId || "").trim();
+  if (!userId) {
+    return {
+      ok: false,
+      message: "Sign in required to run this action.",
+      error: { category: "auth" },
+    };
+  }
+
+  try {
+    if (provider === "notion") {
+      const { resolveNotionToken } = await import("./connectors/notionAuth");
+      const {
+        notionSearch,
+        notionCreatePage,
+        notionAppendBlocks,
+      } = await import("./connectors/providers/notion");
+      const { extractNotionPageId, formatNotionPageId } = await import(
+        "./connectors/notionParent"
+      );
+      const resolved = await resolveNotionToken(userId);
+      if (!resolved?.token) {
+        return {
+          ok: false,
+          message: "Connect your own Notion account under Connections first.",
+          error: { category: "auth" },
+        };
+      }
+      if (actionId === "notion.search") {
+        const r = await notionSearch({
+          accessToken: resolved.token,
+          query: config.query || config.title || "",
+        });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
+      if (actionId === "notion.create_page") {
+        let parentId =
+          extractNotionPageId(config.parent_id || "") ||
+          extractNotionPageId(connections.notionDefaultParent || "");
+        if (!parentId && (config.parent_name || config.parent || "").trim()) {
+          const search = await notionSearch({
+            accessToken: resolved.token,
+            query: (config.parent_name || config.parent || "").trim(),
+          });
+          const pages = (search.data as { pages?: { id: string }[] })?.pages || [];
+          if (pages[0]?.id) parentId = pages[0].id;
+        }
+        if (!parentId) {
+          return {
+            ok: false,
+            message:
+              "Set a default page in Connections → Notion, or name a parent page for this step.",
+            error: { category: "validation" },
+          };
+        }
+        const r = await notionCreatePage({
+          accessToken: resolved.token,
+          parentId: formatNotionPageId(parentId),
+          title: config.title || "Untitled",
+          content: config.content,
+        });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
+      if (actionId === "notion.append_blocks") {
+        let pageId =
+          extractNotionPageId(config.page_id || "") ||
+          extractNotionPageId(config.page_url || "");
+        if (!pageId && (config.page_name || config.page || "").trim()) {
+          const search = await notionSearch({
+            accessToken: resolved.token,
+            query: (config.page_name || config.page || "").trim(),
+          });
+          const pages = (search.data as { pages?: { id: string }[] })?.pages || [];
+          if (pages[0]?.id) pageId = pages[0].id;
+        }
+        const r = await notionAppendBlocks({
+          accessToken: resolved.token,
+          pageId: pageId ? formatNotionPageId(pageId) : "",
+          content: config.content || "",
+        });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
+    }
+
+    if (provider === "slack") {
+      const { getConnection } = await import("./connectors/tokenStore");
+      const conn = await getConnection(userId, "slack");
+      if (!conn?.accessToken) {
+        return {
+          ok: false,
+          message: "Connect your own Slack workspace under Connections first.",
+          error: { category: "auth" },
+        };
+      }
+      const slack = await import("./connectors/providers/slack");
+      if (actionId === "slack.list_channels") {
+        const r = await slack.slackListChannels({ accessToken: conn.accessToken });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
+      if (actionId === "slack.post_message") {
+        const r = await slack.slackPostMessage({
+          accessToken: conn.accessToken,
+          channel: config.channel || "",
+          text: config.text || "",
+        });
+        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+      }
+    }
+
+    // Other providers: require authenticated HTTP path
+    return {
+      ok: false,
+      message: `Server execution for ${actionId} requires a signed-in session. Use Start work from the employee page.`,
+      error: { category: "not_configured" },
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "Provider call failed",
+      error: { category: "server_error" },
+    };
+  }
+}
+
 async function executeAction(
   actionId: string,
   config: Record<string, string>,
@@ -386,35 +586,8 @@ async function executeAction(
       }
     }
     default: {
-      // Provider actions: call existing API routes when in browser
       if (simulate) return { ok: true, message: `Preview only — would run ${actionId}` };
-      if (typeof window !== "undefined") {
-        const provider = actionId.split(".")[0];
-        if (["slack", "notion", "buffer", "hubspot", "ideogram"].includes(provider)) {
-          const authHdr = await browserAuthHeaders();
-          const res = await fetch(`/api/connections/${provider}/execute`, {
-            method: "POST",
-            headers: authHdr,
-            body: JSON.stringify({
-              actionId,
-              input: config,
-              defaultParent: connections.notionDefaultParent,
-            }),
-          });
-          const data = await res.json().catch(() => ({}));
-          return {
-            ok: Boolean(data.ok),
-            message: data.message || (data.ok ? "OK" : "Failed"),
-            data: data.data,
-            error: data.error,
-          };
-        }
-      }
-      return {
-        ok: false,
-        message: "This action is not available.",
-        error: { category: "validation" },
-      };
+      return executeProviderAction(actionId, config, connections);
     }
   }
 }
