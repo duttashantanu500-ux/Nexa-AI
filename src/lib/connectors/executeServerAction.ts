@@ -13,6 +13,27 @@ export type ServerActionResult = {
   error?: NormalizedProviderError;
 };
 
+function mapError(err?: { category?: string; providerStatusCode?: number; providerMessage?: string }): NormalizedProviderError | undefined {
+  if (!err) return undefined;
+  const allowed = new Set([
+    "auth",
+    "rate_limit",
+    "validation",
+    "server_error",
+    "unknown",
+    "mapping_error",
+    "not_configured",
+  ]);
+  const category = allowed.has(String(err.category || ""))
+    ? (err.category as NormalizedProviderError["category"])
+    : "unknown";
+  return {
+    category,
+    providerStatusCode: err.providerStatusCode,
+    providerMessage: err.providerMessage,
+  };
+}
+
 function notConnected(name: string): ServerActionResult {
   return {
     ok: false,
@@ -26,6 +47,20 @@ function unknownAction(actionId: string): ServerActionResult {
     ok: false,
     message: `This action is not available: ${actionId}`,
     error: { category: "validation" },
+  };
+}
+
+function fromProvider(r: {
+  ok: boolean;
+  message: string;
+  data?: unknown;
+  error?: { category?: string; providerStatusCode?: number; providerMessage?: string };
+}): ServerActionResult {
+  return {
+    ok: r.ok,
+    message: r.message,
+    data: r.data,
+    error: mapError(r.error),
   };
 }
 
@@ -107,7 +142,7 @@ async function runNotion(
       accessToken: resolved.token,
       query: input.query || input.title || "",
     });
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    return fromProvider(r);
   }
 
   if (actionId === "notion.create_page") {
@@ -137,7 +172,7 @@ async function runNotion(
       title: input.title || "Untitled",
       content: input.content,
     });
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    return fromProvider(r);
   }
 
   if (actionId === "notion.append_blocks") {
@@ -156,7 +191,7 @@ async function runNotion(
       pageId: pageId ? formatNotionPageId(pageId) : "",
       content: input.content || "",
     });
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    return fromProvider(r);
   }
 
   return unknownAction(actionId);
@@ -175,7 +210,7 @@ async function runSlack(
 
   if (actionId === "slack.list_channels") {
     const r = await slackListChannels({ accessToken: conn.accessToken });
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    return fromProvider(r);
   }
   if (actionId === "slack.post_message") {
     const r = await slackPostMessage({
@@ -183,7 +218,7 @@ async function runSlack(
       channel: input.channel || "",
       text: input.text || "",
     });
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    return fromProvider(r);
   }
   return unknownAction(actionId);
 }
@@ -203,14 +238,14 @@ async function runBuffer(
 
   if (actionId === "buffer.list_channels") {
     const r = await bufferListChannels({ accessToken: resolved.token });
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    return fromProvider(r);
   }
   if (actionId === "buffer.list_posts") {
     const r = await bufferListPosts({
       accessToken: resolved.token,
       channel: input.channel || "",
     });
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    return fromProvider(r);
   }
   if (actionId === "buffer.create_post") {
     const r = await bufferCreatePost({
@@ -219,7 +254,7 @@ async function runBuffer(
       text: input.text || "",
       scheduledAt: input.scheduled_at || input.scheduledAt || "",
     });
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    return fromProvider(r);
   }
   return unknownAction(actionId);
 }
@@ -239,96 +274,81 @@ async function runHubspot(
   const lim = Number.isFinite(limit) ? limit : 20;
 
   switch (actionId) {
-    case "hubspot.list_contacts": {
-      const r = await hs.hubspotListContacts({ accessToken: token, limit: lim });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
-    case "hubspot.search_contacts": {
-      const r = await hs.hubspotSearchContacts({
-        accessToken: token,
-        query: input.query || "",
-      });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
-    case "hubspot.get_contact": {
-      const r = await hs.hubspotGetContact({
-        accessToken: token,
-        contactId: input.contactId || input.id || "",
-      });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
-    case "hubspot.create_contact": {
-      const r = await hs.hubspotCreateContact({
-        accessToken: token,
-        email: input.email || "",
-        firstname: input.firstname,
-        lastname: input.lastname,
-        phone: input.phone,
-        company: input.company,
-      });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
-    case "hubspot.update_contact": {
-      const r = await hs.hubspotUpdateContact({
-        accessToken: token,
-        contactId: input.contactId || input.id || "",
-        email: input.email,
-        firstname: input.firstname,
-        lastname: input.lastname,
-        phone: input.phone,
-        company: input.company,
-      });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
-    case "hubspot.list_companies": {
-      const r = await hs.hubspotListCompanies({ accessToken: token, limit: lim });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
-    case "hubspot.search_companies": {
-      const r = await hs.hubspotSearchCompanies({
-        accessToken: token,
-        query: input.query || "",
-      });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
-    case "hubspot.create_company": {
-      const r = await hs.hubspotCreateCompany({
-        accessToken: token,
-        name: input.name || "",
-        domain: input.domain,
-      });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
-    case "hubspot.list_deals": {
-      const r = await hs.hubspotListDeals({ accessToken: token, limit: lim });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
-    case "hubspot.search_deals": {
-      const r = await hs.hubspotSearchDeals({
-        accessToken: token,
-        query: input.query || "",
-      });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
-    case "hubspot.create_deal": {
-      const r = await hs.hubspotCreateDeal({
-        accessToken: token,
-        dealname: input.dealname || input.name || "",
-        amount: input.amount,
-        dealstage: input.dealstage,
-      });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
-    case "hubspot.update_deal": {
-      const r = await hs.hubspotUpdateDeal({
-        accessToken: token,
-        dealId: input.dealId || input.id || "",
-        dealname: input.dealname,
-        amount: input.amount,
-        dealstage: input.dealstage,
-      });
-      return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-    }
+    case "hubspot.list_contacts":
+      return fromProvider(await hs.hubspotListContacts({ accessToken: token, limit: lim }));
+    case "hubspot.search_contacts":
+      return fromProvider(
+        await hs.hubspotSearchContacts({ accessToken: token, query: input.query || "" })
+      );
+    case "hubspot.get_contact":
+      return fromProvider(
+        await hs.hubspotGetContact({
+          accessToken: token,
+          contactId: input.contactId || input.id || "",
+        })
+      );
+    case "hubspot.create_contact":
+      return fromProvider(
+        await hs.hubspotCreateContact({
+          accessToken: token,
+          email: input.email || "",
+          firstname: input.firstname,
+          lastname: input.lastname,
+          phone: input.phone,
+          company: input.company,
+        })
+      );
+    case "hubspot.update_contact":
+      return fromProvider(
+        await hs.hubspotUpdateContact({
+          accessToken: token,
+          contactId: input.contactId || input.id || "",
+          email: input.email,
+          firstname: input.firstname,
+          lastname: input.lastname,
+          phone: input.phone,
+          company: input.company,
+        })
+      );
+    case "hubspot.list_companies":
+      return fromProvider(await hs.hubspotListCompanies({ accessToken: token, limit: lim }));
+    case "hubspot.search_companies":
+      return fromProvider(
+        await hs.hubspotSearchCompanies({ accessToken: token, query: input.query || "" })
+      );
+    case "hubspot.create_company":
+      return fromProvider(
+        await hs.hubspotCreateCompany({
+          accessToken: token,
+          name: input.name || "",
+          domain: input.domain,
+        })
+      );
+    case "hubspot.list_deals":
+      return fromProvider(await hs.hubspotListDeals({ accessToken: token, limit: lim }));
+    case "hubspot.search_deals":
+      return fromProvider(
+        await hs.hubspotSearchDeals({ accessToken: token, query: input.query || "" })
+      );
+    case "hubspot.create_deal":
+      return fromProvider(
+        await hs.hubspotCreateDeal({
+          accessToken: token,
+          dealname: input.dealname || input.name || "",
+          amount: input.amount,
+          dealstage: input.dealstage,
+        })
+      );
+    case "hubspot.update_deal":
+      return fromProvider(
+        await hs.hubspotUpdateDeal({
+          accessToken: token,
+          dealId: input.dealId || input.id || "",
+          dealname: input.dealname,
+          amount: input.amount,
+          dealstage: input.dealstage,
+        })
+      );
     default:
       return unknownAction(actionId);
   }
@@ -349,7 +369,7 @@ async function runIdeogram(
       apiKey: resolved.token,
       prompt: input.prompt || "",
     });
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    return fromProvider(r);
   }
   return unknownAction(actionId);
 }
@@ -366,29 +386,26 @@ async function runVapi(
   const vapi = await import("./providers/vapi");
 
   if (actionId === "vapi.list_assistants") {
-    const r = await vapi.vapiListAssistants(resolved.token);
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    return fromProvider(await vapi.vapiListAssistants(resolved.token));
   }
   if (actionId === "vapi.list_phone_numbers") {
-    const r = await vapi.vapiListPhoneNumbers(resolved.token);
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    return fromProvider(await vapi.vapiListPhoneNumbers(resolved.token));
   }
   if (actionId === "vapi.list_calls") {
     const limit = parseInt(String(input.limit || "20"), 10);
-    const r = await vapi.vapiListCalls(
-      resolved.token,
-      Number.isFinite(limit) ? limit : 20
+    return fromProvider(
+      await vapi.vapiListCalls(resolved.token, Number.isFinite(limit) ? limit : 20)
     );
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
   }
   if (actionId === "vapi.create_outbound_call") {
-    const r = await vapi.vapiCreateOutboundCall({
-      apiKey: resolved.token,
-      assistantId: input.assistantId || "",
-      phoneNumberId: input.phoneNumberId || "",
-      customerNumber: input.customerNumber || "",
-    });
-    return { ok: r.ok, message: r.message, data: r.data, error: r.error };
+    return fromProvider(
+      await vapi.vapiCreateOutboundCall({
+        apiKey: resolved.token,
+        assistantId: input.assistantId || "",
+        phoneNumberId: input.phoneNumberId || "",
+        customerNumber: input.customerNumber || "",
+      })
+    );
   }
   return unknownAction(actionId);
 }
@@ -413,13 +430,13 @@ async function runMcp(
       ok: r.ok,
       message: r.message,
       data: r.data,
-      error: r.ok ? undefined : { category: "provider" },
+      error: r.ok ? undefined : { category: "unknown" },
     };
   } catch {
     return {
       ok: false,
       message: "Could not run this MCP tool.",
-      error: { category: "provider" },
+      error: { category: "server_error" },
     };
   }
 }
