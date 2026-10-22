@@ -49,6 +49,11 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const userId = String(body.userId || "").trim();
+    const mode = body.mode === "edit" ? "edit" : "create";
+    const existingAgent =
+      body.existingAgent && typeof body.existingAgent === "object"
+        ? body.existingAgent
+        : undefined;
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const cleaned = messages
       .filter(
@@ -81,6 +86,8 @@ export async function POST(req: NextRequest) {
     const result = await completeAgentBuilder({
       messages: cleaned,
       connections,
+      mode,
+      existingAgent,
     });
 
     if (result.kind === "off_topic") {
@@ -116,10 +123,27 @@ export async function POST(req: NextRequest) {
     if (connectorNotes.length) {
       message += `\n\nConnectors needed:\n• ${connectorNotes.join("\n• ")}`;
     }
+    // Soften Notion parent messaging when Notion is already connected
+    if (connections.notion === "connected") {
+      message = message.replace(
+        /set a default page[^\n.]*/gi,
+        "choose which Notion parent page to use (employee settings or tell me the page name)"
+      );
+    }
     if (validated.issues.filter((i) => i.severity === "warning").length) {
       const warns = validated.issues
         .filter((i) => i.severity === "warning")
-        .map((i) => i.message)
+        .map((i) => {
+          let m = i.message;
+          if (
+            connections.notion === "connected" &&
+            /default page|parent page/i.test(m)
+          ) {
+            m =
+              "Notion is connected — set the parent page on this employee or tell me which page to use.";
+          }
+          return m;
+        })
         .slice(0, 4);
       if (warns.length) {
         message += `\n\nBefore this employee can run fully:\n• ${warns.join("\n• ")}`;
