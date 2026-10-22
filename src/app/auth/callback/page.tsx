@@ -23,20 +23,58 @@ export default function AuthCallbackPage() {
         const code = url.searchParams.get("code");
         const tokenHash = url.searchParams.get("token_hash");
         const type = url.searchParams.get("type");
+        const next = url.searchParams.get("next");
         const errorDesc =
           url.searchParams.get("error_description") ||
           url.searchParams.get("error");
 
+        // Hash-based recovery / magic links (access_token in fragment)
+        if (window.location.hash) {
+          const hash = window.location.hash.replace(/^#/, "");
+          const params = new URLSearchParams(hash);
+          const access_token = params.get("access_token");
+          const refresh_token = params.get("refresh_token");
+          const hashType = params.get("type");
+          if (access_token) {
+            const { error: setErr } = await sb.auth.setSession({
+              access_token,
+              refresh_token: refresh_token || "",
+            });
+            if (!setErr) {
+              try {
+                window.history.replaceState(
+                  null,
+                  "",
+                  window.location.pathname + window.location.search
+                );
+              } catch {
+                /* */
+              }
+              const { data: userData } = await sb.auth.getUser();
+              if (userData.user) {
+                await finish(
+                  sb,
+                  userData.user.id,
+                  hashType || type,
+                  url,
+                  next
+                );
+                return;
+              }
+            }
+          }
+        }
+
         const existing = await sb.auth.getSession();
         if (existing.data.session?.user && !code && !tokenHash) {
           setHint("You are signed in. Redirecting…");
-          await finish(sb, existing.data.session.user.id, type, url);
+          await finish(sb, existing.data.session.user.id, type, url, next);
           return;
         }
 
         if (errorDesc && !code && !tokenHash) {
           if (existing.data.session?.user) {
-            await finish(sb, existing.data.session.user.id, type, url);
+            await finish(sb, existing.data.session.user.id, type, url, next);
             return;
           }
           setError(
@@ -62,7 +100,11 @@ export default function AuthCallbackPage() {
           }
         } else if (tokenHash && type) {
           const otpType =
-            type === "recovery" ? "recovery" : type === "email" ? "email" : "signup";
+            type === "recovery"
+              ? "recovery"
+              : type === "email"
+                ? "email"
+                : "signup";
           const { error: otpErr } = await sb.auth.verifyOtp({
             token_hash: tokenHash,
             type: otpType as "signup" | "recovery" | "email",
@@ -86,7 +128,7 @@ export default function AuthCallbackPage() {
           return;
         }
 
-        await finish(sb, userData.user.id, type, url);
+        await finish(sb, userData.user.id, type, url, next);
       } catch {
         try {
           const sb2 = getSupabase();
@@ -106,7 +148,8 @@ export default function AuthCallbackPage() {
       sb: NonNullable<ReturnType<typeof getSupabase>>,
       userId: string,
       type: string | null,
-      url: URL
+      url: URL,
+      nextParam?: string | null
     ) {
       try {
         const { data: userData } = await sb.auth.getUser();
@@ -132,7 +175,12 @@ export default function AuthCallbackPage() {
         /* */
       }
 
-      if (type === "recovery" || url.searchParams.get("next") === "reset") {
+      const isRecovery =
+        type === "recovery" ||
+        nextParam === "reset" ||
+        url.searchParams.get("next") === "reset";
+
+      if (isRecovery) {
         router.replace("/auth/reset-password");
         return;
       }
