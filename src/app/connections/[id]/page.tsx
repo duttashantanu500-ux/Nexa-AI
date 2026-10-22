@@ -55,6 +55,12 @@ function DetailInner() {
     [id]
   );
 
+  /** Only implemented+available actions — single source of truth for UI and employees */
+  const capabilities = useMemo(() => {
+    if (!def?.actions?.length) return [];
+    return def.actions.filter((a) => a.implemented && a.available);
+  }, [def]);
+
   const loadStatus = useCallback(async () => {
     const s = loadOperatorState();
     const uid = (s.user?.id || getStableUserId() || "").trim();
@@ -325,11 +331,11 @@ function DetailInner() {
           </div>
         </div>
 
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">{def.description}</p>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          {def.detailDescription || def.description}
+        </p>
 
-        {statusMessage && (
-          <p className="text-sm text-zinc-500">{statusMessage}</p>
-        )}
+        {statusMessage && <p className="text-sm text-zinc-500">{statusMessage}</p>}
 
         {isConnected && workspaceName && (
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
@@ -347,6 +353,41 @@ function DetailInner() {
         {msg && (
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
             {msg}
+          </div>
+        )}
+
+        {/* Capabilities — driven only by implemented registry actions */}
+        {capabilities.length > 0 && (
+          <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+              Capabilities
+            </h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              What your AI employees can do with this connection when it is connected.
+            </p>
+            <ul className="mt-3 space-y-2">
+              {capabilities.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300"
+                >
+                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />
+                  <span>
+                    <span className="font-medium">{a.name}</span>
+                    {a.readOnly ? (
+                      <span className="ml-1.5 text-[10px] uppercase tracking-wide text-zinc-400">
+                        read
+                      </span>
+                    ) : a.requiresApproval ? (
+                      <span className="ml-1.5 text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                        needs approval
+                      </span>
+                    ) : null}
+                    <span className="mt-0.5 block text-xs text-zinc-500">{a.description}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
