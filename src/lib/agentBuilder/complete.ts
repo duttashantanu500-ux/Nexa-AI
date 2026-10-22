@@ -1,16 +1,25 @@
 /**
  * AI Employee Builder LLM call — multi-provider with local fallback.
+ * Supports create (new hire) and edit (existing employee) modes.
  */
 import { registryCatalogForPrompt } from "./validate";
 import { callOpenAICompat, callGemini, callOllama } from "./modelClients";
 
-const OFF_TOPIC =
+const OFF_TOPIC_CREATE =
   "I'm here to help you hire and shape AI employees — roles that use your tools (Notion, Slack, HubSpot, Buffer, and more).\n\n" +
   "Try something like:\n" +
   "• Create a Notion page after each meeting\n" +
   "• List new HubSpot contacts and summarize in Slack\n" +
   "• Schedule a Buffer post every Monday\n\n" +
   "What should your next AI employee do?";
+
+const OFF_TOPIC_EDIT =
+  "I'm helping you update this AI employee — schedule, tools, steps, or purpose.\n\n" +
+  "Try:\n" +
+  "• Change schedule to every Friday at 5 PM\n" +
+  "• Add a Slack notification step\n" +
+  "• Use a different Notion parent page\n\n" +
+  "What would you like to change?";
 
 function getApiKey(...names: string[]): string | null {
   for (const name of names) {
@@ -25,11 +34,49 @@ function connectionSummary(connections?: Record<string, string>): string {
     return "Connection status unknown.";
   }
   const lines = Object.entries(connections).map(([id, status]) => `- ${id}: ${status}`);
-  return `Live connection status:\n${lines.join("\n")}\nIf not connected, Status must be Connection required.`;
+  return `Live connection status:\n${lines.join("\n")}\nIf not connected, Status must be Connection required. When a connector IS connected, do NOT ask the user to "set a default page" as a blocker — instead guide them to choose or confirm a parent page/channel inside the workflow config, or propose a sensible config they can edit.`;
 }
 
-function buildSystemPrompt(connections?: Record<string, string>): string {
-  return `You are Nexa's AI Employee Builder — not a general chatbot.\nPropose one AI employee using only this registry:\n\n${registryCatalogForPrompt()}\n\n${connectionSummary(connections)}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"create","message":"short note","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nRules: fewest steps; CRM=hubspot.*; Slack=slack.*; Notion=notion.*; social=buffer.*; custom=mcp.call_tool.\nIf connector not connected: still propose, connection required. Never claim work ran. Schedules: once/daily/weekly/monthly only.\nIf the user is only greeting, joking, or asking general questions unrelated to hiring/configuring an AI employee, respond with {"off_topic":true,"message":"warm redirect toward describing a role or workflow"} — never invent a fake employee for small talk.`;
+function existingAgentSummary(existing?: {
+  name?: string;
+  purpose?: string;
+  description?: string;
+  steps?: { actionId?: string; name?: string; config?: Record<string, unknown> }[];
+  schedule?: { frequency?: string; time?: string; timezone?: string; enabled?: boolean };
+}): string {
+  if (!existing) return "";
+  const steps = Array.isArray(existing.steps) ? existing.steps : [];
+  const stepLines = steps
+    .map((s, i) => `  ${i + 1}. ${s?.name || s?.actionId || "step"} (${s?.actionId || "?"})`)
+    .join("\n");
+  const sched = existing.schedule;
+  return `
+CURRENT EMPLOYEE (edit this — do not invent a brand-new hire):
+- Name: ${existing.name || "(unnamed)"}
+- Purpose: ${existing.purpose || existing.description || ""}
+- Schedule: ${sched?.frequency || "once"} ${sched?.time || ""} ${sched?.timezone || "UTC"} enabled=${Boolean(sched?.enabled)}
+- Steps:
+${stepLines || "  (none)"}
+
+You are refining THIS employee. Intent must be "update". Keep their identity unless the user asks to rename. Only change what they asked for.`;
+}
+
+function buildSystemPrompt(
+  connections?: Record<string, string>,
+  mode: "create" | "edit" = "create",
+  existing?: {
+    name?: string;
+    purpose?: string;
+    description?: string;
+    steps?: { actionId?: string; name?: string; config?: Record<string, unknown> }[];
+    schedule?: { frequency?: string; time?: string; timezone?: string; enabled?: boolean };
+  }
+): string {
+  if (mode === "edit") {
+    return `You are Nexa's AI Employee editor for an EXISTING employee — not a general chatbot and not the new-hire assistant.\n${existingAgentSummary(existing)}\n\nRegistry (only these actions):\n${registryCatalogForPrompt()}\n\n${connectionSummary(connections)}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"update","message":"short note about what you changed","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nRules: preserve existing steps the user did not ask to change; fewest changes; CRM=hubspot.*; Slack=slack.*; Notion=notion.*; social=buffer.*.\nWhen Notion is connected, prefer guiding the user to pick a parent page in config rather than blocking with "set a default page".\nIf the user only greets, respond with {"off_topic":true,"message":"warm redirect toward changing schedule, tools, or steps"}. Never say you are here to create new AI employees.`;
+  }
+
+  return `You are Nexa's AI Employee Builder — not a general chatbot.\nPropose one AI employee using only this registry:\n\n${registryCatalogForPrompt()}\n\n${connectionSummary(connections)}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"create","message":"short note","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nRules: fewest steps; CRM=hubspot.*; Slack=slack.*; Notion=notion.*; social=buffer.*; custom=mcp.call_tool.\nIf connector not connected: still propose, connection required. When connector IS connected (e.g. notion: connected), do not block on "set a default page" — propose the step and ask which Notion page/parent to use, or leave parent config empty for the user to set on the employee page.\nNever claim work ran. Schedules: once/daily/weekly/monthly only.\nIf the user is only greeting, joking, or asking general questions unrelated to hiring/configuring an AI employee, respond with {"off_topic":true,"message":"warm redirect toward describing a role or workflow"} — never invent a fake employee for small talk.`;
 }
 
 export type BuilderCompleteResult =
@@ -40,12 +87,22 @@ export type BuilderCompleteResult =
 export async function completeAgentBuilder(params: {
   messages: { role: "user" | "assistant"; content: string }[];
   connections?: Record<string, string>;
+  mode?: "create" | "edit";
+  existingAgent?: {
+    name?: string;
+    purpose?: string;
+    description?: string;
+    steps?: { actionId?: string; name?: string; config?: Record<string, unknown> }[];
+    schedule?: { frequency?: string; time?: string; timezone?: string; enabled?: boolean };
+  };
 }): Promise<BuilderCompleteResult> {
+  const mode = params.mode === "edit" ? "edit" : "create";
+  const OFF_TOPIC = mode === "edit" ? OFF_TOPIC_EDIT : OFF_TOPIC_CREATE;
   const thinking: string[] = [];
-  thinking.push("Reading your request");
+  thinking.push(mode === "edit" ? "Reading change request for this employee" : "Reading your request");
   thinking.push("Checking available connectors and actions");
 
-  const system = buildSystemPrompt(params.connections);
+  const system = buildSystemPrompt(params.connections, mode, params.existingAgent);
   const all = params.messages || [];
   const recent = all.slice(-6);
   const textMessages = [
@@ -54,12 +111,12 @@ export async function completeAgentBuilder(params: {
   ];
 
   const lastUser = [...params.messages].reverse().find((m) => m.role === "user");
-  if (lastUser && looksOffTopic(lastUser.content)) {
+  if (lastUser && looksOffTopic(lastUser.content, mode)) {
     thinking.push("Request is outside AI Employee Builder scope");
     return { kind: "off_topic", message: OFF_TOPIC, thinking };
   }
 
-  thinking.push("Designing a workflow from the registry");
+  thinking.push(mode === "edit" ? "Updating workflow from the registry" : "Designing a workflow from the registry");
 
   const geminiKey = getApiKey("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY");
   const groqKey = getApiKey("GROQ_API_KEY");
@@ -191,7 +248,7 @@ export async function completeAgentBuilder(params: {
   } else {
     console.info(`[agent-builder] attempting up to ${attempts.length} model routes`);
   }
-  thinking.push("Building your AI employee");
+  thinking.push(mode === "edit" ? "Applying changes to this employee" : "Building your AI employee");
 
   for (const attempt of attempts) {
     try {
@@ -212,7 +269,7 @@ export async function completeAgentBuilder(params: {
         thinking.push("Preparing proposal for your review");
         return {
           kind: "proposal",
-          message: formatLocalStructuredMessage(proposal, params.connections),
+          message: formatLocalStructuredMessage(proposal, params.connections, mode),
           proposal,
           provider: result.provider,
           thinking,
@@ -224,12 +281,38 @@ export async function completeAgentBuilder(params: {
   }
 
   console.warn("[agent-builder] all model routes failed — local fallback");
+  if (mode === "edit" && params.existingAgent) {
+    thinking.push("Keeping current employee; describe a specific change");
+    return {
+      kind: "proposal",
+      message:
+        `I'm updating **${params.existingAgent.name || "this employee"}**. ` +
+        "Tell me what to change — schedule, a step, or a tool (Slack, Notion, HubSpot, Buffer).",
+      proposal: {
+        name: params.existingAgent.name,
+        description: params.existingAgent.description || params.existingAgent.purpose,
+        purpose: params.existingAgent.purpose,
+        trigger: params.existingAgent.schedule?.enabled ? "schedule" : "manual",
+        schedule: params.existingAgent.schedule || {
+          frequency: "once",
+          time: "09:00",
+          timezone: "UTC",
+          enabled: false,
+        },
+        steps: params.existingAgent.steps || [],
+        notes: "",
+      },
+      provider: "local_fallback",
+      thinking,
+    };
+  }
+
   const fallback = localFallbackProposal(lastUser?.content || "", params.connections);
   if (fallback) {
     thinking.push("Preparing proposal for your review");
     return {
       kind: "proposal",
-      message: formatLocalStructuredMessage(fallback as Record<string, unknown>, params.connections),
+      message: formatLocalStructuredMessage(fallback as Record<string, unknown>, params.connections, mode),
       proposal: fallback,
       provider: "local_fallback",
       thinking,
@@ -244,12 +327,12 @@ export async function completeAgentBuilder(params: {
   };
 }
 
-function looksOffTopic(text: string): boolean {
+function looksOffTopic(text: string, mode: "create" | "edit"): boolean {
   const t = text.toLowerCase().trim();
   if (!t) return false;
 
   const workHints =
-    /\b(agent|employee|workflow|automat|schedule|connect|slack|notion|github|hubspot|buffer|ideogram|crm|contact|deal|compan(?:y|ies)|list|filter|report|trigger|daily|weekly|hire|post|page|task|step|mcp|oauth|vault|comfy|research|summar|update|create a|build (an? |my )?|make (an? )?)\b/i;
+    /\b(agent|employee|workflow|automat|schedule|connect|slack|notion|github|hubspot|buffer|ideogram|crm|contact|deal|compan(?:y|ies)|list|filter|report|trigger|daily|weekly|hire|post|page|task|step|mcp|oauth|vault|comfy|research|summar|update|create a|build (an? |my )?|make (an? )?|change|rename|add|remove|friday|monday)\b/i;
   if (workHints.test(t)) return false;
 
   if (
@@ -304,13 +387,18 @@ function parseModelJson(raw: string): Record<string, unknown> | null {
 
 function formatLocalStructuredMessage(
   proposal: Record<string, unknown>,
-  connections?: Record<string, string>
+  connections?: Record<string, string>,
+  mode: "create" | "edit" = "create"
 ): string {
   const name = String(proposal.name || "AI employee");
   const purpose = String(proposal.purpose || proposal.description || "");
   const steps = Array.isArray(proposal.steps) ? proposal.steps : [];
+  const header =
+    mode === "edit"
+      ? `Updated draft for **${name}**.`
+      : `Here's a draft for **${name}**.`;
   const lines = [
-    `Here's a draft for **${name}**.`,
+    header,
     purpose ? purpose : "",
     steps.length
       ? "Steps:\n" +
@@ -319,6 +407,11 @@ function formatLocalStructuredMessage(
           .join("\n")
       : "",
   ].filter(Boolean);
+  if (connections?.notion === "connected") {
+    lines.push(
+      "Notion is connected. On the employee page you can set which parent page to use, or tell me the page name to target."
+    );
+  }
   return lines.join("\n\n");
 }
 
@@ -343,7 +436,10 @@ function localFallbackProposal(
           requiresApproval: true,
         },
       ],
-      notes: "",
+      notes:
+        connections?.notion === "connected"
+          ? "Notion is connected — set parent page on the employee or tell me which page to use."
+          : "",
     };
   }
   if (/slack/.test(t)) {
