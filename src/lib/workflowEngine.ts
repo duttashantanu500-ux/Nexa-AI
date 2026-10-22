@@ -1,7 +1,7 @@
 /**
  * Deterministic workflow runner.
  * Browser: calls /api/connections/{provider}/execute with user JWT.
- * Server: dispatches through provider modules using the userId from connections.
+ * Server: executeServerAction for every connector (Notion, Slack, Buffer, HubSpot, Ideogram, Vapi, MCP).
  */
 
 import { getAction } from "./actionRegistry";
@@ -44,9 +44,7 @@ export interface RuntimeConnectionConfig {
   githubToken?: string;
   userId?: string;
   notionDefaultParent?: string;
-  /** Absolute origin for server-side self-fetch when needed */
   origin?: string;
-  /** Bearer token for server-side calls to execute routes */
   accessToken?: string;
 }
 
@@ -281,13 +279,23 @@ async function browserAuthHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
+const PROVIDER_EXECUTE = [
+  "slack",
+  "notion",
+  "buffer",
+  "hubspot",
+  "ideogram",
+  "vapi",
+  "mcp",
+] as const;
+
 async function executeProviderAction(
   actionId: string,
   config: Record<string, string>,
   connections: RuntimeConnectionConfig
 ): Promise<ActionExecResult> {
   const provider = actionId.split(".")[0];
-  if (!["slack", "notion", "buffer", "hubspot", "ideogram", "vapi"].includes(provider)) {
+  if (!PROVIDER_EXECUTE.includes(provider as (typeof PROVIDER_EXECUTE)[number])) {
     return {
       ok: false,
       message: "This action is not available.",
@@ -295,8 +303,35 @@ async function executeProviderAction(
     };
   }
 
-  // Browser: use live session JWT
+  // Browser: live session JWT → existing HTTP execute routes
   if (typeof window !== "undefined") {
+    if (provider === "mcp") {
+      const authHdr = await browserAuthHeaders();
+      const toolName = (config.tool || config.toolName || "").trim();
+      let args: Record<string, unknown> = {};
+      try {
+        if (config.args) args = JSON.parse(config.args);
+      } catch {
+        /* */
+      }
+      const res = await fetch("/api/connections/mcp/execute", {
+        method: "POST",
+        headers: authHdr,
+        body: JSON.stringify({
+          userId: connections.userId,
+          toolName,
+          args,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return {
+        ok: Boolean(data.ok),
+        message: data.message || (data.ok ? "Done" : "Tool failed"),
+        data: data.data,
+        error: data.ok ? undefined : { category: "provider" },
+      };
+    }
+
     const authHdr = await browserAuthHeaders();
     const res = await fetch(`/api/connections/${provider}/execute`, {
       method: "POST",
@@ -316,8 +351,8 @@ async function executeProviderAction(
     };
   }
 
-  // Server: prefer bearer + origin self-call when available
-  if (connections.accessToken && connections.origin) {
+  // Server with user JWT: optional self-call (same routes as browser)
+  if (connections.accessToken && connections.origin && provider !== "mcp") {
     try {
       const res = await fetch(
         `${connections.origin.replace(/\/$/, "")}/api/connections/${provider}/execute`,
@@ -341,16 +376,12 @@ async function executeProviderAction(
         data: data.data,
         error: data.error,
       };
-    } catch (e) {
-      return {
-        ok: false,
-        message: e instanceof Error ? e.message : "Provider call failed",
-        error: { category: "server_error" },
-      };
+    } catch {
+      // fall through to direct server executor
     }
   }
 
-  // Server without JWT: require userId and use token store + provider modules
+  // Server (cron / background): all connectors via unified executor
   const userId = (connections.userId || "").trim();
   if (!userId) {
     return {
@@ -360,119 +391,13 @@ async function executeProviderAction(
     };
   }
 
-  try {
-    if (provider === "notion") {
-      const { resolveNotionToken } = await import("./connectors/notionAuth");
-      const {
-        notionSearch,
-        notionCreatePage,
-        notionAppendBlocks,
-      } = await import("./connectors/providers/notion");
-      const { extractNotionPageId, formatNotionPageId } = await import(
-        "./connectors/notionParent"
-      );
-      const resolved = await resolveNotionToken(userId);
-      if (!resolved?.token) {
-        return {
-          ok: false,
-          message: "Connect your own Notion account under Connections first.",
-          error: { category: "auth" },
-        };
-      }
-      if (actionId === "notion.search") {
-        const r = await notionSearch({
-          accessToken: resolved.token,
-          query: config.query || config.title || "",
-        });
-        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-      }
-      if (actionId === "notion.create_page") {
-        let parentId =
-          extractNotionPageId(config.parent_id || "") ||
-          extractNotionPageId(connections.notionDefaultParent || "");
-        if (!parentId && (config.parent_name || config.parent || "").trim()) {
-          const search = await notionSearch({
-            accessToken: resolved.token,
-            query: (config.parent_name || config.parent || "").trim(),
-          });
-          const pages = (search.data as { pages?: { id: string }[] })?.pages || [];
-          if (pages[0]?.id) parentId = pages[0].id;
-        }
-        if (!parentId) {
-          return {
-            ok: false,
-            message:
-              "Set a default page in Connections → Notion, or name a parent page for this step.",
-            error: { category: "validation" },
-          };
-        }
-        const r = await notionCreatePage({
-          accessToken: resolved.token,
-          parentId: formatNotionPageId(parentId),
-          title: config.title || "Untitled",
-          content: config.content,
-        });
-        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-      }
-      if (actionId === "notion.append_blocks") {
-        let pageId =
-          extractNotionPageId(config.page_id || "") ||
-          extractNotionPageId(config.page_url || "");
-        if (!pageId && (config.page_name || config.page || "").trim()) {
-          const search = await notionSearch({
-            accessToken: resolved.token,
-            query: (config.page_name || config.page || "").trim(),
-          });
-          const pages = (search.data as { pages?: { id: string }[] })?.pages || [];
-          if (pages[0]?.id) pageId = pages[0].id;
-        }
-        const r = await notionAppendBlocks({
-          accessToken: resolved.token,
-          pageId: pageId ? formatNotionPageId(pageId) : "",
-          content: config.content || "",
-        });
-        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-      }
-    }
-
-    if (provider === "slack") {
-      const { loadConnection } = await import("./connectors/tokenStore");
-      const conn = await loadConnection(userId, "slack");
-      if (!conn?.accessToken) {
-        return {
-          ok: false,
-          message: "Connect your own Slack workspace under Connections first.",
-          error: { category: "auth" },
-        };
-      }
-      const slack = await import("./connectors/providers/slack");
-      if (actionId === "slack.list_channels") {
-        const r = await slack.slackListChannels({ accessToken: conn.accessToken });
-        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-      }
-      if (actionId === "slack.post_message") {
-        const r = await slack.slackPostMessage({
-          accessToken: conn.accessToken,
-          channel: config.channel || "",
-          text: config.text || "",
-        });
-        return { ok: r.ok, message: r.message, data: r.data, error: r.error };
-      }
-    }
-
-    // Other providers: require authenticated HTTP path
-    return {
-      ok: false,
-      message: `Server execution for ${actionId} requires a signed-in session. Use Start work from the employee page.`,
-      error: { category: "not_configured" },
-    };
-  } catch (e) {
-    return {
-      ok: false,
-      message: e instanceof Error ? e.message : "Provider call failed",
-      error: { category: "server_error" },
-    };
-  }
+  const { executeServerAction } = await import("./connectors/executeServerAction");
+  return executeServerAction({
+    userId,
+    actionId,
+    input: config,
+    notionDefaultParent: connections.notionDefaultParent,
+  });
 }
 
 async function executeAction(
@@ -486,7 +411,10 @@ async function executeAction(
     case "local_data.list_from_text": {
       const text = config.text || "";
       const sep = config.separator === "comma" ? "," : "\n";
-      ctx.list = text.split(sep).map((s) => s.trim()).filter(Boolean);
+      ctx.list = text
+        .split(sep)
+        .map((s) => s.trim())
+        .filter(Boolean);
       return {
         ok: true,
         message: `List created with ${ctx.list.length} items`,
@@ -535,55 +463,6 @@ async function executeAction(
       ];
       ctx.report = lines.join("\n");
       return { ok: true, message: "Report ready", data: { report: ctx.report } };
-    }
-    case "mcp.call_tool": {
-      if (simulate) return { ok: true, message: "Preview only — no tools run." };
-      const toolName = (config.tool || config.toolName || "").trim();
-      let args: Record<string, unknown> = {};
-      try {
-        if (config.args) args = JSON.parse(config.args);
-      } catch {
-        /* */
-      }
-      if (typeof window !== "undefined") {
-        const authHdr = await browserAuthHeaders();
-        const res = await fetch("/api/connections/mcp/execute", {
-          method: "POST",
-          headers: authHdr,
-          body: JSON.stringify({
-            userId: connections.userId,
-            toolName,
-            args,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        return {
-          ok: Boolean(data.ok),
-          message: data.message || (data.ok ? "Done" : "Tool failed"),
-          data: data.data,
-          error: data.ok ? undefined : { category: "provider" },
-        };
-      }
-      try {
-        const { executeApprovedMcpTool } = await import("./connectors/mcpAuth");
-        const r = await executeApprovedMcpTool({
-          userId: connections.userId || "",
-          toolName,
-          args,
-        });
-        return {
-          ok: r.ok,
-          message: r.message,
-          data: r.data,
-          error: r.ok ? undefined : { category: "provider" },
-        };
-      } catch {
-        return {
-          ok: false,
-          message: "Could not run this tool.",
-          error: { category: "provider" },
-        };
-      }
     }
     default: {
       if (simulate) return { ok: true, message: `Preview only — would run ${actionId}` };
