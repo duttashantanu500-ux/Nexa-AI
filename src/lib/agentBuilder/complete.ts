@@ -4,6 +4,10 @@
  */
 import { registryCatalogForPrompt } from "./validate";
 import { callOpenAICompat, callGemini, callOllama } from "./modelClients";
+import {
+  formatLiveOptionsForPrompt,
+  type LiveAccountOptions,
+} from "./liveAccountOptions";
 
 const OFF_TOPIC_CREATE =
   "I'm here to help you hire and shape AI employees — roles that use your tools (Notion, Slack, HubSpot, Buffer, and more).\n\n" +
@@ -29,12 +33,16 @@ function getApiKey(...names: string[]): string | null {
   return null;
 }
 
-function connectionSummary(connections?: Record<string, string>): string {
+function connectionSummary(
+  connections?: Record<string, string>,
+  liveOptions?: LiveAccountOptions
+): string {
   if (!connections || !Object.keys(connections).length) {
     return "Connection status unknown.";
   }
   const lines = Object.entries(connections).map(([id, status]) => `- ${id}: ${status}`);
-  return `Live connection status:\n${lines.join("\n")}\nIf not connected, Status must be Connection required. When a connector IS connected, do NOT ask the user to "set a default page" as a blocker — instead guide them to choose or confirm a parent page/channel inside the workflow config, or propose a sensible config they can edit.`;
+  const live = liveOptions ? "\n\n" + formatLiveOptionsForPrompt(liveOptions) : "";
+  return `Live connection status:\n${lines.join("\n")}\nIf not connected, Status must be Connection required. When a connector IS connected, do NOT ask the user to "set a default page" as a blocker — instead use LIVE ACCOUNT TARGETS below (or ask them to pick one by name) and put real ids into step config (parent_id, channel, contactId, etc.).${live}`;
 }
 
 function existingAgentSummary(existing?: {
@@ -70,13 +78,15 @@ function buildSystemPrompt(
     description?: string;
     steps?: { actionId?: string; name?: string; config?: Record<string, unknown> }[];
     schedule?: { frequency?: string; time?: string; timezone?: string; enabled?: boolean };
-  }
+  },
+  liveOptions?: LiveAccountOptions
 ): string {
+  const connBlock = connectionSummary(connections, liveOptions);
   if (mode === "edit") {
-    return `You are Nexa's AI Employee editor for an EXISTING employee — not a general chatbot and not the new-hire assistant.\n${existingAgentSummary(existing)}\n\nRegistry (only these actions):\n${registryCatalogForPrompt()}\n\n${connectionSummary(connections)}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"update","message":"short note about what you changed","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nRules: preserve existing steps the user did not ask to change; fewest changes; CRM=hubspot.*; Slack=slack.*; Notion=notion.*; social=buffer.*.\nWhen Notion is connected, prefer guiding the user to pick a parent page in config rather than blocking with "set a default page".\nIf the user only greets, respond with {"off_topic":true,"message":"warm redirect toward changing schedule, tools, or steps"}. Never say you are here to create new AI employees.`;
+    return `You are Nexa's AI Employee editor for an EXISTING employee — not a general chatbot and not the new-hire assistant.\n${existingAgentSummary(existing)}\n\nRegistry (only these actions):\n${registryCatalogForPrompt()}\n\n${connBlock}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"update","message":"short note about what you changed","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nRules: preserve existing steps the user did not ask to change; fewest changes; CRM=hubspot.*; Slack=slack.*; Notion=notion.*; social=buffer.*.\nWhen the user names a page/channel/contact, map it to LIVE ACCOUNT TARGETS and write real ids into step config (parent_id, channel, contactId, dealId). Never invent targets.\nIf the user only greets, respond with {"off_topic":true,"message":"warm redirect toward changing schedule, tools, or steps"}. Never say you are here to create new AI employees.`;
   }
 
-  return `You are Nexa's AI Employee Builder — not a general chatbot.\nPropose one AI employee using only this registry:\n\n${registryCatalogForPrompt()}\n\n${connectionSummary(connections)}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"create","message":"short note","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nRules: fewest steps; CRM=hubspot.*; Slack=slack.*; Notion=notion.*; social=buffer.*; custom=mcp.call_tool.\nIf connector not connected: still propose, connection required. When connector IS connected (e.g. notion: connected), do not block on "set a default page" — propose the step and ask which Notion page/parent to use, or leave parent config empty for the user to set on the employee page.\nNever claim work ran. Schedules: once/daily/weekly/monthly only.\nIf the user is only greeting, joking, or asking general questions unrelated to hiring/configuring an AI employee, respond with {"off_topic":true,"message":"warm redirect toward describing a role or workflow"} — never invent a fake employee for small talk.`;
+  return `You are Nexa's AI Employee Builder — not a general chatbot.\nPropose one AI employee using only this registry:\n\n${registryCatalogForPrompt()}\n\n${connBlock}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"create","message":"short note","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nRules: fewest steps; CRM=hubspot.*; Slack=slack.*; Notion=notion.*; social=buffer.*; custom=mcp.call_tool.\nIf connector not connected: still propose, connection required. When connected, put real targets from LIVE ACCOUNT TARGETS into step config when the user picks or implies one — do not block on "set a default page".\nNever claim work ran. Schedules: once/daily/weekly/monthly only.\nIf the user is only greeting, joking, or asking general questions unrelated to hiring/configuring an AI employee, respond with {"off_topic":true,"message":"warm redirect toward describing a role or workflow"} — never invent a fake employee for small talk.`;
 }
 
 export type BuilderCompleteResult =
@@ -95,14 +105,23 @@ export async function completeAgentBuilder(params: {
     steps?: { actionId?: string; name?: string; config?: Record<string, unknown> }[];
     schedule?: { frequency?: string; time?: string; timezone?: string; enabled?: boolean };
   };
+  liveOptions?: LiveAccountOptions;
 }): Promise<BuilderCompleteResult> {
   const mode = params.mode === "edit" ? "edit" : "create";
   const OFF_TOPIC = mode === "edit" ? OFF_TOPIC_EDIT : OFF_TOPIC_CREATE;
   const thinking: string[] = [];
   thinking.push(mode === "edit" ? "Reading change request for this employee" : "Reading your request");
   thinking.push("Checking available connectors and actions");
+  if (params.liveOptions) {
+    thinking.push("Loading targets from your connected accounts");
+  }
 
-  const system = buildSystemPrompt(params.connections, mode, params.existingAgent);
+  const system = buildSystemPrompt(
+    params.connections,
+    mode,
+    params.existingAgent,
+    params.liveOptions
+  );
   const all = params.messages || [];
   const recent = all.slice(-6);
   const textMessages = [
@@ -407,11 +426,20 @@ function formatLocalStructuredMessage(
           .join("\n")
       : "",
   ].filter(Boolean);
+  const tips: string[] = [];
   if (connections?.notion === "connected") {
-    lines.push(
-      "Notion is connected. On the employee page you can set which parent page to use, or tell me the page name to target."
-    );
+    tips.push("Notion: pick a parent page from your account list (or name it) — ids go in step config.");
   }
+  if (connections?.slack === "connected") {
+    tips.push("Slack: pick a channel from your workspace for post steps.");
+  }
+  if (connections?.buffer === "connected") {
+    tips.push("Buffer: pick a channel for create/schedule post steps.");
+  }
+  if (connections?.hubspot === "connected") {
+    tips.push("HubSpot: pick a contact or deal when a step needs a specific record.");
+  }
+  if (tips.length) lines.push(tips.join(" "));
   return lines.join("\n\n");
 }
 
