@@ -27,6 +27,11 @@ import {
   getRoleTemplate,
   type RoleTemplate,
 } from "@/lib/roleTemplates";
+import {
+  LiveAccountPicker,
+  livePickToMessage,
+  type LivePick,
+} from "@/components/LiveAccountPicker";
 
 type ChatLine = { role: "user" | "assistant"; content: string; thinking?: string[] };
 
@@ -443,6 +448,14 @@ function NewAgentInner() {
         </div>
 
         <div className="sticky bottom-0 border-t border-zinc-200 bg-zinc-50 pt-3 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="mb-3">
+            <LiveAccountPicker
+              onPick={(pick: LivePick) => {
+                if (busy) return;
+                void sendText(livePickToMessage(pick));
+              }}
+            />
+          </div>
           <div className="flex gap-2">
             <input
               value={input}
@@ -453,7 +466,7 @@ function NewAgentInner() {
                   void send();
                 }
               }}
-              placeholder='Describe a role, or pick a template above — e.g. "Weekly Slack summary"'
+              placeholder="Describe a role, pick a template, or choose a page/channel above"
               className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               disabled={busy}
             />
