@@ -204,46 +204,50 @@ export function formatLiveOptionsForPrompt(opts: LiveAccountOptions): string {
   const blocks: string[] = [];
   if (opts.notionPages.length) {
     blocks.push(
-      "Notion pages (use as parent for notion.create_page — prefer id in config.parent_id or name in parent_name):\n" +
-        opts.notionPages
-          .map((p) => `  - "${p.label}" id=${p.id}`)
-          .join("\n")
+      "Notion pages (use as parent for notion.create_page - prefer id in config.parent_id or name in parent_name):\n" +
+        opts.notionPages.map((p) => '  - "' + p.label + '" id=' + p.id).join("\n")
     );
   }
   if (opts.slackChannels.length) {
     blocks.push(
       "Slack channels (use id or #name in slack.post_message config.channel):\n" +
-        opts.slackChannels.map((c) => `  - ${c.label} id=${c.id}`).join("\n")
+        opts.slackChannels.map((c) => "  - " + c.label + " id=" + c.id).join("\n")
     );
   }
   if (opts.bufferChannels.length) {
     blocks.push(
       "Buffer channels (use id in buffer.create_post config.channel):\n" +
         opts.bufferChannels
-          .map((c) => `  - "${c.label}" id=${c.id}${c.meta ? ` (${c.meta})` : ""}`)
+          .map(
+            (c) =>
+              '  - "' +
+              c.label +
+              '" id=' +
+              c.id +
+              (c.meta ? " (" + c.meta + ")" : "")
+          )
           .join("\n")
     );
   }
   if (opts.hubspotContacts.length) {
     blocks.push(
-      "HubSpot contacts (sample — use id for get/update):\n" +
+      "HubSpot contacts (sample - use id for get/update):\n" +
         opts.hubspotContacts
-          .map((c) => `  - "${c.label}" id=${c.id}`)
+          .map((c) => '  - "' + c.label + '" id=' + c.id)
           .join("\n")
     );
   }
   if (opts.hubspotDeals.length) {
     blocks.push(
-      "HubSpot deals (sample — use id for get/update):\n" +
-        opts.hubspotDeals.map((d) => `  - "${d.label}" id=${d.id}`).join("\n")
+      "HubSpot deals (sample - use id for get/update):\n" +
+        opts.hubspotDeals.map((d) => '  - "' + d.label + '" id=' + d.id).join("\n")
     );
   }
   if (!blocks.length) {
     return "No live account targets loaded (connector not connected, or list empty). Do not invent page/channel names.";
   }
   return (
-    "LIVE ACCOUNT TARGETS from the user's connected apps (prefer these real ids/names in step config; never invent):
-" +
+    "LIVE ACCOUNT TARGETS from the user's connected apps (prefer these real ids/names in step config; never invent):\n" +
     blocks.join("\n") +
     "\nWhen the user picks a target by name, put the matching id into step config."
   );
