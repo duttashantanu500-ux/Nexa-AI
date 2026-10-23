@@ -15,6 +15,11 @@ import {
   stepId,
 } from "@/lib/operatorStore";
 import { patchServerAgent } from "@/lib/serverAgentClient";
+import {
+  LiveAccountPicker,
+  livePickToMessage,
+  type LivePick,
+} from "@/components/LiveAccountPicker";
 
 /**
  * Persistent chat for an EXISTING AI employee.
@@ -77,12 +82,11 @@ export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
     [agentId]
   );
 
-  const send = async () => {
-    const text = input.trim();
-    if (!text || busy) return;
-    setInput("");
+  const sendText = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || busy) return;
     setError("");
-    const next = [...lines, { role: "user" as const, content: text }];
+    const next = [...lines, { role: "user" as const, content: trimmed }];
     setLines(next);
     setBusy(true);
     try {
@@ -131,6 +135,18 @@ export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
     setBusy(false);
   };
 
+  const send = async () => {
+    const text = input.trim();
+    if (!text || busy) return;
+    setInput("");
+    await sendText(text);
+  };
+
+  const onPick = (pick: LivePick) => {
+    if (busy) return;
+    void sendText(livePickToMessage(pick));
+  };
+
   return (
     <section className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
       <div className="border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
@@ -141,10 +157,13 @@ export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
           Change schedule, tools, or workflow for this employee only.
         </p>
       </div>
+      <div className="border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
+        <LiveAccountPicker onPick={onPick} />
+      </div>
       <div className="flex max-h-80 flex-col gap-2 overflow-y-auto px-4 py-3">
         {lines.length === 0 && !busy && (
           <p className="text-sm text-zinc-500">
-            Describe a change, or ask what this employee does.
+            Describe a change, pick a page/channel above, or ask what this employee does.
           </p>
         )}
         {lines.map((l, i) => (
@@ -179,7 +198,7 @@ export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
               void send();
             }
           }}
-          placeholder='e.g. "Run every Friday at 5 PM" or "Add Slack"'
+          placeholder='e.g. "Run every Friday at 5 PM" or pick a target above'
           className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
           disabled={busy}
         />
