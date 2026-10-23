@@ -410,7 +410,7 @@ function DetailInner() {
         )}
 
         <div className="mt-6 flex flex-wrap gap-2">
-          {status === "available" && def.authType === "oauth" && (
+          {status === "available" && def.connectionMethod === "oauth" && (
             <button
               type="button"
               disabled={busy}
@@ -438,7 +438,7 @@ function DetailInner() {
               </button>
             </div>
           )}
-          {isConnected && def.authType === "oauth" && (
+          {isConnected && def.connectionMethod === "oauth" && (
             <>
               <button
                 type="button"
@@ -492,7 +492,7 @@ function DetailInner() {
           )}
         </div>
 
-        {status === "available" && def.authType === "oauth" && (
+        {status === "available" && def.connectionMethod === "oauth" && (
           <p className="mt-3 text-xs text-zinc-500">
             You will authorize Nexa in {def.name}, then return here.
           </p>
