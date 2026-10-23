@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { completeAgentBuilder } from "@/lib/agentBuilder/complete";
 import { validateProposal } from "@/lib/agentBuilder/validate";
+import { loadLiveAccountOptions } from "@/lib/agentBuilder/liveAccountOptions";
 
 /** Strip any residual internal model/provider noise before it reaches the UI. */
 function sanitizePublicThinking(lines?: string[]): string[] {
@@ -83,11 +84,18 @@ export async function POST(req: NextRequest) {
         : req.nextUrl.origin);
 
     const connections = await loadConnectionMap(userId, origin);
+    let liveOptions = undefined;
+    try {
+      liveOptions = await loadLiveAccountOptions(userId);
+    } catch (e) {
+      console.warn("[api/agent-builder] live options", e);
+    }
     const result = await completeAgentBuilder({
       messages: cleaned,
       connections,
       mode,
       existingAgent,
+      liveOptions,
     });
 
     if (result.kind === "off_topic") {
@@ -123,11 +131,11 @@ export async function POST(req: NextRequest) {
     if (connectorNotes.length) {
       message += `\n\nConnectors needed:\n• ${connectorNotes.join("\n• ")}`;
     }
-    // Soften Notion parent messaging when Notion is already connected
+    // Soften connector setup messaging when accounts are already connected
     if (connections.notion === "connected") {
       message = message.replace(
         /set a default page[^\n.]*/gi,
-        "choose which Notion parent page to use (employee settings or tell me the page name)"
+        "pick a Notion parent page from your workspace (or name the page)"
       );
     }
     if (validated.issues.filter((i) => i.severity === "warning").length) {
@@ -140,7 +148,16 @@ export async function POST(req: NextRequest) {
             /default page|parent page/i.test(m)
           ) {
             m =
-              "Notion is connected — set the parent page on this employee or tell me which page to use.";
+              "Notion is connected — pick a parent page from the account list or tell me the page name.";
+          }
+          if (connections.slack === "connected" && /channel/i.test(m)) {
+            m = "Slack is connected — pick a channel from your workspace list.";
+          }
+          if (
+            connections.buffer === "connected" &&
+            /channel|buffer/i.test(m)
+          ) {
+            m = "Buffer is connected — pick a channel from your account list.";
           }
           return m;
         })
@@ -149,6 +166,16 @@ export async function POST(req: NextRequest) {
         message += `\n\nBefore this employee can run fully:\n• ${warns.join("\n• ")}`;
       }
     }
+
+    const liveSummary = liveOptions
+      ? {
+          notionPages: liveOptions.notionPages?.length || 0,
+          slackChannels: liveOptions.slackChannels?.length || 0,
+          bufferChannels: liveOptions.bufferChannels?.length || 0,
+          hubspotContacts: liveOptions.hubspotContacts?.length || 0,
+          hubspotDeals: liveOptions.hubspotDeals?.length || 0,
+        }
+      : null;
 
     return NextResponse.json({
       ok: true,
@@ -162,6 +189,7 @@ export async function POST(req: NextRequest) {
         requiredConnectors: validated.requiredConnectors,
         approvalSteps: validated.approvalSteps,
       },
+      liveSummary,
       thinking: sanitizePublicThinking(result.thinking),
     });
   } catch (err) {
