@@ -154,13 +154,20 @@ function DetailInner() {
       setBusy(false);
       return;
     }
-    const oauthProviders = ["notion", "slack", "buffer", "hubspot", "github"] as const;
-    if (!oauthProviders.includes(def.id as (typeof oauthProviders)[number])) {
-      setMsg("This connection does not use OAuth here.");
-      setBusy(false);
-      return;
+    try {
+      const res = await fetch(`/api/oauth/${def.id}/start?userId=${encodeURIComponent(uid)}`, {
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      setMsg(data.message || "Could not start connection.");
+    } catch {
+      setMsg("Could not start connection.");
     }
-    window.location.href = `/api/oauth/${def.id}/start?userId=${encodeURIComponent(uid)}`;
+    setBusy(false);
   };
 
   const disconnect = async () => {
@@ -227,14 +234,26 @@ function DetailInner() {
     setBusy(true);
     setMsg("");
     try {
-      const res = await fetch(
-        `/api/connections/${def.id}/test?userId=${encodeURIComponent(uid)}`,
-        { cache: "no-store" }
-      );
+      const token = await resolveAccessToken();
+      if (!token) {
+        setMsg("Please sign in again to run a test.");
+        setBusy(false);
+        return;
+      }
+      const res = await fetch(`/api/connections/${def.id}/test`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ userId: uid }),
+        cache: "no-store",
+      });
       const data = await res.json().catch(() => ({}));
       if (data.ok) {
         setMsg(data.message || "Connection looks healthy.");
         setStatus("connected");
+        await loadStatus();
       } else {
         setMsg(data.message || "Test failed. Try reconnecting.");
       }
@@ -300,263 +319,186 @@ function DetailInner() {
   };
 
   const saveComfy = () => {
-    const u = comfyUrl.trim();
+    const u = comfyUrl.trim().replace(/\/$/, "");
     try {
       if (u) localStorage.setItem(COMFY_KEY, u);
       else localStorage.removeItem(COMFY_KEY);
       setStatus(u ? "connected" : "available");
       setCanDisconnect(Boolean(u));
-      setMsg(u ? "ComfyUI URL saved." : "ComfyUI URL cleared.");
+      setMsg(u ? "ComfyUI URL saved." : "Cleared.");
+      setStatusMessage(u ? "ComfyUI URL saved on this device." : "Add your ComfyUI base URL.");
     } catch {
-      setMsg("Could not save locally.");
+      setMsg("Could not save on this device.");
     }
   };
 
-  const isOAuth = ["notion", "slack", "buffer", "hubspot", "github"].includes(def.id);
-  const isApiKey = ["ideogram", "vapi"].includes(def.id);
-  const isComfy = def.id === "local_comfyui";
-  const isMcp = def.id === "mcp";
   const isConnected = status === "connected";
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-lg space-y-6 px-4 py-8">
-        <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-800">
-            <ConnectorLogo id={def.id} size={28} />
-          </div>
+      <div className="mx-auto max-w-lg px-4 py-8">
+        <div className="mb-6 flex items-start gap-3">
+          <ConnectorLogo id={def.id} size={40} />
           <div className="min-w-0 flex-1">
-            <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">{def.name}</h1>
-            <span className={statusBadgeClass(status)}>{statusLabel(status)}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">{def.name}</h1>
+              <span className={statusBadgeClass(status)}>{statusLabel(status)}</span>
+            </div>
+            <p className="mt-1 text-sm text-zinc-500">{def.description}</p>
           </div>
         </div>
 
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          {def.detailDescription || def.description}
-        </p>
-
+        {msg && <p className="mb-3 text-sm text-indigo-600 dark:text-indigo-400">{msg}</p>}
         {statusMessage && <p className="text-sm text-zinc-500">{statusMessage}</p>}
 
         {isConnected && workspaceName && (
-          <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-            <span className="text-zinc-500">Workspace · </span>
-            <span className="font-medium text-zinc-800 dark:text-zinc-100">{workspaceName}</span>
-          </div>
-        )}
-
-        {isConnected && connectedAt && (
-          <p className="text-xs text-zinc-400">
-            Connected {new Date(connectedAt).toLocaleString()}
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+            Workspace · {workspaceName}
           </p>
         )}
-
-        {msg && (
-          <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-            {msg}
-          </div>
+        {isConnected && connectedAt && (
+          <p className="text-xs text-zinc-400">Connected {new Date(connectedAt).toLocaleString()}</p>
         )}
 
-        {/* Capabilities — driven only by implemented registry actions */}
+        {def.id === "mcp" && <McpConnectionPanel />}
+
         {capabilities.length > 0 && (
-          <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-              Capabilities
-            </h2>
-            <p className="mt-1 text-xs text-zinc-500">
+          <div className="mt-6">
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Capabilities</h2>
+            <p className="mt-0.5 text-xs text-zinc-500">
               What your AI employees can do with this connection when it is connected.
             </p>
             <ul className="mt-3 space-y-2">
               {capabilities.map((a) => (
                 <li
                   key={a.id}
-                  className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300"
+                  className="rounded-lg border border-zinc-100 px-3 py-2 dark:border-zinc-800"
                 >
-                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />
-                  <span>
-                    <span className="font-medium">{a.name}</span>
-                    {a.readOnly ? (
-                      <span className="ml-1.5 text-[10px] uppercase tracking-wide text-zinc-400">
-                        read
-                      </span>
-                    ) : a.requiresApproval ? (
-                      <span className="ml-1.5 text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400">
-                        needs approval
-                      </span>
-                    ) : null}
-                    <span className="mt-0.5 block text-xs text-zinc-500">{a.description}</span>
-                  </span>
+                  <div className="flex items-center gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100">
+                    {a.name}
+                    <span className="text-[10px] font-normal uppercase tracking-wide text-zinc-400">
+                      {a.requiresApproval ? "Needs approval" : "Read"}
+                    </span>
+                  </div>
+                  {a.description && (
+                    <p className="mt-0.5 text-xs text-zinc-500">{a.description}</p>
+                  )}
                 </li>
               ))}
             </ul>
           </div>
         )}
 
-        {isOAuth && (
-          <div className="space-y-3">
-            {!isConnected ? (
-              <>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void startOAuth()}
-                  className="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  {busy ? "Redirecting…" : `Connect ${def.name}`}
-                </button>
-                <p className="text-xs text-zinc-500">
-                  You will authorize Nexa in {def.name}, then return here.
-                </p>
-              </>
-            ) : (
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void startOAuth()}
-                  className="flex-1 rounded-lg border border-zinc-200 bg-white py-2.5 text-sm font-medium text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 disabled:opacity-50"
-                >
-                  {busy ? "…" : "Reconnect"}
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void testConnection()}
-                  className="flex-1 rounded-lg border border-zinc-200 bg-white py-2.5 text-sm font-medium text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 disabled:opacity-50"
-                >
-                  Test
-                </button>
-                {canDisconnect && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void disconnect()}
-                    className="flex-1 rounded-lg border border-red-200 bg-red-50 py-2.5 text-sm font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 disabled:opacity-50"
-                  >
-                    Disconnect
-                  </button>
-                )}
-              </div>
-            )}
+        {def.id === "local_comfyui" && (
+          <div className="mt-6 space-y-2">
+            <label className="block text-xs font-medium text-zinc-500">ComfyUI base URL</label>
+            <input
+              value={comfyUrl}
+              onChange={(e) => setComfyUrl(e.target.value)}
+              placeholder="http://127.0.0.1:8188"
+              className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={saveComfy}
+              className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white disabled:opacity-50"
+            >
+              Save
+            </button>
           </div>
         )}
 
-        {isApiKey && (
-          <div className="space-y-3">
-            {!isConnected && (
-              <label className="block space-y-1">
-                <span className="text-xs text-zinc-500">API key</span>
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="Paste your API key"
-                  className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                />
-              </label>
-            )}
-            <div className="flex flex-col gap-2 sm:flex-row">
-              {!isConnected ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void saveApiKey()}
-                  className="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  {busy ? "Saving…" : "Save and connect"}
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => {
-                      setStatus("available");
-                      setMsg("Paste a new key to update.");
-                    }}
-                    className="flex-1 rounded-lg border border-zinc-200 bg-white py-2.5 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900"
-                  >
-                    Update key
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void testConnection()}
-                    className="flex-1 rounded-lg border border-zinc-200 bg-white py-2.5 text-sm font-medium dark:border-zinc-700 dark:bg-zinc-900"
-                  >
-                    Test
-                  </button>
-                  {canDisconnect && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void disconnect()}
-                      className="flex-1 rounded-lg border border-red-200 bg-red-50 py-2.5 text-sm font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
-                    >
-                      Disconnect
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-            {status === "available" && apiKey && (
+        <div className="mt-6 flex flex-wrap gap-2">
+          {status === "available" && def.authType === "oauth" && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void startOAuth()}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              Connect {def.name}
+            </button>
+          )}
+          {status === "available" && (def.id === "ideogram" || def.id === "vapi") && (
+            <div className="flex w-full flex-col gap-2 sm:flex-row">
+              <input
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="API key"
+                className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              />
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => void saveApiKey()}
-                className="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
-                {busy ? "Saving…" : "Save key"}
+                Save and connect
               </button>
-            )}
-          </div>
-        )}
-
-        {isMcp && (
-          <McpConnectionPanel
-            userId={(loadOperatorState().user?.id || getStableUserId() || "").trim()}
-            onStatus={(s) => setStatus(s === "loading" ? "available" : s)}
-          />
-        )}
-
-        {isComfy && (
-          <div className="space-y-3">
-            <label className="block space-y-1">
-              <span className="text-xs text-zinc-500">ComfyUI base URL</span>
-              <input
-                value={comfyUrl}
-                onChange={(e) => setComfyUrl(e.target.value)}
-                placeholder="http://127.0.0.1:8188"
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-              />
-            </label>
-            <div className="flex gap-2">
+            </div>
+          )}
+          {isConnected && def.authType === "oauth" && (
+            <>
               <button
                 type="button"
-                onClick={saveComfy}
-                className="flex-1 rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white"
+                disabled={busy}
+                onClick={() => void startOAuth()}
+                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
               >
-                Save URL
+                Reconnect
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void testConnection()}
+                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+              >
+                Test
               </button>
               {canDisconnect && (
                 <button
                   type="button"
+                  disabled={busy}
                   onClick={() => void disconnect()}
-                  className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700"
+                  className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 dark:border-red-900"
                 >
-                  Clear
+                  Disconnect
                 </button>
               )}
-            </div>
-          </div>
-        )}
+            </>
+          )}
+          {isConnected && (def.id === "ideogram" || def.id === "vapi") && (
+            <>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void testConnection()}
+                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700"
+              >
+                Test
+              </button>
+              {canDisconnect && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void disconnect()}
+                  className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 dark:border-red-900"
+                >
+                  Disconnect
+                </button>
+              )}
+            </>
+          )}
+        </div>
 
-        {!isOAuth && !isApiKey && !isComfy && !isMcp && (
-          <p className="text-sm text-zinc-500">
-            This connection is available to your AI employees without extra setup.
+        {status === "available" && def.authType === "oauth" && (
+          <p className="mt-3 text-xs text-zinc-500">
+            You will authorize Nexa in {def.name}, then return here.
           </p>
         )}
 
-        <Link href="/connections" className="inline-block text-sm text-indigo-600">
+        <Link href="/connections" className="mt-8 inline-block text-sm text-zinc-500 hover:text-indigo-600">
           ← Back to Connections
         </Link>
       </div>
