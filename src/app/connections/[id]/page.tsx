@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { ConnectorLogo } from "@/components/ConnectorLogo";
 import { McpConnectionPanel } from "@/components/McpConnectionPanel";
@@ -36,7 +36,6 @@ async function resolveAccessToken(): Promise<string | null> {
 function DetailInner() {
   const router = useRouter();
   const params = useParams();
-  const search = useSearchParams();
   const id = String(params?.id || "");
   const [status, setStatus] = useState<ConnectorUiStatus>("available");
   const [busy, setBusy] = useState(false);
@@ -112,18 +111,24 @@ function DetailInner() {
 
   useEffect(() => {
     void loadStatus();
-    const q = (search.get("s") || "").toLowerCase();
-    if (q === "connected" || q === "available" || q === "error") {
-      setStatus(q as ConnectorUiStatus);
+    // Read OAuth return flags from the URL without useSearchParams (avoids Suspense hang).
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const q = (sp.get("s") || "").toLowerCase();
+      if (q === "connected" || q === "available" || q === "error") {
+        setStatus(q as ConnectorUiStatus);
+      }
+      if (sp.get("connected")) {
+        setMsg("Connected successfully.");
+        setStatus("connected");
+      }
+      if (sp.get("error")) {
+        setMsg("Could not finish connecting. Try again or check the tool is still linked.");
+      }
+    } catch {
+      /* ignore */
     }
-    if (search.get("connected")) {
-      setMsg("Connected successfully.");
-      setStatus("connected");
-    }
-    if (search.get("error")) {
-      setMsg("Could not finish connecting. Try again or check the tool is still linked.");
-    }
-  }, [loadStatus, search]);
+  }, [loadStatus]);
 
   if (!def) {
     return (
@@ -512,15 +517,5 @@ function DetailInner() {
 }
 
 export default function ConnectionDetailPage() {
-  return (
-    <Suspense
-      fallback={
-        <AppShell>
-          <div className="px-4 py-12 text-center text-sm text-zinc-500">Loading…</div>
-        </AppShell>
-      }
-    >
-      <DetailInner />
-    </Suspense>
-  );
+  return <DetailInner />;
 }
