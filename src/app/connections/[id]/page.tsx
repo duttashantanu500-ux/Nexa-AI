@@ -61,8 +61,27 @@ function DetailInner() {
   }, [def]);
 
   const loadStatus = useCallback(async () => {
-    const s = loadOperatorState();
-    const uid = (s.user?.id || getStableUserId() || "").trim();
+    let s = loadOperatorState();
+    let uid = (s.user?.id || getStableUserId() || "").trim();
+    // Mobile/slow hydration: wait briefly for session before bouncing to login.
+    if (!uid) {
+      try {
+        const sb = getSupabase();
+        if (sb) {
+          const { data } = await sb.auth.getSession();
+          if (data.session?.user?.id) {
+            uid = data.session.user.id;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      if (!uid) {
+        await new Promise((r) => setTimeout(r, 250));
+        s = loadOperatorState();
+        uid = (s.user?.id || getStableUserId() || "").trim();
+      }
+    }
     if (!uid) {
       router.replace("/login");
       return;
