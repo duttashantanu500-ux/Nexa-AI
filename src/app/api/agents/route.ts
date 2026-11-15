@@ -4,6 +4,7 @@ import {
   listAgentsForUser,
   loadAgentSteps,
   upsertServerAgent,
+  getAgentForUser,
 } from "@/lib/serverAgents";
 
 export const runtime = "nodejs";
@@ -24,7 +25,8 @@ export async function GET(req: NextRequest) {
     const rows = await listAgentsForUser(auth.userId);
     const agents = await Promise.all(
       rows.map(async (a) => {
-        const steps = await loadAgentSteps(a.id, a.current_version);
+        const full = await getAgentForUser(a.id, auth.userId);
+        const steps = full?.steps || (await loadAgentSteps(a.id, a.current_version));
         return {
           id: a.id,
           userId: a.owner_user_id,
@@ -34,7 +36,7 @@ export async function GET(req: NextRequest) {
           status: a.status || "active",
           version: a.current_version || 1,
           steps,
-          schedule: {
+          schedule: full?.schedule || {
             frequency: "once",
             enabled: false,
           },
