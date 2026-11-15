@@ -214,7 +214,7 @@ export default function WorkBoardPage() {
         <PageHeader
           page="activity"
           title="Work Board"
-          subtitle="Real work across your digital team — status only updates when execution succeeds or fails."
+          subtitle="See what your digital team is working on — status updates when work finishes or needs your approval."
           actions={
             <Link
               href="/agents"
