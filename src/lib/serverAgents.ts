@@ -159,6 +159,27 @@ export async function loadAgentSteps(agentId: string, version?: number): Promise
   return Array.isArray(data?.steps) ? data.steps : [];
 }
 
+function mapScheduleRow(sch: any | null) {
+  if (!sch) {
+    return { frequency: "once", time: "09:00", timezone: "UTC", enabled: false };
+  }
+  const type = String(sch.type || "one_time");
+  const frequency =
+    type === "daily"
+      ? "daily"
+      : type === "weekly"
+        ? "weekly"
+        : type === "monthly"
+          ? "monthly"
+          : "once";
+  return {
+    frequency,
+    time: String(sch.time_of_day || "09:00").slice(0, 5),
+    timezone: "UTC",
+    enabled: Boolean(sch.enabled),
+  };
+}
+
 export async function getAgentForUser(agentId: string, userId: string): Promise<any | null> {
   const sb = adminClient();
   if (!sb) return null;
@@ -169,13 +190,19 @@ export async function getAgentForUser(agentId: string, userId: string): Promise<
     .eq("owner_user_id", userId)
     .maybeSingle();
   if (!data) return null;
+  const steps = await loadAgentSteps(agentId, data.current_version);
   const { data: sch } = await sb
     .from("nexa_schedules")
     .select("*")
     .eq("agent_id", agentId)
     .limit(1)
     .maybeSingle();
-  return { ...data, schedule: sch || null };
+  return {
+    ...data,
+    steps,
+    schedule: mapScheduleRow(sch || null),
+    schedule_raw: sch || null,
+  };
 }
 
 export async function upsertServerAgent(params: {
