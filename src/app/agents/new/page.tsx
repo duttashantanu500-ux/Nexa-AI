@@ -21,7 +21,7 @@ import {
 import type { AgentProposal } from "@/lib/agentBuilder/types";
 import { UpgradeLimitModal } from "@/components/UpgradeLimitModal";
 import { LIMIT_MESSAGES } from "@/lib/plans";
-import { fetchServerAgents } from "@/lib/serverAgentClient";
+import { fetchServerAgents, saveServerAgent } from "@/lib/serverAgentClient";
 import {
   ROLE_TEMPLATES,
   getRoleTemplate,
@@ -40,9 +40,7 @@ export default function NewAgentPage() {
     <Suspense
       fallback={
         <AppShell>
-          <div className="px-4 py-12 text-center text-sm text-zinc-500">
-            Loading Hiring Desk…
-          </div>
+          <div className="px-4 py-12 text-center text-sm text-zinc-500">Loading…</div>
         </AppShell>
       }
     >
@@ -55,23 +53,22 @@ function NewAgentInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [lines, setLines] = useState<ChatLine[]>([]);
-  const [chatReady, setChatReady] = useState(false);
-  const scopeRef = useRef("");
-  const roleAutoStarted = useRef(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [thinkingLive, setThinkingLive] = useState<string[]>([]);
+  const [error, setError] = useState("");
   const [proposal, setProposal] = useState<AgentProposal | null>(null);
   const [requiredConnectors, setRequiredConnectors] = useState<
     { id: string; name: string; status: string }[]
   >([]);
   const [creating, setCreating] = useState(false);
-  const [error, setError] = useState("");
-  const [billing, setBilling] = useState<ClientBillingState | null>(null);
   const [limitOpen, setLimitOpen] = useState(false);
+  const [billing, setBilling] = useState<ClientBillingState | null>(null);
   const [pickedRole, setPickedRole] = useState<RoleTemplate | null>(null);
+  const [chatReady, setChatReady] = useState(false);
   const [showDesk, setShowDesk] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scopeRef = useRef<string>("");
+  const roleAutoStarted = useRef(false);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -79,124 +76,94 @@ function NewAgentInner() {
       router.replace("/login");
       return;
     }
+    if (!s.user.onboardingCompleted) {
+      router.replace("/onboarding");
+      return;
+    }
     const scope = draftScopeId(s.user.id);
     scopeRef.current = scope;
-    const existing = loadBuilderChat(scope) as ChatLine[];
-    setLines(existing);
-    if (existing.length > 0) setShowDesk(false);
+    const stored = loadBuilderChat(scope);
+    if (stored.lines?.length) {
+      setLines(
+        stored.lines.map((l) => ({
+          role: l.role,
+          content: l.content,
+          thinking: l.thinking,
+        }))
+      );
+      if (stored.proposal) setProposal(stored.proposal as AgentProposal);
+      setShowDesk(false);
+    }
     setChatReady(true);
-    void fetchBillingStatus().then(setBilling);
+    void fetchBillingStatus().then(setBilling).catch(() => null);
   }, [router]);
 
   useEffect(() => {
-    if (!chatReady || !scopeRef.current) return;
-    saveBuilderChat(scopeRef.current, lines as BuilderLine[]);
-  }, [lines, chatReady]);
-
-  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [lines, proposal, thinkingLive]);
+  }, [lines, busy, proposal]);
 
-  const sendText = async (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed || busy) return;
-    setError("");
-    setProposal(null);
-    setRequiredConnectors([]);
+  const persist = (next: ChatLine[], prop: AgentProposal | null) => {
+    if (!scopeRef.current) return;
+    const mapped: BuilderLine[] = next.map((l) => ({
+      role: l.role,
+      content: l.content,
+      thinking: l.thinking,
+    }));
+    saveBuilderChat(scopeRef.current, mapped, prop);
+  };
+
+  const sendMessage = async (text: string) => {
+    const msg = text.trim();
+    if (!msg || busy) return;
     setShowDesk(false);
-    const nextLines = [...lines, { role: "user" as const, content: trimmed }];
+    setError("");
+    const nextLines: ChatLine[] = [...lines, { role: "user", content: msg }];
     setLines(nextLines);
+    setInput("");
     setBusy(true);
-    setThinkingLive([
-      "Reading your request",
-      "Checking available connectors and actions",
-      "Designing a workflow from the registry",
-    ]);
     try {
       const s = loadOperatorState();
       const res = await fetch("/api/agent-builder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: s.user?.id || "",
           messages: nextLines.map((l) => ({ role: l.role, content: l.content })),
+          userId: s.user?.id,
+          mode: "create",
         }),
       });
-      const data = await res.json();
-      const thinking = Array.isArray(data.thinking) ? data.thinking : [];
-      setThinkingLive([]);
-
-      if (!data.ok) {
-        setLines((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content:
-              data.message ||
-              "I'm Nexa's AI Employee Builder. I can only help you hire or update AI employees.",
-            thinking,
-          },
-        ]);
-      } else if (data.declined) {
-        setLines((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: data.message || "I can only help with AI employees.",
-            thinking,
-          },
-        ]);
-      } else {
-        if (data.proposal) {
-          setProposal(data.proposal as AgentProposal);
-          setLines((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content:
-                "Draft ready. Review the card below — connect any missing tools, then hire.",
-              thinking,
-            },
-          ]);
-        } else {
-          setLines((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content: data.message || "Here is a proposed AI employee.",
-              thinking,
-            },
-          ]);
-        }
-        if (data.validation?.requiredConnectors) {
-          setRequiredConnectors(data.validation.requiredConnectors);
-        }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setError(data.message || "Could not process that. Try again.");
+        setBusy(false);
+        return;
       }
+      const reply = String(data.message || data.reply || "");
+      const thinking = Array.isArray(data.thinking) ? data.thinking : undefined;
+      const prop = data.proposal || null;
+      const withAssistant: ChatLine[] = [
+        ...nextLines,
+        { role: "assistant", content: reply || "Draft ready.", thinking },
+      ];
+      setLines(withAssistant);
+      if (prop) setProposal(prop);
+      if (Array.isArray(data.requiredConnectors)) setRequiredConnectors(data.requiredConnectors);
+      persist(withAssistant, prop);
     } catch {
-      setThinkingLive([]);
-      setError("Something went wrong. Please try again.");
+      setError("Network error. Try again.");
     }
     setBusy(false);
   };
 
-  const send = async () => {
-    const text = input.trim();
-    if (!text || busy) return;
-    setInput("");
-    await sendText(text);
-  };
-
   const pickTemplate = (t: RoleTemplate) => {
     setPickedRole(t);
-    setShowDesk(false);
-    setInput(t.builderPrompt);
-    void sendText(t.builderPrompt);
+    void sendMessage(
+      `Hire a ${t.name}. Role: ${t.role}. ${t.description} Constraints: ${t.constraints}`
+    );
   };
 
-  // Auto-start from onboarding: /agents/new?role=marketing
   useEffect(() => {
-    if (!chatReady || roleAutoStarted.current || busy) return;
-    if (lines.length > 0) return;
+    if (!chatReady || lines.length || roleAutoStarted.current) return;
     const roleId =
       searchParams.get("role") ||
       (() => {
@@ -275,6 +242,23 @@ function NewAgentInner() {
           enabled: Boolean(proposal.schedule?.enabled),
         },
       });
+      // Persist to server so the team survives new devices / browsers.
+      try {
+        const saved = await saveServerAgent({
+          id: agent.id,
+          name: agent.name,
+          description: agent.description,
+          purpose: agent.purpose,
+          status: agent.status,
+          steps: agent.steps,
+          schedule: agent.schedule,
+        });
+        if (!saved.ok) {
+          console.warn("[Nexa] server hire save:", saved.message);
+        }
+      } catch (e) {
+        console.warn("[Nexa] server hire save failed", e);
+      }
       if (scopeRef.current && agent?.id) {
         migrateBuilderChat(scopeRef.current, employeeScopeId(agent.id));
       }
@@ -288,6 +272,10 @@ function NewAgentInner() {
   const missingConnectors = requiredConnectors.filter(
     (c) => c.status !== "connected" && c.id !== "local_data" && c.id !== "vault"
   );
+
+  const onLivePick = (pick: LivePick) => {
+    void sendMessage(livePickToMessage(pick));
+  };
 
   return (
     <AppShell>
@@ -319,176 +307,114 @@ function NewAgentInner() {
                   type="button"
                   disabled={busy}
                   onClick={() => pickTemplate(t)}
-                  className="rounded-xl border border-zinc-200 bg-white p-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50/40 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-indigo-700"
+                  className="rounded-xl border border-zinc-200 bg-white p-3 text-left transition hover:border-indigo-300 dark:border-zinc-800 dark:bg-zinc-900"
                 >
-                  <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-                    {t.name}
+                  <div className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{t.name}</div>
+                  <div className="mt-0.5 text-xs text-zinc-500">
+                    {t.role} · {t.department}
                   </div>
-                  <div className="mt-0.5 text-[11px] text-indigo-600 dark:text-indigo-400">
-                    {t.jobTitle} · {t.department}
-                  </div>
-                  <p className="mt-1.5 text-xs text-zinc-500 line-clamp-2">{t.summary}</p>
-                  <p className="mt-2 text-[10px] text-zinc-400">{t.limitations}</p>
+                  <p className="mt-1 text-xs text-zinc-500 line-clamp-2">{t.description}</p>
+                  <p className="mt-1 text-[11px] text-zinc-400 line-clamp-2">{t.constraints}</p>
                 </button>
               ))}
             </div>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-400">
               Or describe a custom role below. Templates only use tools Nexa already supports.
             </p>
           </section>
         )}
 
-        {!showDesk && lines.length === 0 && !busy && (
-          <button
-            type="button"
-            className="mb-3 text-left text-xs text-indigo-600"
-            onClick={() => setShowDesk(true)}
-          >
-            ← Back to role templates
-          </button>
-        )}
-
-        <div className="flex flex-1 flex-col gap-3 overflow-y-auto pb-4">
-          {lines.length === 0 && !busy && !showDesk && (
-            <p className="px-1 text-sm text-zinc-500">What should this employee do?</p>
-          )}
-
+        <div className="flex-1 space-y-3 overflow-y-auto pb-4">
           {lines.map((l, i) => (
-            <div key={i}>
+            <div
+              key={i}
+              className={
+                l.role === "user"
+                  ? "ml-8 rounded-xl bg-indigo-600 px-3 py-2 text-sm text-white"
+                  : "mr-4 rounded-xl border border-zinc-100 bg-white px-3 py-2 text-sm text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+              }
+            >
               {l.thinking && l.thinking.length > 0 && (
-                <div className="mb-1 mr-8 space-y-0.5 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/50">
+                <ul className="mb-2 space-y-0.5 text-xs text-zinc-400">
                   {l.thinking.map((t, j) => (
-                    <div key={j} className="flex items-center gap-1.5">
-                      <span className="text-emerald-500">✓</span>
-                      <span>{t}</span>
-                    </div>
+                    <li key={j}>✓ {t}</li>
                   ))}
-                </div>
+                </ul>
               )}
-              <div
-                className={
-                  l.role === "user"
-                    ? "ml-8 rounded-xl bg-indigo-600 px-3 py-2 text-sm text-white"
-                    : "mr-8 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
-                }
-              >
-                {l.role === "assistant" ? (
-                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-zinc-800 dark:text-zinc-100">
-                    {l.content}
-                  </pre>
-                ) : (
-                  l.content
-                )}
-              </div>
+              <div className="whitespace-pre-wrap">{l.content}</div>
             </div>
           ))}
-
-          {busy && thinkingLive.length > 0 && (
-            <div className="mr-8 space-y-1 rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-xs text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-300">
-              <div className="font-medium">Working…</div>
-              {thinkingLive.map((t, j) => (
-                <div key={j} className="flex items-center gap-1.5 opacity-80">
-                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" />
-                  <span>{t}</span>
-                </div>
-              ))}
+          {busy && (
+            <div className="mr-4 rounded-xl border border-zinc-100 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800">
+              Working…
             </div>
           )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
 
-          {proposal && (
+          {proposal && !busy && (
             <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 dark:border-indigo-900 dark:bg-indigo-950/30">
-              <h2 className="text-sm font-semibold">{proposal.name || "Proposed AI employee"}</h2>
-              {pickedRole && (
-                <p className="mt-0.5 text-[11px] text-indigo-600 dark:text-indigo-400">
-                  Template: {pickedRole.name}
-                </p>
-              )}
-              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                {proposal.purpose || proposal.description}
+              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                {proposal.name || "AI Employee"}
+              </div>
+              <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                {proposal.description || proposal.purpose}
               </p>
-              {proposal.steps?.length > 0 && (
-                <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-zinc-600 dark:text-zinc-400">
-                  {proposal.steps.map((st, i) => (
-                    <li key={i}>{st.name || st.actionId}</li>
+              {Array.isArray(proposal.steps) && proposal.steps.length > 0 && (
+                <ul className="mt-2 space-y-1 text-xs text-zinc-600 dark:text-zinc-300">
+                  {proposal.steps.map((st: any, i: number) => (
+                    <li key={i}>• {st.name || st.actionId}</li>
                   ))}
-                </ol>
+                </ul>
               )}
               {missingConnectors.length > 0 && (
-                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-                  <div className="font-medium">Connectors needed</div>
-                  <ul className="mt-1 list-disc pl-4">
-                    {missingConnectors.map((c) => (
-                      <li key={c.id}>
-                        <Link href={`/connections/${c.id}`} className="underline">
-                          {c.name}
-                        </Link>{" "}
-                        — {c.status === "coming_soon" ? "coming soon" : "not connected yet"}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                  Connect: {missingConnectors.map((c) => c.name).join(", ")}
+                </p>
               )}
               <button
                 type="button"
                 disabled={creating}
                 onClick={() => void confirmHire()}
-                className="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
-                {creating
-                  ? "Hiring…"
-                  : missingConnectors.length
-                    ? "Hire as draft"
-                    : "Hire AI Employee"}
+                {creating ? "Hiring…" : "Hire AI Employee"}
               </button>
             </div>
           )}
-
-          {error && <p className="text-sm text-red-600">{error}</p>}
           <div ref={bottomRef} />
         </div>
 
-        <div className="sticky bottom-0 border-t border-zinc-200 bg-zinc-50 pt-3 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="mb-3">
-            <LiveAccountPicker
-              onPick={(pick: LivePick) => {
-                if (busy) return;
-                void sendText(livePickToMessage(pick));
-              }}
-            />
-          </div>
-          <div className="flex gap-2">
+        <div className="sticky bottom-0 border-t border-zinc-100 bg-zinc-50 pt-3 dark:border-zinc-800 dark:bg-zinc-950">
+          <LiveAccountPicker onPick={onLivePick} />
+          <div className="mt-2 flex gap-2">
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  void send();
+                  void sendMessage(input);
                 }
               }}
-              placeholder="Describe a role, pick a template, or choose a page/channel above"
-              className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-              disabled={busy}
+              placeholder="Describe the employee you want to hire…"
+              className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              disabled={busy || creating}
             />
             <button
               type="button"
-              disabled={busy || !input.trim()}
-              onClick={() => void send()}
+              disabled={busy || creating || !input.trim()}
+              onClick={() => void sendMessage(input)}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
-              {busy ? "…" : "Send"}
+              Send
             </button>
           </div>
-          <p className="mt-2 text-xs text-zinc-500">
+          <p className="mt-2 text-[11px] text-zinc-400">
             Hire once. Reuse the same employee for ongoing work — no need to rehire for every task.
           </p>
         </div>
       </div>
-      <UpgradeLimitModal
-        open={limitOpen}
-        message={error || LIMIT_MESSAGES.agents}
-        onClose={() => setLimitOpen(false)}
-      />
+      <UpgradeLimitModal open={limitOpen} message={error || LIMIT_MESSAGES.agents} onClose={() => setLimitOpen(false)} />
     </AppShell>
   );
 }
