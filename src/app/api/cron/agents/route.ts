@@ -123,13 +123,19 @@ export async function GET(req: NextRequest) {
         },
       });
 
-      await finishAgentRun(runId, {
-        ok: result.ok,
-        status: result.status,
-        error: result.error,
-        steps: result.steps,
-        output: result.output,
-      });
+      const summary = String(result.output || result.error || result.status || "").slice(0, 280);
+      let runStatus = "failed";
+      if (result.status === "waiting_for_approval") {
+        runStatus = "waiting_for_approval";
+      } else if (result.ok || result.status === "completed") {
+        runStatus = "succeeded";
+      } else if (result.status === "succeeded_with_errors") {
+        runStatus = "succeeded_with_errors";
+      }
+
+      if (runId) {
+        await finishAgentRun(runId, runStatus, summary);
+      }
 
       if (result.status === "waiting_for_approval") {
         await recordScheduleSuccess(row.id);
