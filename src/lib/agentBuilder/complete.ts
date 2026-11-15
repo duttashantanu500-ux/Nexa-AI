@@ -448,25 +448,44 @@ function localFallbackProposal(
   connections?: Record<string, string>
 ): Record<string, unknown> | null {
   const t = userText.toLowerCase();
-  if (/notion/.test(t)) {
+  if (/notion/.test(t) || /research|report|marketing|summar/.test(t)) {
+    const wantsResearch = /research|report|marketing|summar|brief|analysis/.test(t);
+    const steps: any[] = [];
+    if (wantsResearch) {
+      steps.push({
+        actionId: "local_data.list_from_text",
+        name: "Collect research notes",
+        config: {},
+        onError: "stop",
+        requiresApproval: false,
+      });
+      steps.push({
+        actionId: "local_data.report",
+        name: "Draft report",
+        config: { title: "Research report" },
+        onError: "stop",
+        requiresApproval: false,
+      });
+    }
+    steps.push({
+      actionId: "notion.create_page",
+      name: wantsResearch ? "Save report to Notion" : "Create Notion page",
+      config: {},
+      onError: "stop",
+      requiresApproval: true,
+    });
     return {
-      name: "Notion page helper",
-      description: "Creates or updates Notion pages from your instructions.",
-      purpose: "Help with Notion pages",
+      name: wantsResearch ? "Research & Notion writer" : "Notion page helper",
+      description: wantsResearch
+        ? "Researches a topic, drafts a report, and saves it as a Notion page."
+        : "Creates or updates Notion pages from your instructions.",
+      purpose: wantsResearch ? "Research, report, and publish to Notion" : "Help with Notion pages",
       trigger: "manual",
       schedule: { frequency: "once", time: "09:00", timezone: "UTC", enabled: false },
-      steps: [
-        {
-          actionId: "notion.create_page",
-          name: "Create Notion page",
-          config: {},
-          onError: "stop",
-          requiresApproval: true,
-        },
-      ],
+      steps,
       notes:
         connections?.notion === "connected"
-          ? "Notion is connected — set parent page on the employee or tell me which page to use."
+          ? "Notion is connected — pick a parent page from your account or name it in chat."
           : "",
     };
   }
