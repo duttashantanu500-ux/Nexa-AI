@@ -36,8 +36,15 @@ export async function GET(
       purpose: agent.description || "",
       status: agent.status,
       version: agent.current_version || 1,
-      steps: agent.steps || [],
-      schedule: agent.schedule || null,
+      steps: Array.isArray(agent.steps) ? agent.steps : [],
+      schedule: agent.schedule || {
+        frequency: "once",
+        time: "09:00",
+        timezone: "UTC",
+        enabled: false,
+      },
+      createdAt: agent.created_at,
+      updatedAt: agent.updated_at,
     },
   });
 }
