@@ -20,6 +20,11 @@ import {
   livePickToMessage,
   type LivePick,
 } from "@/components/LiveAccountPicker";
+import {
+  injectNotionParentIntoSteps,
+  resolveNotionParentForHire,
+  setNotionParent,
+} from "@/lib/notionParent";
 
 /**
  * Persistent chat for an EXISTING AI employee.
@@ -52,19 +57,28 @@ export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
 
   const applyProposalToAgent = useCallback(
     async (proposal: AgentProposal) => {
-      const steps = (proposal.steps || []).map((st, i) => ({
+      const s = loadOperatorState();
+      const resolved = await resolveNotionParentForHire(s.user?.id);
+      let steps = (proposal.steps || []).map((st, i) => ({
         id: stepId(),
         actionId: st.actionId,
         name: st.name || st.actionId,
         order: i,
-        config: st.config || {},
+        config: (st.config || {}) as Record<string, unknown>,
         onError: st.onError || ("stop" as const),
       }));
+      if (resolved.parentId) {
+        steps = injectNotionParentIntoSteps(
+          steps,
+          resolved.parentId,
+          resolved.parentLabel
+        );
+      }
       updateAgent(agentId, {
         name: proposal.name,
         purpose: proposal.purpose || proposal.description,
         description: proposal.description || proposal.purpose,
-        steps,
+        steps: steps as any,
         schedule: {
           frequency: proposal.schedule?.frequency || "once",
           time: proposal.schedule?.time || "09:00",
@@ -144,6 +158,22 @@ export function EmployeeBuilderChat({ agentId }: { agentId: string }) {
 
   const onPick = (pick: LivePick) => {
     if (busy) return;
+    if (pick.kind === "notion_page" && pick.option?.id) {
+      setNotionParent(pick.option.id);
+      const agent = getAgent(agentId);
+      if (agent?.steps?.length) {
+        const steps = injectNotionParentIntoSteps(
+          agent.steps.map((st) => ({
+            ...st,
+            config: (st.config || {}) as Record<string, unknown>,
+          })),
+          pick.option.id,
+          pick.option.label
+        );
+        updateAgent(agentId, { steps: steps as any });
+        void patchServerAgent(agentId, { steps });
+      }
+    }
     void sendText(livePickToMessage(pick));
   };
 
