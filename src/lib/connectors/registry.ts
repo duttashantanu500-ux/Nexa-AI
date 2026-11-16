@@ -71,7 +71,6 @@ export type ConnectorDefinition = {
   name: string;
   provider: string;
   icon: string;
-  /** Primary business niche for filtering */
   category: ConnectorCategory;
   description: string;
   detailDescription?: string;
@@ -468,9 +467,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         readOnly: false,
         requiresApproval: true,
         riskTier: "medium",
-        fields: [
-          { key: "prompt", label: "Prompt", type: "textarea", required: true },
-        ],
+        fields: [{ key: "prompt", label: "Prompt", type: "textarea", required: true }],
         ...impl(),
       },
     ],
@@ -499,9 +496,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         readOnly: false,
         requiresApproval: true,
         riskTier: "medium",
-        fields: [
-          { key: "tool", label: "Tool name", type: "text", required: true },
-        ],
+        fields: [{ key: "tool", label: "Tool name", type: "text", required: true }],
         ...impl(),
       },
     ],
@@ -594,7 +589,6 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     category: "Productivity",
     description: "Lists & notes",
     shortDescription: "Lists & notes",
-    detailDescription: "Built-in tools for lists, notes, and reports. No external account required.",
     connectionMethod: "local",
     costLabel: "free",
     configurable: false,
@@ -605,7 +599,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         id: "local_data.list_from_text",
         connectorId: "local_data",
         name: "List from text",
-        description: "Build a list from free-form text.",
+        description: "Build a list from text.",
         readOnly: true,
         requiresApproval: false,
         riskTier: "low",
@@ -613,33 +607,45 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
         ...impl(),
       },
       {
-        id: "local_data.filter_list",
+        id: "local_data.filter",
         connectorId: "local_data",
         name: "Filter list",
-        description: "Filter the current list by a keyword.",
+        description: "Filter list items by keyword.",
         readOnly: true,
         requiresApproval: false,
         riskTier: "low",
-        fields: [{ key: "query", label: "Filter", type: "text", required: true }],
+        fields: [
+          { key: "keyword", label: "Keyword", type: "text", required: true },
+          {
+            key: "mode",
+            label: "Mode",
+            type: "select",
+            required: false,
+            options: [
+              { value: "include", label: "Include" },
+              { value: "exclude", label: "Exclude" },
+            ],
+          },
+        ],
         ...impl(),
       },
       {
-        id: "local_data.limit_list",
+        id: "local_data.limit",
         connectorId: "local_data",
         name: "Limit list",
-        description: "Keep only the first N items.",
+        description: "Limit list to N items.",
         readOnly: true,
         requiresApproval: false,
         riskTier: "low",
-        fields: [{ key: "limit", label: "Limit", type: "number", required: true }],
+        fields: [{ key: "count", label: "Count", type: "number", required: false, placeholder: "10" }],
         ...impl(),
       },
       {
-        id: "local_data.add_note",
+        id: "local_data.note",
         connectorId: "local_data",
         name: "Add note",
-        description: "Add a working note.",
-        readOnly: false,
+        description: "Add a note to the workflow context.",
+        readOnly: true,
         requiresApproval: false,
         riskTier: "low",
         fields: [{ key: "note", label: "Note", type: "textarea", required: true }],
@@ -648,8 +654,8 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
       {
         id: "local_data.report",
         connectorId: "local_data",
-        name: "Build report",
-        description: "Build a short report from notes and list items.",
+        name: "Report",
+        description: "Build a text report.",
         readOnly: true,
         requiresApproval: false,
         riskTier: "low",
@@ -702,7 +708,6 @@ export function getAction(id: string): ConnectorAction | undefined {
   return undefined;
 }
 
-/** Actions safe to add to a runnable agent (implemented + available + connector executable). */
 export function listAvailableActions(): ConnectorAction[] {
   return CONNECTOR_REGISTRY.flatMap((c) =>
     c.actions.filter((a) => a.implemented && a.available && c.executable)
@@ -722,4 +727,23 @@ export function statusLabel(s: ConnectorUiStatus): string {
     loading: "Loading",
   };
   return map[s] || s;
+}
+
+export function statusBadgeClass(s: ConnectorUiStatus): string {
+  switch (s) {
+    case "connected":
+      return "rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300";
+    case "available":
+      return "rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300";
+    case "error":
+      return "rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/40 dark:text-red-300";
+    case "coming_soon":
+      return "rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
+    case "unavailable":
+      return "rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300";
+    case "loading":
+      return "rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
+    default:
+      return "rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500";
+  }
 }
