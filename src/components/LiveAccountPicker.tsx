@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { loadOperatorState } from "@/lib/operatorStore";
+import { setNotionParent } from "@/lib/notionParent";
 
 export type LiveOption = {
   id: string;
@@ -29,15 +30,15 @@ export type LivePick =
 export function livePickToMessage(pick: LivePick): string {
   switch (pick.kind) {
     case "notion_page":
-      return `Use Notion parent page "${pick.option.label}" (id ${pick.option.id}) for create page steps.`;
+      return `Use Notion parent page "${pick.option.label}" for create page steps.`;
     case "slack_channel":
-      return `Use Slack channel ${pick.option.label} (id ${pick.option.id}) for post message steps.`;
+      return `Use Slack channel ${pick.option.label} for post message steps.`;
     case "buffer_channel":
-      return `Use Buffer channel "${pick.option.label}" (id ${pick.option.id}) for create post steps.`;
+      return `Use Buffer channel "${pick.option.label}" for create post steps.`;
     case "hubspot_contact":
-      return `Target HubSpot contact "${pick.option.label}" (id ${pick.option.id}).`;
+      return `Target HubSpot contact "${pick.option.label}".`;
     case "hubspot_deal":
-      return `Target HubSpot deal "${pick.option.label}" (id ${pick.option.id}).`;
+      return `Target HubSpot deal "${pick.option.label}".`;
   }
 }
 
@@ -67,7 +68,7 @@ function ChipRow({
             key={o.id}
             type="button"
             onClick={() => onPick(o)}
-            title={o.meta || o.id}
+            title={o.meta || o.label}
             className="max-w-full truncate rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-800 hover:border-indigo-400 hover:bg-indigo-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:border-indigo-500 dark:hover:bg-indigo-950/40"
           >
             {o.label}
@@ -116,6 +117,13 @@ export function LiveAccountPicker({ onPick, className }: Props) {
     void load();
   }, [load]);
 
+  const handlePick = (pick: LivePick) => {
+    if (pick.kind === "notion_page" && pick.option?.id) {
+      setNotionParent(pick.option.id);
+    }
+    onPick(pick);
+  };
+
   const hasAny =
     options &&
     (options.notionPages.length > 0 ||
@@ -161,27 +169,27 @@ export function LiveAccountPicker({ onPick, className }: Props) {
       <ChipRow
         title="Notion pages"
         options={options!.notionPages}
-        onPick={(o) => onPick({ kind: "notion_page", option: o })}
+        onPick={(o) => handlePick({ kind: "notion_page", option: o })}
       />
       <ChipRow
         title="Slack channels"
         options={options!.slackChannels}
-        onPick={(o) => onPick({ kind: "slack_channel", option: o })}
+        onPick={(o) => handlePick({ kind: "slack_channel", option: o })}
       />
       <ChipRow
         title="Buffer channels"
         options={options!.bufferChannels}
-        onPick={(o) => onPick({ kind: "buffer_channel", option: o })}
+        onPick={(o) => handlePick({ kind: "buffer_channel", option: o })}
       />
       <ChipRow
         title="HubSpot contacts"
         options={options!.hubspotContacts}
-        onPick={(o) => onPick({ kind: "hubspot_contact", option: o })}
+        onPick={(o) => handlePick({ kind: "hubspot_contact", option: o })}
       />
       <ChipRow
         title="HubSpot deals"
         options={options!.hubspotDeals}
-        onPick={(o) => onPick({ kind: "hubspot_deal", option: o })}
+        onPick={(o) => handlePick({ kind: "hubspot_deal", option: o })}
       />
     </div>
   );
