@@ -32,6 +32,11 @@ import {
   livePickToMessage,
   type LivePick,
 } from "@/components/LiveAccountPicker";
+import {
+  injectNotionParentIntoSteps,
+  resolveNotionParentForHire,
+  setNotionParent,
+} from "@/lib/notionParent";
 
 type ChatLine = { role: "user" | "assistant"; content: string; thinking?: string[] };
 
@@ -140,7 +145,21 @@ function NewAgentInner() {
       }
       const reply = String(data.message || data.reply || "");
       const thinking = Array.isArray(data.thinking) ? data.thinking : undefined;
-      const prop = data.proposal || null;
+      let prop = data.proposal || null;
+      // If user already picked a Notion page, bake it into the draft steps.
+      if (prop?.steps) {
+        const resolved = await resolveNotionParentForHire(s.user?.id);
+        if (resolved.parentId) {
+          prop = {
+            ...prop,
+            steps: injectNotionParentIntoSteps(
+              prop.steps,
+              resolved.parentId,
+              resolved.parentLabel
+            ),
+          };
+        }
+      }
       const withAssistant: ChatLine[] = [
         ...nextLines,
         { role: "assistant", content: reply || "Draft ready.", thinking },
@@ -221,21 +240,32 @@ function NewAgentInner() {
         setCreating(false);
         return;
       }
-      const steps = (proposal.steps || []).map((st, i) => ({
+
+      // Ensure Notion create steps have a parent page before saving the employee.
+      const resolved = await resolveNotionParentForHire(s.user.id);
+      let mappedSteps = (proposal.steps || []).map((st, i) => ({
         id: stepId(),
         actionId: st.actionId,
         name: st.name || st.actionId,
         order: i,
-        config: st.config || {},
+        config: (st.config || {}) as Record<string, unknown>,
         onError: st.onError || "stop",
       }));
+      if (resolved.parentId) {
+        mappedSteps = injectNotionParentIntoSteps(
+          mappedSteps,
+          resolved.parentId,
+          resolved.parentLabel
+        );
+      }
+
       const agent = createAgent({
         userId: s.user.id,
         name: proposal.name || pickedRole?.name || "AI Employee",
         purpose: proposal.purpose || proposal.description || "",
         description: proposal.description || proposal.purpose || "",
         templateType: pickedRole?.id,
-        steps,
+        steps: mappedSteps as any,
         status: "active",
         schedule: {
           frequency: proposal.schedule?.frequency || "once",
@@ -283,6 +313,21 @@ function NewAgentInner() {
   );
 
   const onLivePick = (pick: LivePick) => {
+    if (pick.kind === "notion_page" && pick.option?.id) {
+      setNotionParent(pick.option.id);
+      if (proposal?.steps) {
+        const next = {
+          ...proposal,
+          steps: injectNotionParentIntoSteps(
+            proposal.steps,
+            pick.option.id,
+            pick.option.label
+          ),
+        };
+        setProposal(next);
+        persist(lines, next);
+      }
+    }
     void sendMessage(livePickToMessage(pick));
   };
 
