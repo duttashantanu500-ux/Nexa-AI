@@ -48,6 +48,7 @@ function DetailInner() {
   const [statusMessage, setStatusMessage] = useState("");
   const [canDisconnect, setCanDisconnect] = useState(false);
   const [connectedAt, setConnectedAt] = useState<string | null>(null);
+  const [userId, setUserId] = useState("");
 
   const def = useMemo(
     () => CONNECTOR_REGISTRY.find((c) => c.id === id) as ConnectorDefinition | undefined,
@@ -86,6 +87,7 @@ function DetailInner() {
       router.replace("/login");
       return;
     }
+    setUserId(uid);
     if (s.user && !s.user.onboardingCompleted) {
       router.replace("/onboarding");
       return;
@@ -96,7 +98,7 @@ function DetailInner() {
         const u = localStorage.getItem(COMFY_KEY)?.trim() || "";
         setComfyUrl(u);
         setStatus(u ? "connected" : "available");
-        setStatusMessage(u ? "ComfyUI URL saved on this device." : "Add your ComfyUI base URL.");
+        setStatusMessage(u ? "Local image server saved on this device." : "Add your local image server address.");
         setCanDisconnect(Boolean(u));
         setWorkspaceName(null);
       } catch {
@@ -207,8 +209,8 @@ function DetailInner() {
         setComfyUrl("");
         setStatus("available");
         setCanDisconnect(false);
-        setMsg("ComfyUI URL cleared.");
-        setStatusMessage("Add your ComfyUI base URL.");
+        setMsg("Local image server cleared.");
+        setStatusMessage("Add your local image server address.");
       } catch {
         setMsg("Could not clear.");
       }
@@ -296,7 +298,7 @@ function DetailInner() {
     }
     const key = apiKey.trim();
     if (!key) {
-      setMsg("Enter an API key.");
+      setMsg("Enter an access key.");
       return;
     }
     setBusy(true);
@@ -316,7 +318,7 @@ function DetailInner() {
             ? "/api/connections/vapi/connect"
             : "";
       if (!endpoint) {
-        setMsg("API key save is not available for this tool.");
+        setMsg("Access key save is not available for this tool.");
         setBusy(false);
         return;
       }
@@ -349,8 +351,8 @@ function DetailInner() {
       else localStorage.removeItem(COMFY_KEY);
       setStatus(u ? "connected" : "available");
       setCanDisconnect(Boolean(u));
-      setMsg(u ? "ComfyUI URL saved." : "Cleared.");
-      setStatusMessage(u ? "ComfyUI URL saved on this device." : "Add your ComfyUI base URL.");
+      setMsg(u ? "Local image server saved." : "Cleared.");
+      setStatusMessage(u ? "Local image server saved on this device." : "Add your local image server address.");
     } catch {
       setMsg("Could not save on this device.");
     }
@@ -384,7 +386,7 @@ function DetailInner() {
           <p className="text-xs text-zinc-400">Connected {new Date(connectedAt).toLocaleString()}</p>
         )}
 
-        {def.id === "mcp" && <McpConnectionPanel />}
+        {def.id === "mcp" && userId ? <McpConnectionPanel userId={userId} /> : null}
 
         {capabilities.length > 0 && (
           <div className="mt-6">
@@ -400,8 +402,8 @@ function DetailInner() {
                 >
                   <div className="flex items-center gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100">
                     {a.name}
-                    <span className="text-[10px] font-normal uppercase tracking-wide text-zinc-400">
-                      {a.requiresApproval ? "Needs approval" : "Read"}
+                    <span className="text-[10px] font-normal tracking-wide text-zinc-400">
+                      {a.requiresApproval ? "Needs your OK" : "View only"}
                     </span>
                   </div>
                   {a.description && (
@@ -415,7 +417,7 @@ function DetailInner() {
 
         {def.id === "local_comfyui" && (
           <div className="mt-6 space-y-2">
-            <label className="block text-xs font-medium text-zinc-500">ComfyUI base URL</label>
+            <label className="block text-xs font-medium text-zinc-500">Local image server address</label>
             <input
               value={comfyUrl}
               onChange={(e) => setComfyUrl(e.target.value)}
@@ -449,7 +451,7 @@ function DetailInner() {
               <input
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="API key"
+                placeholder="Access key"
                 className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               />
               <button
