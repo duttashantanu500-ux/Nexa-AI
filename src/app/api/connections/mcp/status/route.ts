@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
     if (!authHeader.startsWith("Bearer ")) {
       return NextResponse.json({
         status: "available",
-        message: "Sign in to connect your own MCP server.",
+        message: "Sign in to connect your own custom tools server.",
       });
     }
 
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     if ("error" in auth) {
       return NextResponse.json({
         status: "available",
-        message: "Sign in to connect your own MCP server.",
+        message: "Sign in to connect your own custom tools server.",
       });
     }
 
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     if (!conn) {
       return NextResponse.json({
         status: "available",
-        message: "Add your own MCP server to use its tools with your AI employees.",
+        message: "Add your own tools server so AI employees can use approved tools.",
       });
     }
 
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
   } catch {
     return NextResponse.json({
       status: "error",
-      message: "Could not load MCP connection.",
+      message: "Could not load custom tools connection.",
     });
   }
 }
