@@ -85,8 +85,8 @@ export async function GET(req: NextRequest) {
     buffer: one("Buffer", "buffer", bufferOAuthConfigured()),
     hubspot: one("HubSpot", "hubspot", hubspotOAuthConfigured()),
     ideogram: one("Ideogram", "ideogram", true),
-    mcp: one("MCP", "mcp", true),
-    vapi: one("Vapi", "vapi", true),
+    mcp: one("Custom tools", "mcp", true),
+    vapi: one("Voice calling", "vapi", true),
   };
 
   return json({
