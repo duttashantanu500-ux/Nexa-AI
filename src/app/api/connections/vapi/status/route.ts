@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
       {
         configured: true,
         status: "available",
-        message: "Sign in, then connect your Vapi account.",
+        message: "Sign in, then connect your voice calling account.",
         canDisconnect: false,
         connectPath: "/connections/vapi/setup",
       },
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
         configured: true,
         status: "available",
         message:
-          "Connect your own Vapi account to use voice assistants and calls with your AI employees.",
+          "Connect your voice calling account to use assistants and calls with your AI employees.",
         canDisconnect: false,
         connectPath: "/connections/vapi/setup",
       },
@@ -35,9 +35,9 @@ export async function GET(req: NextRequest) {
     {
       configured: true,
       status: "connected",
-      message: "Your Vapi account is connected",
+      message: "Your voice calling account is connected",
       canDisconnect: true,
-      workspaceName: resolved.meta.workspaceName || "Vapi",
+      workspaceName: resolved.meta.workspaceName || "Voice",
       connectedAt: resolved.meta.connectedAt,
       lastVerifiedAt: resolved.meta.lastVerifiedAt,
       connectPath: "/connections/vapi/setup",
