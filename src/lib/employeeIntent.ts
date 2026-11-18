@@ -111,7 +111,7 @@ export function classifyEmployeeMessage(
       intent: "configure",
       suggestConfigure: true,
       message:
-        `To change how ${name} is set up (schedule, steps, or tools), use the Configure tab below and describe the change there.`,
+        `I'll update how ${name} is set up. Describe the change (schedule, steps, or tools) and I'll apply it.`,
     };
   }
 
@@ -120,7 +120,7 @@ export function classifyEmployeeMessage(
       return {
         intent: "clarify",
         suggestConfigure: true,
-        message: `${name} has no workflow steps yet. Open Configure and add what they should do, or describe the job there.`,
+        message: `${name} has no workflow steps yet. Describe the job you want them to do, and I'll help configure it.`,
       };
     }
 
@@ -136,14 +136,14 @@ export function classifyEmployeeMessage(
     return {
       intent: "work",
       shouldStartWork: true,
-      message: `Starting ${name}'s work now. You'll see progress above — some steps may need your approval before they finish.`,
+      message: `Ready to run **${name}**'s assigned work. Starting now — some steps may need your approval before they finish.`,
     };
   }
 
   if (CLARIFY_SHORT.test(t) || t.length < 3) {
     return {
       intent: "clarify",
-      message: `I'm ${name}. I can run my assigned work, answer questions about what I do, or you can open Configure to change my setup. What do you need?`,
+      message: `I'm ${name}. I can run my assigned work, answer questions about what I do, or help you change my setup. What do you need?`,
     };
   }
 
@@ -160,7 +160,7 @@ export function classifyEmployeeMessage(
       : "I work with the steps configured for me.";
     return {
       intent: "chat",
-      message: `I'm **${name}**. ${purpose}\n\n${toolLine}\n\nSay **start work** when you want me to run, or open Configure to change my steps.`,
+      message: `I'm **${name}**. ${purpose}\n\n${toolLine}\n\nSay **start work** when you want me to run, or ask me to change my schedule or steps.`,
     };
   }
 
@@ -171,7 +171,7 @@ export function classifyEmployeeMessage(
   ) {
     return {
       intent: "chat",
-      message: `I can chat briefly, but I'm ${name} — hired for ${purpose}. I don't have live weather or general web answers unless that is part of my workflow.\n\nFor real work, say **start work**. To change what I do, use Configure.`,
+      message: `I can chat briefly, but I'm ${name} — hired for ${purpose}. I don't invent access to weather or general web answers.\n\nFor real work, say **start work**. To change what I do, tell me the schedule or steps to update.`,
     };
   }
 
@@ -195,7 +195,7 @@ export function classifyEmployeeMessage(
       return {
         intent: "refuse",
         message:
-          "Nexa doesn't send email yet. I can't claim that capability. If you need messages to a team channel, connect Slack and add a send-message step in Configure.",
+          "Nexa doesn't send email yet. I can't claim that capability. If you need messages to a team channel, connect Slack and add a send-message step.",
       };
     }
     return {
@@ -224,12 +224,12 @@ export function classifyEmployeeMessage(
       intent: "missing_connector",
       suggestedConnector: "hubspot",
       message:
-        "I don't have HubSpot on this employee's steps. Connect HubSpot under Connections, then use Configure to add CRM steps — or hire a sales employee that includes them.",
+        "I don't have HubSpot on this employee's steps. Connect HubSpot under Connections, then ask me to add CRM steps — or hire a sales employee that includes them.",
     };
   }
 
   return {
     intent: "chat",
-    message: `I'm ${name}. ${purpose}\n\nI can run my assigned workflow when you say **start work**, answer what I'm set up to do, or you can open **Configure** to change steps and schedule.\n\nWhat would you like?`,
+    message: `I'm ${name}. ${purpose}\n\nI can run my assigned workflow when you say **start work**, answer what I'm set up to do, or help you change steps and schedule.\n\nWhat would you like?`,
   };
 }
