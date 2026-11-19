@@ -46,6 +46,18 @@ const nextConfig: NextConfig = {
       process.env.VERCEL_DEPLOYMENT_ID ||
       "dev",
   },
+  async redirects() {
+    return [
+      { source: "/pricing", destination: "/plans", permanent: true },
+      {
+        source: "/reset-password",
+        destination: "/auth/reset-password",
+        permanent: false,
+      },
+      { source: "/work", destination: "/activity", permanent: false },
+      { source: "/dashboard", destination: "/activity", permanent: false },
+    ];
+  },
   async headers() {
     return [
       {
