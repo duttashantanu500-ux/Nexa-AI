@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   employeeScopeId,
   loadBuilderChatHydrated,
@@ -27,12 +27,17 @@ import {
 } from "@/lib/notionParent";
 import {
   classifyEmployeeMessage,
+  emptyStateForEmployee,
   type IntentContext,
 } from "@/lib/employeeIntent";
 
+/** In-memory connection status cache to avoid repeated status fetches */
+let connectedCache: { at: number; map: Record<string, boolean> } | null = null;
+const CONNECTED_TTL_MS = 30_000;
+
 /**
  * Chat for an EXISTING AI employee.
- * Understands intent: conversation, real work, configuration, refusal.
+ * Understands intent: conversation, real work, configuration, history, refusal.
  */
 export function EmployeeBuilderChat({
   agentId,
@@ -49,6 +54,36 @@ export function EmployeeBuilderChat({
   const [error, setError] = useState("");
   const scope = employeeScopeId(agentId);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [, bump] = useState(0);
+
+  const intentCtxBase = useMemo((): Omit<IntentContext, "connected"> => {
+    const a = getAgent(agentId);
+    const schedule = a?.schedule;
+    let scheduleLabel = "";
+    if (schedule?.enabled && schedule.frequency && schedule.frequency !== "once") {
+      scheduleLabel = `${schedule.frequency}${schedule.time ? ` at ${schedule.time}` : ""}${
+        schedule.timezone ? ` (${schedule.timezone})` : ""
+      }`;
+    } else if (schedule?.frequency === "once" || !schedule?.enabled) {
+      scheduleLabel = "manual / on demand";
+    }
+    return {
+      agentName: a?.name || "this employee",
+      purpose: a?.purpose,
+      description: a?.description,
+      actionIds: (a?.steps || []).map((s) => s.actionId),
+      stepNames: (a?.steps || []).map((s) => s.name || s.actionId),
+      hasSteps: Boolean(a?.steps?.length),
+      scheduleLabel,
+    };
+  }, [agentId, lines, ready, busy]);
+
+  const empty = useMemo(
+    () => emptyStateForEmployee({ ...intentCtxBase, connected: {} }),
+    [intentCtxBase]
+  );
+
+  const agentName = intentCtxBase.agentName;
 
   useEffect(() => {
     void loadBuilderChatHydrated(scope).then((msgs) => {
@@ -67,6 +102,10 @@ export function EmployeeBuilderChat({
   }, [lines, busy]);
 
   const loadConnectedMap = async (): Promise<Record<string, boolean>> => {
+    const now = Date.now();
+    if (connectedCache && now - connectedCache.at < CONNECTED_TTL_MS) {
+      return connectedCache.map;
+    }
     const out: Record<string, boolean> = {};
     try {
       const s = loadOperatorState();
@@ -81,6 +120,7 @@ export function EmployeeBuilderChat({
       for (const [k, v] of Object.entries(statuses)) {
         out[k] = String((v as { status?: string })?.status || "") === "connected";
       }
+      connectedCache = { at: now, map: out };
     } catch {
       /* */
     }
@@ -124,24 +164,25 @@ export function EmployeeBuilderChat({
         steps,
         schedule: proposal.schedule,
       });
+      bump((n) => n + 1);
     },
     [agentId]
   );
 
   const sendConfigure = async (next: BuilderLine[]) => {
     const s = loadOperatorState();
-    const agent = getAgent(agentId);
-    const existingAgent = agent
+    const agentRow = getAgent(agentId);
+    const existingAgent = agentRow
       ? {
-          name: agent.name,
-          purpose: agent.purpose,
-          description: agent.description,
-          steps: (agent.steps || []).map((st) => ({
+          name: agentRow.name,
+          purpose: agentRow.purpose,
+          description: agentRow.description,
+          steps: (agentRow.steps || []).map((st) => ({
             actionId: st.actionId,
             name: st.name,
             config: st.config || {},
           })),
-          schedule: agent.schedule,
+          schedule: agentRow.schedule,
         }
       : undefined;
 
@@ -178,37 +219,31 @@ export function EmployeeBuilderChat({
     setLines(next);
     setBusy(true);
     try {
-      const agent = getAgent(agentId);
-      const connected = await loadConnectedMap();
+      const needsConnectionCheck =
+        /\b(start|run|work|publish|post|create|list|send|hubspot|notion|slack|buffer|connect)\b/i.test(
+          trimmed
+        );
+      const connected = needsConnectionCheck
+        ? await loadConnectedMap()
+        : connectedCache?.map || {};
+
       const ctx: IntentContext = {
-        agentName: agent?.name || "this employee",
-        purpose: agent?.purpose,
-        description: agent?.description,
-        actionIds: (agent?.steps || []).map((s) => s.actionId),
+        ...intentCtxBase,
         connected,
-        hasSteps: Boolean(agent?.steps?.length),
       };
 
       const result = classifyEmployeeMessage(trimmed, ctx);
 
-      // Configuration changes go through the builder (edit mode only)
-      if (
-        result.intent === "configure" ||
-        (/\b(change|update|edit|rename|schedule|every|add|remove|step|timezone|parent page|channel)\b/i.test(
-          trimmed
-        ) &&
-          result.intent !== "work" &&
-          result.intent !== "refuse")
-      ) {
-        if (
-          /\b(change|update|edit|rename|schedule|every|add|remove|step|timezone|parent page|channel)\b/i.test(
-            trimmed
-          )
-        ) {
-          await sendConfigure(next);
-          setBusy(false);
-          return;
+      if (result.intent === "configure" || result.suggestConfigure) {
+        if (result.message) {
+          setLines((prev) => [
+            ...prev,
+            { role: "assistant", content: result.message },
+          ]);
         }
+        await sendConfigure(next);
+        setBusy(false);
+        return;
       }
 
       setLines((prev) => [
@@ -240,10 +275,10 @@ export function EmployeeBuilderChat({
     if (busy) return;
     if (pick.kind === "notion_page" && pick.option?.id) {
       setNotionParent(pick.option.id);
-      const agent = getAgent(agentId);
-      if (agent?.steps?.length) {
+      const agentRow = getAgent(agentId);
+      if (agentRow?.steps?.length) {
         const steps = injectNotionParentIntoSteps(
-          agent.steps.map((st) => ({
+          agentRow.steps.map((st) => ({
             ...st,
             config: (st.config || {}) as Record<string, unknown>,
           })),
@@ -264,18 +299,35 @@ export function EmployeeBuilderChat({
           Talk to this employee
         </h2>
         <p className="text-xs text-zinc-500">
-          Ask what they do, run their work, or change schedule and steps.
+          Manage {agentName} — work, schedule, steps, or history.
         </p>
       </div>
       <div className="border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
         <LiveAccountPicker onPick={onPick} />
       </div>
-      <div className="flex max-h-80 flex-col gap-2 overflow-y-auto px-4 py-3">
+      <div className="flex max-h-96 flex-col gap-2 overflow-y-auto px-4 py-3">
         {lines.length === 0 && !busy && (
-          <p className="text-sm text-zinc-500">
-            Try: “What do you do?”, “Start work”, “Run every Friday at 5 PM”, or
-            pick a page/channel above.
-          </p>
+          <div className="space-y-3 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+            <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">
+              {empty.headline}
+            </p>
+            <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
+              {empty.body}
+            </pre>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {empty.suggestions.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void sendText(s)}
+                  className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-indigo-600"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {lines.map((l, i) => (
           <div
@@ -309,7 +361,7 @@ export function EmployeeBuilderChat({
               void send();
             }
           }}
-          placeholder='e.g. "What do you do?" · "Start work" · "Every Friday at 5 PM"'
+          placeholder='e.g. "Start work" · "Every Friday at 5 PM" · "What did you work on?"'
           className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
           disabled={busy}
         />
