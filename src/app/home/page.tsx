@@ -9,6 +9,7 @@ import { loadOperatorState, saveOperatorState } from "@/lib/operatorStore";
 import { fetchServerAgents } from "@/lib/serverAgentClient";
 import { CONNECTOR_REGISTRY } from "@/lib/connectors/registry";
 import { Agent, AgentRun, defaultPermissions } from "@/types";
+import { WorkforceChat } from "@/components/WorkforceChat";
 
 function greeting() {
   const h = new Date().getHours();
@@ -153,6 +154,15 @@ export default function HomePage() {
               </Link>
             </>
           }
+        />
+
+        <WorkforceChat
+          agentNames={agents.map((a) => a.name).filter(Boolean)}
+          agentIdsByName={Object.fromEntries(
+            agents.filter((a) => a.name && a.id).map((a) => [a.name, a.id])
+          )}
+          recentRunCount={runs.length}
+          failedRunCount={failedRuns.length}
         />
 
         <section className="space-y-3">
