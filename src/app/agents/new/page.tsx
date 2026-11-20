@@ -74,6 +74,7 @@ function NewAgentInner() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scopeRef = useRef<string>("");
   const roleAutoStarted = useRef(false);
+  const hireHintStarted = useRef(false);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -102,6 +103,26 @@ function NewAgentInner() {
     setChatReady(true);
     void fetchBillingStatus().then(setBilling).catch(() => null);
   }, [router]);
+
+  // Accept hire intent from Home WorkforceChat
+  useEffect(() => {
+    if (!chatReady || hireHintStarted.current) return;
+    let hint = "";
+    try {
+      hint = sessionStorage.getItem("nexa_hire_hint") || "";
+      if (hint) sessionStorage.removeItem("nexa_hire_hint");
+    } catch {
+      /* */
+    }
+    if (!hint.trim()) return;
+    hireHintStarted.current = true;
+    setShowDesk(false);
+    const timer = setTimeout(() => {
+      void sendMessage(hint.trim());
+    }, 60);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatReady]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -146,7 +167,6 @@ function NewAgentInner() {
       const reply = String(data.message || data.reply || "");
       const thinking = Array.isArray(data.thinking) ? data.thinking : undefined;
       let prop = data.proposal || null;
-      // If user already picked a Notion page, bake it into the draft steps.
       if (prop?.steps) {
         const resolved = await resolveNotionParentForHire(s.user?.id);
         if (resolved.parentId) {
@@ -241,7 +261,6 @@ function NewAgentInner() {
         return;
       }
 
-      // Ensure Notion create steps have a parent page before saving the employee.
       const resolved = await resolveNotionParentForHire(s.user.id);
       let mappedSteps = (proposal.steps || []).map((st, i) => ({
         id: stepId(),
@@ -272,7 +291,6 @@ function NewAgentInner() {
           enabled: Boolean(proposal.schedule?.enabled),
         },
       });
-      // Persist to server so the team survives new devices / browsers.
       let agentId = agent.id;
       try {
         const saved = await saveServerAgent({
