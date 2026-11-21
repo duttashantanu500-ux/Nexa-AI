@@ -62,14 +62,15 @@ export default function SettingsPage() {
     setThemeLocal(t);
     applyTheme(t);
 
-    // Same identity order as Connections: stable/pinned id owns tokens
-    const stableId = (getStableUserId() || "").trim();
+    // Same identity order as Connections page (operator id first, then pinned)
     const opId = (s.user?.id || "").trim();
-    const uid = stableId || opId;
+    const stableId = (getStableUserId() || "").trim();
+    const uid = opId || stableId;
+    const alts = [opId, stableId].filter((id) => id && id !== uid);
     const localAgents = (s.agents || []).filter(
       (a) =>
         String(a.status) !== "archived" &&
-        (!a.userId || !uid || a.userId === uid || a.userId === opId)
+        (!a.userId || !uid || a.userId === uid || a.userId === opId || a.userId === stableId)
     );
     const vaultBytes = totalVaultBytes(uid || opId);
     setUsage((u) => ({ ...u, agents: localAgents.length, vaultBytes }));
@@ -78,11 +79,7 @@ export default function SettingsPage() {
       const b = await fetchBillingStatus(true);
       setBilling(b);
 
-      // Prefer live status API (tries stable + operator ids); never under-count vs Connections
-      const connections = await getConnectedExternalCount(
-        uid,
-        opId && opId !== uid ? [opId] : []
-      );
+      const connections = await getConnectedExternalCount(uid, alts);
       setUsage((u) => ({
         ...u,
         connections,
@@ -108,8 +105,8 @@ export default function SettingsPage() {
 
     const onVis = () => {
       if (document.visibilityState !== "visible") return;
-      void getConnectedExternalCount(uid, opId && opId !== uid ? [opId] : []).then(
-        (connections) => setUsage((u) => ({ ...u, connections }))
+      void getConnectedExternalCount(uid, alts).then((connections) =>
+        setUsage((u) => ({ ...u, connections }))
       );
     };
     document.addEventListener("visibilitychange", onVis);
@@ -174,12 +171,12 @@ export default function SettingsPage() {
     const b = await fetchBillingStatus(true);
     setBilling(b);
     const s = loadOperatorState();
-    const stableId = (getStableUserId() || "").trim();
     const opId = (s.user?.id || "").trim();
-    const uid = stableId || opId;
+    const stableId = (getStableUserId() || "").trim();
+    const uid = opId || stableId;
     const connections = await getConnectedExternalCount(
       uid,
-      opId && opId !== uid ? [opId] : []
+      [opId, stableId].filter((id) => id && id !== uid)
     );
     setUsage((u) => ({ ...u, connections }));
     setBillingBusy(false);
