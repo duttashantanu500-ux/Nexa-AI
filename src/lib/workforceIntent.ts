@@ -1,6 +1,6 @@
 /**
  * Main Nexa chat intent — Digital Workforce command understanding.
- * Deterministic first. Never invents tool results or completed work.
+ * Deterministic first first. Never invents tool results or completed work.
  */
 
 export type WorkforceIntent =
@@ -44,7 +44,7 @@ const HIRE =
   /\b(hire|create|build|make|set up|setup|need)\b.*\b(employee|agent|assistant|role|worker)\b|\b(new employee|new agent|hiring desk)\b|\b(employee|agent)\b.*\b(for|that|to)\b/i;
 
 const LIST_TEAM =
-  /\b(my (team|employees|agents)|list (my )?(team|employees|agents)|who (do i|have i) (hired|got)|show (me )?(my )?(team|employees))\b/i;
+  /\b(list (my )?(team|employees|agents)|who (do i|have i) (hired|got)|show (me )?(my )?(team|employees)|\bwho is on (my )?(team|staff))\b/i;
 
 const STATUS =
   /\b(what (did|have) (my )?(employees?|agents?|team) (do|done|accomplish)|work (board|history|status)|failed runs?|needs attention|today'?s (work|results?))\b/i;
@@ -117,6 +117,23 @@ export function classifyWorkforceMessage(
     };
   }
 
+  if (STATUS.test(t)) {
+    const failed = ctx.failedRunCount || 0;
+    const recent = ctx.recentRunCount || 0;
+    let line =
+      recent > 0
+        ? `There ${recent === 1 ? "is" : "are"} ${recent} recent run${recent === 1 ? "" : "s"} on the Work Board.`
+        : "No recent work runs yet.";
+    if (failed > 0) {
+      line += ` ${failed} need attention.`;
+    }
+    return {
+      intent: "work_status",
+      message: `${line}\n\nOpen the Work Board for full history — I never invent completed tasks.`,
+      navigateTo: "/activity",
+    };
+  }
+
   if (LIST_TEAM.test(t)) {
     if (!ctx.agentNames.length) {
       return {
@@ -134,23 +151,6 @@ export function classifyWorkforceMessage(
       intent: "list_team",
       message: `Your AI team:\n${list}\n\nOpen AI Team to manage them, or name someone to run their work.`,
       navigateTo: "/agents",
-    };
-  }
-
-  if (STATUS.test(t)) {
-    const failed = ctx.failedRunCount || 0;
-    const recent = ctx.recentRunCount || 0;
-    let line =
-      recent > 0
-        ? `There ${recent === 1 ? "is" : "are"} ${recent} recent run${recent === 1 ? "" : "s"} on the Work Board.`
-        : "No recent work runs yet.";
-    if (failed > 0) {
-      line += ` ${failed} need attention.`;
-    }
-    return {
-      intent: "work_status",
-      message: `${line}\n\nOpen the Work Board for full history — I never invent completed tasks.`,
-      navigateTo: "/activity",
     };
   }
 
