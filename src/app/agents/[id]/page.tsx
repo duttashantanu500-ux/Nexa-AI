@@ -35,13 +35,61 @@ import {
 import { Agent, AgentRun } from "@/types";
 import { EmployeeBuilderChat } from "@/components/EmployeeBuilderChat";
 import { UpgradeLimitModal } from "@/components/UpgradeLimitModal";
+import {
+  injectNotionParentIntoSteps,
+  resolveNotionParentForHire,
+} from "@/lib/notionParent";
 
-const COMFY_KEY = "nexa_comfy_base_url";
 const NOTION_PARENT_KEY = "nexa_notion_default_parent";
 
 function isNotionParentSetupError(msg: string | undefined | null): boolean {
   if (!msg) return false;
   return /default page|parent page|set a default page/i.test(msg);
+}
+
+/** Fill empty step configs so Start work can run without builder jargon. */
+function withRunnableDefaults(
+  agent: Agent,
+  parentId?: string | null,
+  parentLabel?: string | null
+): Agent {
+  const purpose = (agent.purpose || agent.description || agent.name || "Work").trim();
+  const titleGuess =
+    purpose.length > 80 ? purpose.slice(0, 77) + "…" : purpose;
+  let steps = (agent.steps || []).map((st) => {
+    const config = { ...(st.config || {}) } as Record<string, unknown>;
+    const action = String(st.actionId || "");
+    if (action === "local_data.list_from_text" && !String(config.text || "").trim()) {
+      config.text = purpose;
+    }
+    if (action === "local_data.report" && !String(config.title || "").trim()) {
+      config.title = titleGuess || "Report";
+    }
+    if (action === "local_data.note" && !String(config.note || "").trim()) {
+      config.note = purpose;
+    }
+    if (action === "notion.create_page") {
+      if (!String(config.title || "").trim()) config.title = titleGuess || "New page";
+      if (!String(config.content || "").trim()) {
+        config.content = `Work output from ${agent.name}.\n\n${purpose}`;
+      }
+    }
+    if (action === "slack.post_message" && !String(config.text || "").trim()) {
+      config.text = purpose;
+    }
+    if (action === "buffer.create_post" && !String(config.text || "").trim()) {
+      config.text = purpose;
+    }
+    return { ...st, config };
+  });
+  if (parentId) {
+    steps = injectNotionParentIntoSteps(
+      steps as any,
+      parentId,
+      parentLabel || undefined
+    ) as typeof steps;
+  }
+  return { ...agent, steps };
 }
 
 export default function AgentDetailPage() {
@@ -53,7 +101,6 @@ export default function AgentDetailPage() {
   const [error, setError] = useState("");
   const [limitMessage, setLimitMessage] = useState("");
   const [upgrading, setUpgrading] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [needsSignIn, setNeedsSignIn] = useState(false);
   const [notionParentInput, setNotionParentInput] = useState("");
   const [notionParentSaved, setNotionParentSaved] = useState(false);
@@ -76,7 +123,6 @@ export default function AgentDetailPage() {
     } catch {
       /* */
     }
-    // Hydrate from server when local cache is empty (new browser / device)
     let cancelled = false;
     (async () => {
       try {
@@ -134,8 +180,7 @@ export default function AgentDetailPage() {
       const bill = await fetchBillingStatus();
       if (!canRunAgent(bill)) {
         setLimitMessage(
-          bill?.message ||
-            "You've reached your plan limit for work runs this month."
+          "You've reached your plan limit for work runs this month."
         );
         setRunning(false);
         return;
@@ -144,20 +189,50 @@ export default function AgentDetailPage() {
       /* continue */
     }
 
+    let parentId: string | null = null;
+    let parentLabel: string | null = null;
+    try {
+      const resolved = await resolveNotionParentForHire(uid);
+      parentId = resolved.parentId || null;
+      parentLabel = resolved.parentLabel || null;
+    } catch {
+      try {
+        parentId = localStorage.getItem(NOTION_PARENT_KEY);
+      } catch {
+        /* */
+      }
+    }
+    if (!parentId) {
+      try {
+        parentId = localStorage.getItem(NOTION_PARENT_KEY);
+      } catch {
+        /* */
+      }
+    }
+
+    const runnable = withRunnableDefaults(agent, parentId, parentLabel);
+    try {
+      updateAgent(agent.id, { steps: runnable.steps });
+      setAgent({ ...agent, steps: runnable.steps });
+    } catch {
+      /* */
+    }
+
     const runId = createRunId();
     const startedAt = new Date().toISOString();
     addAgentRun({
       id: runId,
       agentId: agent.id,
+      userId: uid,
       status: "running",
       startedAt,
       summary: "Starting work…",
-    });
+    } as any);
     refresh();
 
     try {
       const result = await runWorkflow({
-        agent,
+        agent: runnable,
         userId: uid,
         runId,
       });
@@ -165,12 +240,16 @@ export default function AgentDetailPage() {
       updateAgentRun(runId, {
         status,
         finishedAt: new Date().toISOString(),
-        summary: result.summary || (status === "succeeded" ? "Work completed." : "Work finished with issues."),
+        summary:
+          result.summary ||
+          (status === "succeeded"
+            ? "Work completed."
+            : "Work finished with issues."),
         error: result.error || undefined,
         outputs: result.outputs,
       });
       try {
-        await recordAgentRun(uid, agent.id, runId, status === "succeeded");
+        await recordAgentRun();
       } catch {
         /* */
       }
@@ -321,14 +400,7 @@ export default function AgentDetailPage() {
                   <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-medium dark:bg-zinc-800">
                     {i + 1}
                   </span>
-                  <span>
-                    <span className="font-medium">{st.name || st.actionId}</span>
-                    {st.config && Object.keys(st.config).length > 0 && (
-                      <span className="ml-1 text-xs text-zinc-500">
-                        ({Object.keys(st.config).join(", ")})
-                      </span>
-                    )}
-                  </span>
+                  <span className="font-medium">{st.name || st.actionId}</span>
                 </li>
               ))}
             </ol>
@@ -337,7 +409,7 @@ export default function AgentDetailPage() {
 
         <section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
           <h2 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-            Notion parent page (for Create page)
+            Notion parent page
           </h2>
           <p className="mb-2 text-xs text-zinc-500">
             Required when this employee creates Notion pages. Paste a page ID or
