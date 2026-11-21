@@ -44,7 +44,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               wordmarkClassName="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
             />
             <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-              Connect · Orchestrate
+              AI employees · AI team
             </div>
           </div>
           <nav className="space-y-2">
@@ -79,15 +79,15 @@ export function AppShell({ children }: { children: ReactNode }) {
               />
               <span className="text-xs text-zinc-500 dark:text-zinc-400">{name}</span>
             </div>
-            <nav className="flex gap-2 overflow-x-auto px-2 pb-2">
+            <nav className="flex gap-1 overflow-x-auto px-2 pb-2">
               {NAV.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`shrink-0 whitespace-nowrap rounded-xl border-2 border-dashed px-3 py-1.5 text-xs transition ${LEGO_FONT} ${
+                  className={`shrink-0 rounded-lg border border-dashed px-2.5 py-1.5 text-xs transition ${LEGO_FONT} ${
                     active(item.href)
-                      ? "border-solid border-indigo-500 bg-indigo-600 text-white"
-                      : "border-zinc-300 bg-zinc-50 text-zinc-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                      ? "border-solid border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-indigo-500 dark:bg-indigo-950/40 dark:text-indigo-300"
+                      : "border-zinc-300 text-zinc-600 dark:border-zinc-600 dark:text-zinc-400"
                   }`}
                 >
                   {item.label}
@@ -95,8 +95,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               ))}
             </nav>
           </header>
-
-          <main className="flex-1 text-zinc-900 dark:text-zinc-50">{children}</main>
+          <main className="flex-1">{children}</main>
         </div>
       </div>
     </div>
