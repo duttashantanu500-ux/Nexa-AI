@@ -56,6 +56,10 @@ const nextConfig: NextConfig = {
       },
       { source: "/work", destination: "/activity", permanent: false },
       { source: "/dashboard", destination: "/activity", permanent: false },
+      { source: "/missions", destination: "/agents", permanent: true },
+      { source: "/brain", destination: "/home", permanent: true },
+      { source: "/monitors", destination: "/activity", permanent: true },
+      { source: "/chat", destination: "/home", permanent: true },
     ];
   },
   async headers() {
