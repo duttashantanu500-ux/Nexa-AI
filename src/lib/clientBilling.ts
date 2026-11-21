@@ -172,22 +172,39 @@ export async function startCheckout(): Promise<
   }
 }
 
+function statusOf(
+  row: { status?: string } | string | undefined
+): string | undefined {
+  if (typeof row === "string") return row;
+  if (row && typeof row === "object") return row.status;
+  return undefined;
+}
+
 function countConnectedFromStatuses(
-  statuses: Record<string, { status?: string }>
+  statuses: Record<string, { status?: string } | string>
 ): number {
   let n = 0;
+  const seen = new Set<string>();
   for (const p of EXTERNAL_PROVIDERS) {
-    if (statuses[p]?.status === "connected") n += 1;
+    if (statusOf(statuses[p]) === "connected") {
+      n += 1;
+      seen.add(p);
+    }
+  }
+  for (const [key, row] of Object.entries(statuses || {})) {
+    if (seen.has(key)) continue;
+    if (key === "local_data" || key === "vault" || key === "local_comfyui") continue;
+    if (statusOf(row) === "connected") n += 1;
   }
   return n;
 }
 
-function writeStatusCache(statuses: Record<string, { status?: string }>) {
+function writeStatusCache(statuses: Record<string, { status?: string } | string>) {
   try {
     const map: Record<string, string> = {};
-    for (const p of EXTERNAL_PROVIDERS) {
-      const s = statuses[p]?.status;
-      if (s) map[p] = s;
+    for (const [k, row] of Object.entries(statuses || {})) {
+      const s = statusOf(row);
+      if (s) map[k] = s;
     }
     if (Object.keys(map).length) {
       sessionStorage.setItem(STATUS_CACHE_KEY, JSON.stringify(map));
@@ -206,6 +223,11 @@ function readStatusCacheCount(): number {
     for (const p of EXTERNAL_PROVIDERS) {
       if (map[p] === "connected") n += 1;
     }
+    for (const [key, s] of Object.entries(map)) {
+      if ((EXTERNAL_PROVIDERS as readonly string[]).includes(key)) continue;
+      if (key === "local_data" || key === "vault" || key === "local_comfyui") continue;
+      if (s === "connected") n += 1;
+    }
     return n;
   } catch {
     return 0;
@@ -220,7 +242,10 @@ async function fetchConnectedCountForUser(userId: string): Promise<number> {
       { cache: "no-store" }
     );
     const data = await res.json().catch(() => ({}));
-    const statuses = (data?.statuses || {}) as Record<string, { status?: string }>;
+    const statuses = (data?.statuses || {}) as Record<
+      string,
+      { status?: string } | string
+    >;
     const n = countConnectedFromStatuses(statuses);
     if (n > 0) writeStatusCache(statuses);
     return n;
@@ -337,11 +362,8 @@ export function canConnectService(
 
 export function canRunAgent(
   billing: ClientBillingState
-): { ok: true } | { ok: false; message: string } {
-  if (billing.runsUsedThisPeriod >= billing.limits.maxRunsPerMonth) {
-    return { ok: false, message: LIMIT_MESSAGES.runs };
-  }
-  return { ok: true };
+): boolean {
+  return billing.runsUsedThisPeriod < billing.limits.maxRunsPerMonth;
 }
 
 export function canUseVault(
