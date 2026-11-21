@@ -57,96 +57,20 @@ function repairStepActionId(actionId: string, name: string): string {
 }
 
 export function validateProposal(
-  raw: unknown,
-  liveConnections?: Record<string, string>
+  proposal: AgentProposal,
+  connectionStatuses?: Record<string, string>
 ): ValidatedProposal {
   const issues: ValidationIssue[] = [];
-  const proposal = normalizeProposal(raw, issues);
-
-  // Repair unknown / free-text actionIds from models (esp. Ollama)
-  proposal.steps = proposal.steps.map((st) => {
-    const fixed = repairStepActionId(st.actionId, st.name || "");
-    return fixed !== st.actionId ? { ...st, actionId: fixed } : st;
-  });
-
-  // If still no valid actions, inject a sensible default workflow from name/description
-  const hasAnyKnown = proposal.steps.some((s) => getAction(s.actionId));
-  if (!hasAnyKnown) {
-    const blob = `${proposal.name} ${proposal.description} ${proposal.purpose || ""}`.toLowerCase();
-    const injected: ProposedStep[] = [];
-    if (/marketing/.test(blob)) {
-      injected.push({ actionId: "local_data.note", name: "Add note", config: {}, onError: "stop" });
-      injected.push({
-        actionId: "local_data.report",
-        name: "Report",
-        config: { title: "Marketing summary" },
-        onError: "stop",
-      });
-      injected.push({
-        actionId: "notion.create_page",
-        name: "Create page",
-        config: { title: "", content: "" },
-        requiresApproval: true,
-        onError: "stop",
-      });
-    } else if (/slack/.test(blob)) {
-      injected.push({ actionId: "slack.list_channels", name: "List Slack channels", config: {}, onError: "stop" });
-      if (/notion/.test(blob)) {
-        injected.push({
-          actionId: "notion.create_page",
-          name: "Post summary to Notion",
-          config: { title: "Slack summary", content: "" },
-          requiresApproval: true,
-          onError: "stop",
-        });
-      } else {
-        injected.push({
-          actionId: "slack.post_message",
-          name: "Post summary",
-          config: { channel: "", text: "" },
-          requiresApproval: true,
-          onError: "stop",
-        });
-      }
-    } else if (/hubspot|crm|deal/.test(blob)) {
-      injected.push({ actionId: "hubspot.list_deals", name: "List open deals", config: { limit: "25" }, onError: "stop" });
-      injected.push({ actionId: "hubspot.list_contacts", name: "List related contacts", config: { limit: "10" }, onError: "continue" });
-    } else if (/notion/.test(blob)) {
-      injected.push({ actionId: "notion.search", name: "Search Notion", config: { query: "" }, onError: "stop" });
-      injected.push({
-        actionId: "notion.create_page",
-        name: "Create page",
-        config: { title: "", content: "" },
-        requiresApproval: true,
-        onError: "stop",
-      });
-    } else {
-      injected.push({
-        actionId: "local_data.list_from_text",
-        name: "Load list",
-        config: { text: "", separator: "newline" },
-        onError: "stop",
-      });
-      injected.push({
-        actionId: "local_data.report",
-        name: "Build report",
-        config: { title: "Processed list" },
-        onError: "stop",
-      });
-    }
-    proposal.steps = injected;
-  }
-
-  const required = new Map<string, { id: string; name: string; status: string }>();
   const approvalSteps: string[] = [];
   let validSteps: ProposedStep[] = [];
 
-  for (const step of proposal.steps) {
+  for (const raw of proposal.steps || []) {
+    const step = { ...raw, actionId: repairStepActionId(raw.actionId, raw.name || "") };
     const def = getAction(step.actionId);
     if (!def) {
       issues.push({
         code: "unknown_action",
-        message: `Action "${step.actionId}" is not in Nexa's registry.`,
+        message: `Unknown step "${step.actionId}". Choose a supported action.`,
         severity: "error",
         actionId: step.actionId,
       });
@@ -154,29 +78,11 @@ export function validateProposal(
     }
 
     const connector = getConnector(def.connectionId || "");
-    if (def.connectionId && connector) {
-      let status = "available";
-      if (liveConnections && liveConnections[connector.id]) {
-        status = liveConnections[connector.id];
-      } else if (connector.defaultStatus === "connected") {
-        status = "connected";
-      } else if (connector.defaultStatus === "coming_soon") {
-        status = "coming_soon";
-      } else if (connector.executable && def.implemented) {
-        status = "available";
-      } else {
-        status = "unavailable";
-      }
-
-      required.set(connector.id, {
-        id: connector.id,
-        name: connector.name,
-        status,
-      });
-
-      if (status === "coming_soon") {
+    if (connector) {
+      const status = connectionStatuses?.[connector.id];
+      if (status === "unavailable" || status === "coming_soon") {
         issues.push({
-          code: "connector_coming_soon",
+          code: "connector_unavailable",
           message: `${connector.name} is coming soon — this step cannot run yet.`,
           severity: "warning",
           actionId: step.actionId,
@@ -212,7 +118,7 @@ export function validateProposal(
       if (!String(v ?? "").trim()) {
         issues.push({
           code: "missing_field",
-          message: `Step "${def.name}" needs "${f.label}". You can fill it after creating a draft.`,
+          message: `"${def.name}" still needs a ${f.label.toLowerCase()}. You can set it in chat before starting work.`,
           severity: "warning",
           actionId: step.actionId,
         });
@@ -232,7 +138,6 @@ export function validateProposal(
     });
   }
 
-  // Marketing roles must keep local note + report even when Buffer/Slack are offline
   const roleBlob = `${proposal.name} ${proposal.description} ${proposal.purpose || ""}`.toLowerCase();
   if (/marketing/.test(roleBlob)) {
     const hasNote = validSteps.some((s) => s.actionId === "local_data.note");
@@ -261,56 +166,17 @@ export function validateProposal(
     }
   }
 
-  proposal.steps = validSteps;
-
-  if (!proposal.name.trim()) {
-    issues.push({
-      code: "name_required",
-      message: "Employee name is required.",
-      severity: "error",
-    });
-  }
-
-  if (proposal.steps.length === 0) {
-    issues.push({
-      code: "no_steps",
-      message:
-        "No valid workflow steps. Describe what this AI employee should do with available tools (local list/filter, Slack, Notion, HubSpot, Buffer).",
-      severity: "error",
-    });
-  }
-
-  const hardErrors = issues.filter((i) => i.severity === "error");
-  const canActivate =
-    hardErrors.length === 0 &&
-    proposal.steps.every((s) => {
-      const d = getAction(s.actionId);
-      if (!d?.implemented || !d.available) return false;
-      if (d.connectionId && liveConnections) {
-        const st = liveConnections[d.connectionId];
-        if (
-          st &&
-          st !== "connected" &&
-          d.connectionId !== "local_data" &&
-          d.connectionId !== "vault"
-        ) {
-          return false;
-        }
-      }
-      return true;
-    });
-
+  const hasErrors = issues.some((i) => i.severity === "error");
   return {
-    proposal,
+    ...proposal,
+    steps: validSteps,
     issues,
-    canActivate,
-    canDraft: Boolean(proposal.name.trim()) && proposal.steps.length > 0,
-    requiredConnectors: Array.from(required.values()),
     approvalSteps,
+    ok: !hasErrors && validSteps.length > 0,
   };
 }
 
-function normalizeProposal(raw: unknown, issues: ValidationIssue[]): AgentProposal {
+export function normalizeProposal(raw: unknown, issues: ValidationIssue[]): AgentProposal {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const sched = (o.schedule && typeof o.schedule === "object"
     ? o.schedule
@@ -349,7 +215,7 @@ function normalizeProposal(raw: unknown, issues: ValidationIssue[]): AgentPropos
   if (!Array.isArray(o.steps)) {
     issues.push({
       code: "invalid_shape",
-      message: "Model did not return a steps array.",
+      message: "Could not build steps for this employee. Try describing the role again.",
       severity: "error",
     });
   }
