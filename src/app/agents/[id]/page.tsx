@@ -32,7 +32,7 @@ import {
   recordAgentRun,
   startProCheckout,
 } from "@/lib/clientBilling";
-import { Agent, AgentRun } from "@/types";
+import { Agent, AgentRun, WorkflowStep } from "@/types";
 import { EmployeeBuilderChat } from "@/components/EmployeeBuilderChat";
 import { UpgradeLimitModal } from "@/components/UpgradeLimitModal";
 import {
@@ -47,6 +47,30 @@ function isNotionParentSetupError(msg: string | undefined | null): boolean {
   return /default page|parent page|set a default page/i.test(msg);
 }
 
+function toStringConfig(config: Record<string, unknown> | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!config || typeof config !== "object") return out;
+  for (const [k, v] of Object.entries(config)) {
+    if (v == null) continue;
+    out[k] = typeof v === "string" ? v : String(v);
+  }
+  return out;
+}
+
+/** Normalize agent steps into WorkflowStep[] for the engine. */
+function toWorkflowSteps(agent: Agent): WorkflowStep[] {
+  const raw = Array.isArray(agent.steps) ? agent.steps : [];
+  return raw.map((st: any, i: number) => ({
+    id: String(st.id || `step_${i}`),
+    order: typeof st.order === "number" ? st.order : i,
+    actionId: String(st.actionId || ""),
+    name: String(st.name || st.actionId || `Step ${i + 1}`),
+    config: toStringConfig(st.config),
+    onError: st.onError === "continue" || st.onError === "retry" ? st.onError : "stop",
+    requiresApproval: Boolean(st.requiresApproval),
+  }));
+}
+
 /** Fill empty step configs so Start work can run without builder jargon. */
 function withRunnableDefaults(
   agent: Agent,
@@ -56,7 +80,8 @@ function withRunnableDefaults(
   const purpose = (agent.purpose || agent.description || agent.name || "Work").trim();
   const titleGuess =
     purpose.length > 80 ? purpose.slice(0, 77) + "…" : purpose;
-  let steps = (agent.steps || []).map((st) => {
+  const base = Array.isArray(agent.steps) ? agent.steps : [];
+  let steps = base.map((st: any) => {
     const config = { ...(st.config || {}) } as Record<string, unknown>;
     const action = String(st.actionId || "");
     if (action === "local_data.list_from_text" && !String(config.text || "").trim()) {
@@ -89,7 +114,7 @@ function withRunnableDefaults(
       parentLabel || undefined
     ) as typeof steps;
   }
-  return { ...agent, steps };
+  return { ...agent, steps: Array.isArray(steps) ? steps : [] };
 }
 
 export default function AgentDetailPage() {
@@ -211,8 +236,15 @@ export default function AgentDetailPage() {
     }
 
     const runnable = withRunnableDefaults(agent, parentId, parentLabel);
+    const steps = toWorkflowSteps(runnable);
+    if (!steps.length) {
+      setError("This employee has no steps yet. Configure work in the chat first.");
+      setRunning(false);
+      return;
+    }
+
     try {
-      updateAgent(agent.id, { steps: runnable.steps });
+      updateAgent(agent.id, { steps: runnable.steps as any });
       setAgent({ ...agent, steps: runnable.steps });
     } catch {
       /* */
@@ -232,26 +264,43 @@ export default function AgentDetailPage() {
 
     try {
       const result = await runWorkflow({
-        agent: runnable,
-        userId: uid,
-        runId,
+        steps,
+        connections: {
+          userId: uid,
+          notionDefaultParent: parentId || undefined,
+          origin: typeof window !== "undefined" ? window.location.origin : undefined,
+        },
       });
       const status = mapWorkflowResultToRunStatus(result);
+      const summary =
+        result.output ||
+        result.error ||
+        (status === "succeeded"
+          ? "Work completed."
+          : status === "waiting_for_approval"
+            ? "Waiting for your approval."
+            : "Work finished with issues.");
       updateAgentRun(runId, {
         status,
         finishedAt: new Date().toISOString(),
-        summary:
-          result.summary ||
-          (status === "succeeded"
-            ? "Work completed."
-            : "Work finished with issues."),
+        summary,
         error: result.error || undefined,
-        outputs: result.outputs,
-      });
+        outputs: result.context as any,
+        steps: result.steps as any,
+      } as any);
       try {
         await recordAgentRun();
       } catch {
         /* */
+      }
+      if (!result.ok && result.error) {
+        if (isNotionParentSetupError(result.error)) {
+          setError(
+            "Notion needs a default parent page. Set one below or pick a page in the chat, then try again."
+          );
+        } else {
+          setError(result.error);
+        }
       }
     } catch (e: any) {
       const msg = e?.message || String(e);
@@ -392,7 +441,7 @@ export default function AgentDetailPage() {
             </p>
           ) : (
             <ol className="mt-3 space-y-2">
-              {(agent.steps || []).map((st, i) => (
+              {(agent.steps || []).map((st: any, i: number) => (
                 <li
                   key={st.id || i}
                   className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300"
