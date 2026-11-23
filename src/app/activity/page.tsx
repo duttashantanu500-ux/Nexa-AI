@@ -5,14 +5,22 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader } from "@/components/PageHeader";
-import { loadOperatorState, saveOperatorState } from "@/lib/operatorStore";
+import {
+  getAgent,
+  loadOperatorState,
+  saveOperatorState,
+  updateAgentRun,
+} from "@/lib/operatorStore";
 import { fetchServerAgents } from "@/lib/serverAgentClient";
 import { authHeaders } from "@/lib/authHeaders";
+import { runWorkflow } from "@/lib/workflowEngine";
 import {
+  mapWorkflowResultToRunStatus,
   runStatusLabel,
   statusBadgeClass,
 } from "@/lib/runLifecycle";
-import type { Agent, AgentRun } from "@/types";
+import { getNotionParent } from "@/lib/notionParent";
+import type { Agent, AgentRun, WorkflowStep } from "@/types";
 
 type FilterKey =
   | "all"
@@ -31,12 +39,16 @@ function normalizeStatus(s: string): string {
   return String(s || "").toLowerCase();
 }
 
+function isWaiting(status: string): boolean {
+  const s = normalizeStatus(status);
+  return s === "waiting_for_approval" || s === "waiting_approval";
+}
+
 function matchesFilter(status: string, filter: FilterKey): boolean {
   const s = normalizeStatus(status);
   if (filter === "all") return true;
   if (filter === "running") return s === "running" || s === "queued";
-  if (filter === "waiting")
-    return s === "waiting_for_approval" || s === "waiting_approval";
+  if (filter === "waiting") return isWaiting(s);
   if (filter === "succeeded")
     return (
       s === "succeeded" ||
@@ -48,12 +60,32 @@ function matchesFilter(status: string, filter: FilterKey): boolean {
   return true;
 }
 
+function toWorkflowSteps(agent: Agent): WorkflowStep[] {
+  const raw = Array.isArray(agent.steps) ? agent.steps : [];
+  return raw.map((st: any, i: number) => ({
+    id: String(st.id || `step_${i}`),
+    order: typeof st.order === "number" ? st.order : i,
+    actionId: String(st.actionId || ""),
+    name: String(st.name || st.actionId || `Step ${i + 1}`),
+    config: Object.fromEntries(
+      Object.entries((st.config || {}) as Record<string, unknown>).map(([k, v]) => [
+        k,
+        v == null ? "" : String(v),
+      ])
+    ),
+    onError: st.onError === "continue" || st.onError === "retry" ? st.onError : "stop",
+    requiresApproval: Boolean(st.requiresApproval),
+  }));
+}
+
 export default function WorkBoardPage() {
   const router = useRouter();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [items, setItems] = useState<BoardItem[]>([]);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
 
   const load = useCallback(async () => {
     const s = loadOperatorState();
@@ -108,7 +140,6 @@ export default function WorkBoardPage() {
 
     setAgents(localAgents);
 
-    // Local runs (primary source used by employee detail)
     const localRuns = (s.agentRuns || []).filter((r) => {
       if (r.isTest || r.mode === "simulated") return false;
       if (uid && r.userId && r.userId !== uid) return false;
@@ -127,7 +158,6 @@ export default function WorkBoardPage() {
       });
     }
 
-    // Merge server runs when available (soft-fail)
     const headers = await authHeaders();
     if (headers.Authorization) {
       await Promise.all(
@@ -177,6 +207,129 @@ export default function WorkBoardPage() {
     void load();
   }, [load]);
 
+  const rejectRun = async (run: AgentRun) => {
+    if (busyId) return;
+    setBusyId(run.id);
+    setActionError("");
+    try {
+      updateAgentRun(run.id, {
+        status: "cancelled",
+        finishedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+        summary: "You rejected this step. Work was stopped.",
+        pendingStepId: undefined,
+        pendingStepIndex: undefined,
+      } as any);
+      await load();
+    } catch (e: any) {
+      setActionError(e?.message || "Could not reject this run.");
+    }
+    setBusyId(null);
+  };
+
+  const approveRun = async (run: AgentRun, agentId: string) => {
+    if (busyId) return;
+    setBusyId(run.id);
+    setActionError("");
+    try {
+      const s = loadOperatorState();
+      const uid = s.user?.id || "";
+      const agent = getAgent(agentId) || agents.find((a) => a.id === agentId);
+      if (!agent) {
+        setActionError("Employee not found. Open AI Team and try again.");
+        setBusyId(null);
+        return;
+      }
+      const steps = toWorkflowSteps(agent);
+      if (!steps.length) {
+        setActionError("This employee has no steps to continue.");
+        setBusyId(null);
+        return;
+      }
+
+      const pendingId =
+        run.pendingStepId ||
+        (run.steps || run.stepResults || []).find(
+          (st: any) => st.status === "awaiting_approval"
+        )?.stepId;
+      const pendingIndex =
+        typeof run.pendingStepIndex === "number"
+          ? run.pendingStepIndex
+          : steps.findIndex((st) => st.id === pendingId);
+
+      const startIndex = pendingIndex >= 0 ? pendingIndex : 0;
+      const approvalStepId =
+        pendingId || steps[startIndex]?.id || steps[0]?.id;
+
+      updateAgentRun(run.id, {
+        status: "running",
+        summary: "Resuming after your approval…",
+      } as any);
+
+      const parent = getNotionParent() || undefined;
+      const priorResults = (run.steps || run.stepResults || []) as any[];
+      const priorContext =
+        (run.contextSnapshot || run.context || (run as any).outputs) as any;
+
+      const result = await runWorkflow({
+        steps,
+        startIndex,
+        approvalGrantedForStepId: approvalStepId,
+        priorResults: Array.isArray(priorResults)
+          ? priorResults.filter(
+              (r) => r && r.status !== "awaiting_approval"
+            )
+          : [],
+        priorContext: priorContext || undefined,
+        connections: {
+          userId: uid,
+          notionDefaultParent: parent,
+          origin:
+            typeof window !== "undefined" ? window.location.origin : undefined,
+        },
+      });
+
+      const status = mapWorkflowResultToRunStatus(result);
+      const summary =
+        result.output ||
+        result.error ||
+        (status === "succeeded"
+          ? "Work completed after approval."
+          : status === "waiting_for_approval"
+            ? "Still waiting for another approval."
+            : "Work finished with issues.");
+
+      updateAgentRun(run.id, {
+        status,
+        finishedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+        summary,
+        error: result.error || undefined,
+        steps: result.steps as any,
+        stepResults: result.steps as any,
+        contextSnapshot: result.context as any,
+        context: result.context as any,
+        pendingStepId: result.pendingStepId,
+        pendingStepIndex: result.pendingStepIndex,
+      } as any);
+
+      if (!result.ok && result.error) {
+        setActionError(result.error);
+      }
+      await load();
+    } catch (e: any) {
+      updateAgentRun(run.id, {
+        status: "failed",
+        finishedAt: new Date().toISOString(),
+        summary: "Failed after approval",
+        error: e?.message || String(e),
+      } as any);
+      setActionError(e?.message || "Could not continue this run.");
+      await load();
+    }
+    setBusyId(null);
+  };
+
   const filtered = useMemo(
     () => items.filter((it) => matchesFilter(String(it.run.status), filter)),
     [items, filter]
@@ -187,7 +340,7 @@ export default function WorkBoardPage() {
     for (const it of items) {
       const s = normalizeStatus(String(it.run.status));
       if (s === "running" || s === "queued") c.running++;
-      else if (s === "waiting_for_approval" || s === "waiting_approval") c.waiting++;
+      else if (isWaiting(s)) c.waiting++;
       else if (
         s === "succeeded" ||
         s === "completed" ||
@@ -224,6 +377,12 @@ export default function WorkBoardPage() {
             </Link>
           }
         />
+
+        {actionError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+            {actionError}
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-1.5">
           {filters.map((f) => (
@@ -266,17 +425,21 @@ export default function WorkBoardPage() {
           </div>
         ) : (
           <ul className="space-y-2">
-            {filtered.map(({ run, agentName, agentId }) => (
-              <li key={run.id}>
-                <Link
-                  href={`/agents/${agentId}`}
-                  className="block rounded-xl border border-zinc-200 bg-white p-4 transition hover:border-indigo-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-indigo-700"
+            {filtered.map(({ run, agentName, agentId }) => {
+              const waiting = isWaiting(String(run.status));
+              return (
+                <li
+                  key={run.id}
+                  className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                      <Link
+                        href={`/agents/${agentId}`}
+                        className="truncate text-sm font-medium text-zinc-900 hover:underline dark:text-zinc-50"
+                      >
                         {agentName}
-                      </div>
+                      </Link>
                       <p className="mt-0.5 text-xs text-zinc-500">
                         {run.trigger === "schedule" ? "Scheduled" : "Manual"}
                         {run.startedAt
@@ -298,9 +461,35 @@ export default function WorkBoardPage() {
                       {run.error}
                     </p>
                   )}
-                </Link>
-              </li>
-            ))}
+                  {waiting && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={busyId === run.id}
+                        onClick={() => void approveRun(run, agentId)}
+                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                      >
+                        {busyId === run.id ? "Working…" : "Approve"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyId === run.id}
+                        onClick={() => void rejectRun(run)}
+                        className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                      >
+                        Reject
+                      </button>
+                      <Link
+                        href={`/agents/${agentId}`}
+                        className="rounded-lg px-3 py-1.5 text-sm text-indigo-600 hover:underline"
+                      >
+                        Open employee
+                      </Link>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
