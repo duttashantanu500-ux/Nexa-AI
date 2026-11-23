@@ -57,7 +57,6 @@ function toStringConfig(config: Record<string, unknown> | undefined): Record<str
   return out;
 }
 
-/** Normalize agent steps into WorkflowStep[] for the engine. */
 function toWorkflowSteps(agent: Agent): WorkflowStep[] {
   const raw = Array.isArray(agent.steps) ? agent.steps : [];
   return raw.map((st: any, i: number) => ({
@@ -71,7 +70,6 @@ function toWorkflowSteps(agent: Agent): WorkflowStep[] {
   }));
 }
 
-/** Fill empty step configs so Start work can run without builder jargon. */
 function withRunnableDefaults(
   agent: Agent,
   parentId?: string | null,
@@ -278,15 +276,22 @@ export default function AgentDetailPage() {
         (status === "succeeded"
           ? "Work completed."
           : status === "waiting_for_approval"
-            ? "Waiting for your approval."
+            ? "Waiting for your approval to continue."
             : "Work finished with issues.");
+      const waiting = status === "waiting_for_approval";
       updateAgentRun(runId, {
         status,
-        finishedAt: new Date().toISOString(),
+        finishedAt: waiting ? undefined : new Date().toISOString(),
+        endedAt: waiting ? undefined : new Date().toISOString(),
         summary,
         error: result.error || undefined,
         outputs: result.context as any,
         steps: result.steps as any,
+        stepResults: result.steps as any,
+        contextSnapshot: result.context as any,
+        context: result.context as any,
+        pendingStepId: result.pendingStepId,
+        pendingStepIndex: result.pendingStepIndex,
       } as any);
       try {
         await recordAgentRun();
