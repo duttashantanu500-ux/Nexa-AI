@@ -260,7 +260,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
             label: "Schedule time (optional)",
             type: "text",
             placeholder: "Optional date and time",
-            help: "Leave empty to add to the next queue slot.",
+            help: "Leave empty to add to the next open slot.",
           },
         ],
         ...impl(),
@@ -361,6 +361,33 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
   },
 ];
 
+/** Simple workflow starter templates for the hiring desk / builder. */
+export const WORKFLOW_STARTERS: {
+  id: string;
+  name: string;
+  description: string;
+  actionIds: string[];
+}[] = [
+  {
+    id: "research-notes",
+    name: "Research notes",
+    description: "Search docs and save a short note.",
+    actionIds: ["notion.search", "notion.create_page"],
+  },
+  {
+    id: "team-update",
+    name: "Team update",
+    description: "Draft and send a team message.",
+    actionIds: ["slack.post_message"],
+  },
+  {
+    id: "social-post",
+    name: "Social post",
+    description: "Schedule a social post.",
+    actionIds: ["buffer.create_post"],
+  },
+];
+
 export function getConnector(id: string): ConnectorDefinition | undefined {
   return CONNECTOR_REGISTRY.find((c) => c.id === id);
 }
@@ -375,6 +402,11 @@ export function getAction(actionId: string): ConnectorAction | undefined {
 
 export function allActions(): ConnectorAction[] {
   return CONNECTOR_REGISTRY.flatMap((c) => c.actions);
+}
+
+/** Actions safe to add to a live workflow. */
+export function listAvailableActions(): ConnectorAction[] {
+  return allActions().filter((a) => a.available && a.implemented);
 }
 
 export function statusBadgeClass(status: string): string {
