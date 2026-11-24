@@ -1,6 +1,7 @@
 /**
  * Client-side billing helpers (no secrets).
  * Plan status is loaded from /api/billing/status with cache.
+ * Connection counts come from Composio (max 3 accounts).
  */
 
 import {
@@ -9,6 +10,7 @@ import {
   getPlan,
   hasProAccess,
   LIMIT_MESSAGES,
+  MAX_COMPOSIO_CONNECTIONS,
   type PlanId,
   type PlanLimits,
 } from "./plans";
@@ -26,8 +28,7 @@ export type ClientBillingState = {
   cancelAtPeriodEnd?: boolean;
 };
 
-const EXTERNAL_PROVIDERS = ["notion", "slack", "buffer", "hubspot", "ideogram", "mcp", "vapi"] as const;
-const STATUS_CACHE_KEY = "nexa_conn_status_v1";
+const STATUS_CACHE_KEY = "nexa_conn_status_v2";
 
 let cachedBilling: ClientBillingState | null = null;
 let cacheTs = 0;
@@ -112,12 +113,17 @@ export async function fetchBillingStatus(
     const data = await res.json().catch(() => ({}));
     const planId = (data.planId === "pro" ? "pro" : "free") as PlanId;
     const plan = getPlan(planId);
+    // Force connection limit to product policy even if older API returns Infinity
+    const limits = {
+      ...(data.limits || plan.limits),
+      maxConnections: MAX_COMPOSIO_CONNECTIONS,
+    };
     const state: ClientBillingState = {
       planId,
       planName: data.planName || plan.name,
       status: data.status || "active",
       priceLabel: data.priceLabel || plan.priceLabel,
-      limits: data.limits || plan.limits,
+      limits,
       features: data.features || plan.features,
       runsUsedThisPeriod: Number(data.runsUsedThisPeriod) || 0,
       periodEnd: data.periodEnd || null,
@@ -172,65 +178,22 @@ export async function startCheckout(): Promise<
   }
 }
 
-function statusOf(
-  row: { status?: string } | string | undefined
-): string | undefined {
-  if (typeof row === "string") return row;
-  if (row && typeof row === "object") return row.status;
-  return undefined;
-}
-
-function countConnectedFromStatuses(
-  statuses: Record<string, { status?: string } | string>
-): number {
-  let n = 0;
-  const seen = new Set<string>();
-  for (const p of EXTERNAL_PROVIDERS) {
-    if (statusOf(statuses[p]) === "connected") {
-      n += 1;
-      seen.add(p);
-    }
-  }
-  for (const [key, row] of Object.entries(statuses || {})) {
-    if (seen.has(key)) continue;
-    if (key === "local_data" || key === "vault" || key === "local_comfyui") continue;
-    if (statusOf(row) === "connected") n += 1;
-  }
-  return n;
-}
-
-function writeStatusCache(statuses: Record<string, { status?: string } | string>) {
-  try {
-    const map: Record<string, string> = {};
-    for (const [k, row] of Object.entries(statuses || {})) {
-      const s = statusOf(row);
-      if (s) map[k] = s;
-    }
-    if (Object.keys(map).length) {
-      sessionStorage.setItem(STATUS_CACHE_KEY, JSON.stringify(map));
-    }
-  } catch {
-    /* */
-  }
-}
-
 function readStatusCacheCount(): number {
   try {
     const raw = sessionStorage.getItem(STATUS_CACHE_KEY);
     if (!raw) return 0;
-    const map = JSON.parse(raw) as Record<string, string>;
-    let n = 0;
-    for (const p of EXTERNAL_PROVIDERS) {
-      if (map[p] === "connected") n += 1;
-    }
-    for (const [key, s] of Object.entries(map)) {
-      if ((EXTERNAL_PROVIDERS as readonly string[]).includes(key)) continue;
-      if (key === "local_data" || key === "vault" || key === "local_comfyui") continue;
-      if (s === "connected") n += 1;
-    }
-    return n;
+    const n = Number(JSON.parse(raw)?.used);
+    return Number.isFinite(n) ? n : 0;
   } catch {
     return 0;
+  }
+}
+
+function writeStatusCacheCount(used: number) {
+  try {
+    sessionStorage.setItem(STATUS_CACHE_KEY, JSON.stringify({ used }));
+  } catch {
+    /* */
   }
 }
 
@@ -238,16 +201,19 @@ async function fetchConnectedCountForUser(userId: string): Promise<number> {
   if (!userId) return 0;
   try {
     const res = await fetch(
-      `/api/connections/status?userId=${encodeURIComponent(userId)}`,
+      `/api/composio/connections?userId=${encodeURIComponent(userId)}`,
       { cache: "no-store" }
     );
     const data = await res.json().catch(() => ({}));
-    const statuses = (data?.statuses || {}) as Record<
-      string,
-      { status?: string } | string
-    >;
-    const n = countConnectedFromStatuses(statuses);
-    if (n > 0) writeStatusCache(statuses);
+    if (typeof data.used === "number") {
+      writeStatusCacheCount(data.used);
+      return data.used;
+    }
+    const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+    const n = accounts.filter((a: any) =>
+      /ACTIVE|CONNECTED|SUCCESS/i.test(String(a.status || ""))
+    ).length;
+    writeStatusCacheCount(n);
     return n;
   } catch {
     return 0;
@@ -255,9 +221,7 @@ async function fetchConnectedCountForUser(userId: string): Promise<number> {
 }
 
 /**
- * Count external connections for Settings / plan gates.
- * Tries primary userId then optional alternate ids (pinned vs operator mismatch).
- * Never under-reports vs session cache written by Connections list.
+ * Count Composio connected accounts for Settings / plan gates.
  */
 export async function getConnectedExternalCount(
   userId: string,
@@ -308,7 +272,10 @@ export async function recordAgentRun(): Promise<
     });
     const data = await res.json().catch(() => ({}));
     if (!data.ok) {
-      if (/sign in|unauthorized|session/i.test(String(data.message || "")) && hasOperatorUser()) {
+      if (
+        /sign in|unauthorized|session/i.test(String(data.message || "")) &&
+        hasOperatorUser()
+      ) {
         return { ok: true, runsUsedThisPeriod: 0 };
       }
       return {
@@ -351,18 +318,17 @@ export function canConnectService(
   activeConnectionCount: number,
   billing: ClientBillingState
 ): { ok: true } | { ok: false; message: string } {
-  if (
-    billing.limits.maxConnections !== Number.POSITIVE_INFINITY &&
-    activeConnectionCount >= billing.limits.maxConnections
-  ) {
+  const max = Math.min(
+    billing.limits.maxConnections,
+    MAX_COMPOSIO_CONNECTIONS
+  );
+  if (activeConnectionCount >= max) {
     return { ok: false, message: LIMIT_MESSAGES.connections };
   }
   return { ok: true };
 }
 
-export function canRunAgent(
-  billing: ClientBillingState
-): boolean {
+export function canRunAgent(billing: ClientBillingState): boolean {
   return billing.runsUsedThisPeriod < billing.limits.maxRunsPerMonth;
 }
 
@@ -377,10 +343,7 @@ export function canUseVault(
   return { ok: true };
 }
 
-/** Alias used by vaultStore */
 export const canAddVaultBytes = canUseVault;
-
-/** Alias used by agent detail / settings pages */
 export const startProCheckout = startCheckout;
 
-export { PLAN_FREE, hasProAccess, LIMIT_MESSAGES };
+export { PLAN_FREE, hasProAccess, LIMIT_MESSAGES, MAX_COMPOSIO_CONNECTIONS };
