@@ -19,7 +19,7 @@ import {
   type ClientBillingState,
 } from "@/lib/clientBilling";
 import { totalVaultBytes, formatSize } from "@/lib/vaultStore";
-import { PLAN_FREE, PLAN_PRO } from "@/lib/plans";
+import { PLAN_FREE, PLAN_PRO, MAX_COMPOSIO_CONNECTIONS } from "@/lib/plans";
 import { getStableUserId } from "@/lib/sessionUser";
 import { fetchServerAgents } from "@/lib/serverAgentClient";
 
@@ -62,7 +62,6 @@ export default function SettingsPage() {
     setThemeLocal(t);
     applyTheme(t);
 
-    // Same identity order as Connections page (operator id first, then pinned)
     const opId = (s.user?.id || "").trim();
     const stableId = (getStableUserId() || "").trim();
     const uid = opId || stableId;
@@ -70,7 +69,11 @@ export default function SettingsPage() {
     const localAgents = (s.agents || []).filter(
       (a) =>
         String(a.status) !== "archived" &&
-        (!a.userId || !uid || a.userId === uid || a.userId === opId || a.userId === stableId)
+        (!a.userId ||
+          !uid ||
+          a.userId === uid ||
+          a.userId === opId ||
+          a.userId === stableId)
     );
     const vaultBytes = totalVaultBytes(uid || opId);
     setUsage((u) => ({ ...u, agents: localAgents.length, vaultBytes }));
@@ -229,8 +232,10 @@ export default function SettingsPage() {
   const planId = billing?.planId || "free";
   const isPro = planId === "pro";
   const maxAgents = billing?.limits.maxAgents ?? PLAN_FREE.limits.maxAgents;
-  const maxConn =
-    billing?.limits.maxConnections ?? PLAN_FREE.limits.maxConnections;
+  const maxConn = Math.min(
+    billing?.limits.maxConnections ?? MAX_COMPOSIO_CONNECTIONS,
+    MAX_COMPOSIO_CONNECTIONS
+  );
   const maxRuns =
     billing?.limits.maxRunsPerMonth ?? PLAN_FREE.limits.maxRunsPerMonth;
   const vaultLimit = billing?.limits.vaultBytes ?? PLAN_FREE.limits.vaultBytes;
@@ -314,10 +319,7 @@ export default function SettingsPage() {
                 AI employees: {usage.agents} / {maxAgents}
               </li>
               <li>
-                Connections:{" "}
-                {maxConn === Number.POSITIVE_INFINITY
-                  ? `${usage.connections} · Unlimited`
-                  : `${usage.connections} / ${maxConn}`}
+                App connections: {usage.connections} / {maxConn}
               </li>
               <li>
                 Work runs: {runsUsed} / {maxRuns}
@@ -362,6 +364,27 @@ export default function SettingsPage() {
                 Compare plans
               </Link>
             </div>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+            Connections
+          </h2>
+          <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              Link up to {MAX_COMPOSIO_CONNECTIONS} app accounts for your AI
+              employees. Browse 1,000+ apps on the Connections page.
+            </p>
+            <p className="mt-2 text-xs text-zinc-500">
+              {usage.connections} of {MAX_COMPOSIO_CONNECTIONS} slots in use
+            </p>
+            <Link
+              href="/connections"
+              className="mt-3 inline-block rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white"
+            >
+              Manage connections
+            </Link>
           </div>
         </section>
 
@@ -421,7 +444,11 @@ export default function SettingsPage() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  disabled={supportBusy || !supportSubject.trim() || !supportDesc.trim()}
+                  disabled={
+                    supportBusy ||
+                    !supportSubject.trim() ||
+                    !supportDesc.trim()
+                  }
                   onClick={() => void submitSupport()}
                   className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white disabled:opacity-50"
                 >
