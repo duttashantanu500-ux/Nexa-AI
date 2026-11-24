@@ -1,47 +1,85 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { ConnectorLogo } from "@/components/ConnectorLogo";
 import { PageHeader } from "@/components/PageHeader";
 import { loadOperatorState } from "@/lib/operatorStore";
 import { getStableUserId } from "@/lib/sessionUser";
-import {
-  CONNECTOR_REGISTRY,
-  statusBadgeClass,
-  statusLabel,
-  type ConnectorDefinition,
-  type ConnectorUiStatus,
-} from "@/lib/connectors/registry";
+import { MAX_COMPOSIO_CONNECTIONS } from "@/lib/plans";
+
+type Toolkit = {
+  slug: string;
+  name: string;
+  logo?: string;
+  description?: string;
+  categories?: string[];
+};
+
+type Account = {
+  id: string;
+  toolkit: string;
+  status: string;
+  isDisabled?: boolean;
+};
 
 export default function ConnectionsPage() {
   const router = useRouter();
-  const [statuses, setStatuses] = useState<
-    Record<string, { status?: ConnectorUiStatus; message?: string }>
-  >({});
+  const [userId, setUserId] = useState("");
+  const [q, setQ] = useState("");
+  const [toolkits, setToolkits] = useState<Toolkit[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [used, setUsed] = useState(0);
+  const [loadingCat, setLoadingCat] = useState(true);
+  const [loadingAcc, setLoadingAcc] = useState(true);
+  const [error, setError] = useState("");
   const [banner, setBanner] = useState("");
-  const [storageWarning, setStorageWarning] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  const [configured, setConfigured] = useState(true);
 
-  const resolveStatus = useCallback(
-    (c: ConnectorDefinition): ConnectorUiStatus => {
-      if (c.id === "local_data" || c.id === "vault") return "connected";
-      if (c.id === "local_comfyui") {
-        try {
-          return localStorage.getItem("nexa_comfy_base_url")?.trim()
-            ? "connected"
-            : "available";
-        } catch {
-          return "available";
-               }
+  const refreshAccounts = useCallback(async (uid: string) => {
+    setLoadingAcc(true);
+    try {
+      const res = await fetch(
+        `/api/composio/connections?userId=${encodeURIComponent(uid)}`,
+        { cache: "no-store" }
+      );
+      const data = await res.json().catch(() => ({}));
+      setConfigured(data.configured !== false);
+      setAccounts(Array.isArray(data.accounts) ? data.accounts : []);
+      setUsed(typeof data.used === "number" ? data.used : 0);
+      if (data.error && data.configured === false) {
+        setError(String(data.error));
       }
-      const row = statuses[c.id];
-      return (row?.status as ConnectorUiStatus) || c.defaultStatus || "available";
-    },
-    [statuses]
-  );
+    } catch {
+      setAccounts([]);
+    }
+    setLoadingAcc(false);
+  }, []);
+
+  const loadCatalogue = useCallback(async (query: string) => {
+    setLoadingCat(true);
+    try {
+      const res = await fetch(
+        `/api/composio/toolkits?limit=60&q=${encodeURIComponent(query)}`,
+        { cache: "no-store" }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) {
+        setConfigured(false);
+        setError(data.error || "Could not load integrations.");
+        setToolkits([]);
+      } else {
+        setToolkits(Array.isArray(data.toolkits) ? data.toolkits : []);
+        setError("");
+      }
+    } catch {
+      setToolkits([]);
+      setError("Could not load integrations.");
+    }
+    setLoadingCat(false);
+  }, []);
 
   useEffect(() => {
     const s = loadOperatorState();
@@ -54,104 +92,87 @@ export default function ConnectionsPage() {
       router.replace("/onboarding");
       return;
     }
+    setUserId(uid);
+    void refreshAccounts(uid);
+    void loadCatalogue("");
+  }, [router, refreshAccounts, loadCatalogue]);
 
-    let cancelled = false;
-    (async () => {
-      const healthP = fetch("/api/connections/storage-health")
-        .then((r) => r.json().catch(() => ({})))
-        .catch(() => ({}));
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void loadCatalogue(q.trim());
+    }, 280);
+    return () => clearTimeout(t);
+  }, [q, loadCatalogue]);
 
-      try {
-        const res = await fetch(
-          `/api/connections/status?userId=${encodeURIComponent(uid)}`,
-          { cache: "no-store" }
-        );
-        const data = await res.json().catch(() => ({}));
-        if (!cancelled && data?.statuses) setStatuses(data.statuses);
-      } catch {
-        /* ignore */
-      }
+  const remaining = Math.max(0, MAX_COMPOSIO_CONNECTIONS - used);
 
-      const health = await healthP;
-      if (!cancelled && health?.warning) {
-        setStorageWarning(String(health.warning));
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
-
-  const categories = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of CONNECTOR_REGISTRY) {
-      if (c.category) set.add(c.category);
+  const connect = async (slug: string) => {
+    if (!userId || connecting) return;
+    if (used >= MAX_COMPOSIO_CONNECTIONS) {
+      setBanner(
+        `You already use ${used} of ${MAX_COMPOSIO_CONNECTIONS} connection slots. Disconnect one to free a slot.`
+      );
+      return;
     }
-    return ["All", ...Array.from(set)];
-  }, []);
-
-  const services = useMemo(
-    () =>
-      CONNECTOR_REGISTRY.filter(
-        (c) => !["local_data", "local_comfyui", "vault"].includes(c.id)
-      ),
-    []
-  );
-
-  const local = useMemo(
-    () =>
-      CONNECTOR_REGISTRY.filter((c) =>
-        ["local_data", "local_comfyui", "vault"].includes(c.id)
-      ),
-    []
-  );
-
-  const filteredServices = useMemo(() => {
-    if (categoryFilter === "All") return services;
-    return services.filter((c) => c.category === categoryFilter);
-  }, [services, categoryFilter]);
-
-  const Card = ({ c }: { c: ConnectorDefinition }) => {
-    const status = resolveStatus(c);
-    // Prefer clean paths; status query is optional UX only.
-    const href = `/connections/${c.id}`;
-    return (
-      <Link
-        href={href}
-        prefetch={true}
-        // Hard-nav fallback: some mobile browsers drop client-side Link transitions.
-        onClick={(e) => {
-          try {
-            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-            e.preventDefault();
-            window.location.assign(href);
-          } catch {
-            /* let default Link handle */
-          }
-        }}
-        className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3 transition active:bg-zinc-50 hover:border-indigo-300 dark:border-zinc-800 dark:bg-zinc-900 dark:active:bg-zinc-800 dark:hover:border-indigo-700"
-      >
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-50 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
-          <ConnectorLogo id={c.id} size={22} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <span className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
-              {c.name}
-            </span>
-            <span className={statusBadgeClass(status)}>{statusLabel(status)}</span>
-          </div>
-          <p className="mt-0.5 truncate text-xs text-zinc-500">
-            {c.shortDescription}
-            {c.category ? (
-              <span className="ml-1 text-zinc-400">· {c.category}</span>
-            ) : null}
-          </p>
-        </div>
-      </Link>
-    );
+    setConnecting(slug);
+    setBanner("");
+    setError("");
+    try {
+      const res = await fetch("/api/composio/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, toolkit: slug }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) {
+        setError(data.error || "Could not start connection.");
+        setConnecting(null);
+        return;
+      }
+      if (data.redirectUrl) {
+        window.location.href = data.redirectUrl;
+        return;
+      }
+      setBanner("Connection started. Finish authentication in the opened window, then refresh.");
+      await refreshAccounts(userId);
+    } catch {
+      setError("Could not start connection.");
+    }
+    setConnecting(null);
   };
+
+  const disconnect = async (id: string) => {
+    if (!userId || disconnecting) return;
+    setDisconnecting(id);
+    setError("");
+    try {
+      const res = await fetch("/api/composio/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, connectedAccountId: id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) {
+        setError(data.error || "Could not disconnect.");
+      } else {
+        setBanner("Disconnected. That slot is free again.");
+        await refreshAccounts(userId);
+      }
+    } catch {
+      setError("Could not disconnect.");
+    }
+    setDisconnecting(null);
+  };
+
+  const connectedSlugs = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of accounts) {
+      if (/ACTIVE|CONNECTED|SUCCESS/i.test(a.status) && !a.isDisabled) {
+        set.add(a.toolkit.toLowerCase());
+      }
+    }
+    return set;
+  }, [accounts]);
 
   return (
     <AppShell>
@@ -159,57 +180,168 @@ export default function ConnectionsPage() {
         <PageHeader
           page="connections"
           title="Connections"
-          subtitle="Connect tools your AI employees can use. Status reflects your saved connections."
+          subtitle="Connect apps through Composio. Your AI employees use only accounts you authorize — up to 3 connected accounts."
         />
+
+        <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-medium text-zinc-900 dark:text-zinc-50">
+              Connection slots
+            </span>
+            <span className="text-zinc-600 dark:text-zinc-300">
+              {used} / {MAX_COMPOSIO_CONNECTIONS} used · {remaining} remaining
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-zinc-500">
+            Each connected app account uses one slot. Disconnecting frees a slot. The limit is 3 for every plan.
+          </p>
+        </div>
 
         {banner && (
           <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-200">
             {banner}
           </div>
         )}
-        {storageWarning && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            {storageWarning}
+        {error && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+            {error}
+            {!configured && (
+              <span className="mt-1 block text-xs">
+                Operators: set COMPOSIO_API_KEY in the server environment to enable the marketplace.
+              </span>
+            )}
           </div>
         )}
 
-        <div className="flex flex-wrap gap-2">
-          {categories.map((cat) => (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => setCategoryFilter(cat)}
-              className={
-                categoryFilter === cat
-                  ? "rounded-full bg-indigo-600 px-3 py-1 text-xs font-medium text-white"
-                  : "rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
-              }
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-
         <section className="space-y-2">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-            Connected services
+            Your connected accounts
           </h2>
-          <div className="space-y-2">
-            {filteredServices.map((c) => (
-              <Card key={c.id} c={c} />
-            ))}
-          </div>
+          {loadingAcc ? (
+            <p className="text-sm text-zinc-500">Loading…</p>
+          ) : accounts.length === 0 ? (
+            <p className="text-sm text-zinc-500">
+              None yet. Search the catalogue below and connect an app.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {accounts.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium capitalize text-zinc-900 dark:text-zinc-50">
+                      {a.toolkit}
+                    </p>
+                    <p className="text-xs text-zinc-500">{a.status}</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={disconnecting === a.id}
+                    onClick={() => void disconnect(a.id)}
+                    className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200"
+                  >
+                    {disconnecting === a.id ? "…" : "Disconnect"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
-        <section className="space-y-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-            Local
-          </h2>
-          <div className="space-y-2">
-            {local.map((c) => (
-              <Card key={c.id} c={c} />
-            ))}
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              App marketplace
+            </h2>
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search apps (Gmail, Slack, Notion…)"
+              className="w-full max-w-xs rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 sm:w-64"
+            />
           </div>
+
+          {loadingCat ? (
+            <p className="text-sm text-zinc-500">Loading catalogue…</p>
+          ) : toolkits.length === 0 ? (
+            <p className="text-sm text-zinc-500">
+              No integrations matched. Try another search
+              {!configured ? " or configure COMPOSIO_API_KEY." : "."}
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {toolkits.map((t) => {
+                const connected = connectedSlugs.has(t.slug);
+                return (
+                  <div
+                    key={t.slug}
+                    className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-zinc-50 dark:bg-zinc-800">
+                      {t.logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={t.logo}
+                          alt=""
+                          width={28}
+                          height={28}
+                          className="h-7 w-7 object-contain"
+                          loading="lazy"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = "none";
+                          }}
+                        />
+                      ) : (
+                        <span className="text-xs font-semibold uppercase text-zinc-500">
+                          {t.slug.slice(0, 2)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                            {t.name}
+                          </p>
+                          {t.description && (
+                            <p className="mt-0.5 line-clamp-2 text-xs text-zinc-500">
+                              {t.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-2">
+                        {connected ? (
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                            Connected
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={
+                              connecting === t.slug ||
+                              used >= MAX_COMPOSIO_CONNECTIONS ||
+                              !configured
+                            }
+                            onClick={() => void connect(t.slug)}
+                            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                          >
+                            {connecting === t.slug
+                              ? "Opening…"
+                              : used >= MAX_COMPOSIO_CONNECTIONS
+                                ? "Limit reached"
+                                : "Connect"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
       </div>
     </AppShell>
