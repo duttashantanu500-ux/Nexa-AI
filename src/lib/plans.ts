@@ -1,6 +1,9 @@
 /**
  * Nexa plan definitions — Free + Pro only.
  * Source of truth for limits and feature flags.
+ *
+ * Connections: hard max of 3 connected app accounts for every plan
+ * (Composio marketplace policy — not raised for Pro).
  */
 
 export type PlanId = "free" | "pro";
@@ -16,7 +19,7 @@ export type SubscriptionStatus =
 
 export interface PlanLimits {
   maxAgents: number;
-  maxConnections: number; // Infinity for unlimited
+  maxConnections: number;
   maxRunsPerMonth: number;
   vaultBytes: number;
   advancedWorkflow: boolean;
@@ -32,6 +35,9 @@ export interface PlanDefinition {
   features: string[];
 }
 
+/** Product-wide connection slot limit (Composio-connected accounts). */
+export const MAX_COMPOSIO_CONNECTIONS = 3;
+
 export const PLAN_FREE: PlanDefinition = {
   id: "free",
   name: "Free",
@@ -39,15 +45,15 @@ export const PLAN_FREE: PlanDefinition = {
   priceLabel: "$0/month",
   limits: {
     maxAgents: 3,
-    maxConnections: 3,
+    maxConnections: MAX_COMPOSIO_CONNECTIONS,
     maxRunsPerMonth: 100,
-    vaultBytes: 500 * 1024 * 1024, // 500 MB
+    vaultBytes: 500 * 1024 * 1024,
     advancedWorkflow: false,
     priorityExecution: false,
   },
   features: [
     "Up to 3 AI employees",
-    "Up to 3 connections",
+    "Up to 3 app connections",
     "100 work runs per month",
     "500 MB Vault storage",
     "Scheduling",
@@ -63,15 +69,15 @@ export const PLAN_PRO: PlanDefinition = {
   priceLabel: "$9/month",
   limits: {
     maxAgents: 20,
-    maxConnections: Number.POSITIVE_INFINITY,
+    maxConnections: MAX_COMPOSIO_CONNECTIONS,
     maxRunsPerMonth: 1000,
-    vaultBytes: 5 * 1024 * 1024 * 1024, // 5 GB
+    vaultBytes: 5 * 1024 * 1024 * 1024,
     advancedWorkflow: true,
     priorityExecution: true,
   },
   features: [
     "Up to 20 AI employees",
-    "Unlimited connections",
+    "Up to 3 app connections",
     "1,000 work runs per month",
     "5 GB Vault storage",
     "Scheduling",
@@ -92,7 +98,6 @@ export function getPlan(id: PlanId | string | null | undefined): PlanDefinition 
   return PLAN_FREE;
 }
 
-/** True when the user currently has Pro entitlements (active or canceling until period end). */
 export function hasProAccess(status: SubscriptionStatus | string | null | undefined): boolean {
   return status === "active" || status === "canceling" || status === "past_due";
 }
@@ -113,12 +118,11 @@ export function formatBytesLimit(bytes: number): string {
   return `${bytes} B`;
 }
 
-/** User-facing messages for limit blocks (shown with UpgradeLimitModal) */
 export const LIMIT_MESSAGES = {
   agents:
     "Uh oh — you don't have enough space for another AI employee. Unlock more by upgrading to Pro.",
   connections:
-    "Uh oh — you don't have enough space for another connection. Unlock more by upgrading to Pro.",
+    "You can connect up to 3 app accounts. Disconnect one to free a slot, then try again.",
   runs: "Uh oh — you've used all work runs for this month. Unlock more by upgrading to Pro.",
   vault:
     "Uh oh — your Vault is full. Unlock more storage by upgrading to Pro.",
