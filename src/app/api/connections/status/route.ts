@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { notionOAuthConfigured } from "@/lib/connectors/notionAuth";
 import { slackOAuthConfigured } from "@/lib/connectors/slackAuth";
 import { bufferOAuthConfigured } from "@/lib/connectors/bufferAuth";
-import { hubspotOAuthConfigured } from "@/lib/connectors/hubspotAuth";
 import { loadAllConnectionsForUser } from "@/lib/connectors/tokenStore";
 
 export const runtime = "nodejs";
@@ -25,14 +24,12 @@ type StatusBody = {
 };
 
 /**
- * Batch connection status from persisted tokens only.
- * Single DB round-trip — no remote provider health checks.
- * Source of truth for instant Connections UI.
+ * Legacy batch status for residual native tokens only.
+ * HubSpot and Vapi removed — use Composio marketplace for third-party apps.
  */
 export async function GET(req: NextRequest) {
   const userId = req.nextUrl.searchParams.get("userId")?.trim() || "";
 
-  // One query for all connectors belonging to this user
   const all = userId ? await loadAllConnectionsForUser(userId) : new Map();
 
   const one = (
@@ -83,10 +80,8 @@ export async function GET(req: NextRequest) {
     notion: one("Notion", "notion", notionOAuthConfigured()),
     slack: one("Slack", "slack", slackOAuthConfigured()),
     buffer: one("Buffer", "buffer", bufferOAuthConfigured()),
-    hubspot: one("HubSpot", "hubspot", hubspotOAuthConfigured()),
     ideogram: one("Ideogram", "ideogram", true),
     mcp: one("Custom tools", "mcp", true),
-    vapi: one("Voice calling", "vapi", true),
   };
 
   return json({
