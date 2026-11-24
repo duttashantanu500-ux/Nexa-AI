@@ -23,6 +23,66 @@ type Account = {
   isDisabled?: boolean;
 };
 
+/** Friendly display name for an app id (never show raw technical ids). */
+function friendlyAppName(raw: string): string {
+  const s = String(raw || "").trim();
+  if (!s) return "App";
+  const map: Record<string, string> = {
+    gmail: "Gmail",
+    slack: "Slack",
+    notion: "Notion",
+    hubspot: "HubSpot",
+    github: "GitHub",
+    googledrive: "Google Drive",
+    googlecalendar: "Google Calendar",
+    buffer: "Buffer",
+    outlook: "Outlook",
+    jira: "Jira",
+    linear: "Linear",
+    asana: "Asana",
+    trello: "Trello",
+    discord: "Discord",
+    twitter: "X",
+    linkedin: "LinkedIn",
+  };
+  const key = s.toLowerCase().replace(/\s+/g, "");
+  if (map[key]) return map[key];
+  return s
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function friendlyStatus(status: string, isDisabled?: boolean): string {
+  if (isDisabled) return "Paused";
+  const s = String(status || "").toUpperCase();
+  if (/ACTIVE|CONNECTED|SUCCESS|ENABLED/.test(s)) return "Connected";
+  if (/EXPIRED|REVOKED/.test(s)) return "Needs reconnect";
+  if (/FAILED|ERROR/.test(s)) return "Needs attention";
+  if (/PENDING|INITIATED/.test(s)) return "Connecting…";
+  return "Connected";
+}
+
+/** Soften provider/API errors before showing them. */
+function friendlyError(msg: string): string {
+  const m = String(msg || "");
+  if (/COMPOSIO|API_KEY|api key|not configured/i.test(m)) {
+    return "App connections aren’t available right now. Please try again later.";
+  }
+  if (/limit|slot|3 of 3|already have/i.test(m)) {
+    return "You’ve used all 3 connection slots. Disconnect an app to free one.";
+  }
+  if (/unauthorized|401|403|auth/i.test(m)) {
+    return "Sign in again, then try connecting the app.";
+  }
+  // Strip obvious technical tokens
+  return m
+    .replace(/\bComposio\b/gi, "")
+    .replace(/\bOAuth\b/gi, "")
+    .replace(/\bAPI[_ ]?key\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim() || "Something went wrong. Please try again.";
+}
+
 export default function ConnectionsPage() {
   const router = useRouter();
   const [userId, setUserId] = useState("");
@@ -50,7 +110,7 @@ export default function ConnectionsPage() {
       setAccounts(Array.isArray(data.accounts) ? data.accounts : []);
       setUsed(typeof data.used === "number" ? data.used : 0);
       if (data.error && data.configured === false) {
-        setError(String(data.error));
+        setError(friendlyError(String(data.error)));
       }
     } catch {
       setAccounts([]);
@@ -68,7 +128,7 @@ export default function ConnectionsPage() {
       const data = await res.json().catch(() => ({}));
       if (!data.ok) {
         setConfigured(false);
-        setError(data.error || "Could not load integrations.");
+        setError(friendlyError(data.error || "Could not load apps."));
         setToolkits([]);
       } else {
         setToolkits(Array.isArray(data.toolkits) ? data.toolkits : []);
@@ -76,7 +136,7 @@ export default function ConnectionsPage() {
       }
     } catch {
       setToolkits([]);
-      setError("Could not load integrations.");
+      setError("Could not load apps. Please try again.");
     }
     setLoadingCat(false);
   }, []);
@@ -110,7 +170,7 @@ export default function ConnectionsPage() {
     if (!userId || connecting) return;
     if (used >= MAX_COMPOSIO_CONNECTIONS) {
       setBanner(
-        `You already use ${used} of ${MAX_COMPOSIO_CONNECTIONS} connection slots. Disconnect one to free a slot.`
+        "You’ve used all 3 connection slots. Disconnect an app to free one."
       );
       return;
     }
@@ -125,7 +185,7 @@ export default function ConnectionsPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!data.ok) {
-        setError(data.error || "Could not start connection.");
+        setError(friendlyError(data.error || "Could not start connection."));
         setConnecting(null);
         return;
       }
@@ -133,10 +193,12 @@ export default function ConnectionsPage() {
         window.location.href = data.redirectUrl;
         return;
       }
-      setBanner("Connection started. Finish authentication in the opened window, then refresh.");
+      setBanner(
+        "Almost done — finish signing in with the app in the window that opened, then come back here."
+      );
       await refreshAccounts(userId);
     } catch {
-      setError("Could not start connection.");
+      setError("Could not start connection. Please try again.");
     }
     setConnecting(null);
   };
@@ -153,13 +215,13 @@ export default function ConnectionsPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!data.ok) {
-        setError(data.error || "Could not disconnect.");
+        setError(friendlyError(data.error || "Could not disconnect."));
       } else {
         setBanner("Disconnected. That slot is free again.");
         await refreshAccounts(userId);
       }
     } catch {
-      setError("Could not disconnect.");
+      setError("Could not disconnect. Please try again.");
     }
     setDisconnecting(null);
   };
@@ -180,7 +242,7 @@ export default function ConnectionsPage() {
         <PageHeader
           page="connections"
           title="Connections"
-          subtitle="Connect apps through Composio. Your AI employees use only accounts you authorize — up to 3 connected accounts."
+          subtitle="Link the apps your AI employees may use. You can connect up to 3 accounts."
         />
 
         <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -193,7 +255,7 @@ export default function ConnectionsPage() {
             </span>
           </div>
           <p className="mt-1 text-xs text-zinc-500">
-            Each connected app account uses one slot. Disconnecting frees a slot. The limit is 3 for every plan.
+            Each connected app account uses one slot. Disconnecting frees a slot.
           </p>
         </div>
 
@@ -205,11 +267,6 @@ export default function ConnectionsPage() {
         {error && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
             {error}
-            {!configured && (
-              <span className="mt-1 block text-xs">
-                Operators: set COMPOSIO_API_KEY in the server environment to enable the marketplace.
-              </span>
-            )}
           </div>
         )}
 
@@ -221,7 +278,7 @@ export default function ConnectionsPage() {
             <p className="text-sm text-zinc-500">Loading…</p>
           ) : accounts.length === 0 ? (
             <p className="text-sm text-zinc-500">
-              None yet. Search the catalogue below and connect an app.
+              None yet. Search below and connect an app.
             </p>
           ) : (
             <ul className="space-y-2">
@@ -231,10 +288,12 @@ export default function ConnectionsPage() {
                   className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium capitalize text-zinc-900 dark:text-zinc-50">
-                      {a.toolkit}
+                    <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                      {friendlyAppName(a.toolkit)}
                     </p>
-                    <p className="text-xs text-zinc-500">{a.status}</p>
+                    <p className="text-xs text-zinc-500">
+                      {friendlyStatus(a.status, a.isDisabled)}
+                    </p>
                   </div>
                   <button
                     type="button"
@@ -253,7 +312,7 @@ export default function ConnectionsPage() {
         <section className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              App marketplace
+              Available apps
             </h2>
             <input
               value={q}
@@ -264,16 +323,18 @@ export default function ConnectionsPage() {
           </div>
 
           {loadingCat ? (
-            <p className="text-sm text-zinc-500">Loading catalogue…</p>
+            <p className="text-sm text-zinc-500">Loading apps…</p>
           ) : toolkits.length === 0 ? (
             <p className="text-sm text-zinc-500">
-              No integrations matched. Try another search
-              {!configured ? " or configure COMPOSIO_API_KEY." : "."}
+              {!configured
+                ? "Apps aren’t available right now. Please try again later."
+                : "No apps matched. Try another search."}
             </p>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {toolkits.map((t) => {
                 const connected = connectedSlugs.has(t.slug);
+                const label = t.name || friendlyAppName(t.slug);
                 return (
                   <div
                     key={t.slug}
@@ -294,24 +355,20 @@ export default function ConnectionsPage() {
                           }}
                         />
                       ) : (
-                        <span className="text-xs font-semibold uppercase text-zinc-500">
-                          {t.slug.slice(0, 2)}
+                        <span className="text-xs font-semibold text-zinc-500">
+                          {label.slice(0, 2)}
                         </span>
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
-                            {t.name}
-                          </p>
-                          {t.description && (
-                            <p className="mt-0.5 line-clamp-2 text-xs text-zinc-500">
-                              {t.description}
-                            </p>
-                          )}
-                        </div>
-                      </div>
+                      <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                        {label}
+                      </p>
+                      {t.description && (
+                        <p className="mt-0.5 line-clamp-2 text-xs text-zinc-500">
+                          {t.description}
+                        </p>
+                      )}
                       <div className="mt-2">
                         {connected ? (
                           <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
