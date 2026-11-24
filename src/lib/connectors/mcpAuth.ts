@@ -1,5 +1,5 @@
 /**
- * Custom MCP connection storage + execute helpers.
+ * Custom tools connection storage + execute helpers.
  */
 
 import {
@@ -20,7 +20,6 @@ export async function resolveMcpConnection(
 ): Promise<{ endpoint: string; authHeader?: string; meta: StoredConnection } | null> {
   const conn = await loadConnection(userId, "mcp");
   if (!conn?.accessToken) return null;
-  // accessToken stores the endpoint URL; refreshToken optional auth header value
   return {
     endpoint: conn.accessToken,
     authHeader: conn.refreshToken,
@@ -40,13 +39,13 @@ export async function saveMcpConnection(params: {
       connectorId: "mcp",
       accessToken: params.endpoint,
       refreshToken: params.authHeader,
-      workspaceName: params.workspaceName || "MCP",
+      workspaceName: params.workspaceName || "Custom tools",
       connectedAt: new Date().toISOString(),
       lastVerifiedAt: new Date().toISOString(),
     });
     return { ok: true };
   } catch {
-    return { ok: false, message: "Could not save your MCP connection." };
+    return { ok: false, message: "Could not save your custom tools connection." };
   }
 }
 
@@ -65,7 +64,7 @@ export async function setApprovedTools(
   tools: string[]
 ): Promise<{ ok: boolean; message?: string }> {
   const conn = await loadConnection(userId, "mcp");
-  if (!conn) return { ok: false, message: "Connect an MCP server first." };
+  if (!conn) return { ok: false, message: "Connect custom tools first." };
   try {
     await saveConnection({
       ...conn,
@@ -78,6 +77,14 @@ export async function setApprovedTools(
   }
 }
 
+/** Alias used by the approve API route. */
+export async function approveMcpTools(
+  userId: string,
+  tools: string[]
+): Promise<{ ok: boolean; message?: string }> {
+  return setApprovedTools(userId, tools);
+}
+
 export async function executeApprovedMcpTool(params: {
   userId: string;
   toolName: string;
@@ -85,7 +92,7 @@ export async function executeApprovedMcpTool(params: {
 }): Promise<{ ok: boolean; message: string; data?: unknown }> {
   const resolved = await resolveMcpConnection(params.userId);
   if (!resolved) {
-    return { ok: false, message: "Connect an MCP server first." };
+    return { ok: false, message: "Connect custom tools first." };
   }
   const approved = parseApprovedTools(resolved.meta);
   if (!approved.includes(params.toolName)) {
@@ -94,7 +101,6 @@ export async function executeApprovedMcpTool(params: {
       message: "This tool is not approved for your AI employees yet.",
     };
   }
-  // Actual MCP JSON-RPC is handled in API routes; this is a server-side fallback.
   return {
     ok: false,
     message: "Run this tool from the browser while signed in.",
