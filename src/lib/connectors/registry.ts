@@ -393,7 +393,7 @@ export function statusBadgeClass(status: string): string {
   return "rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300";
 }
 
-export function statusLabel(status:: string): string {
+export function statusLabel(status: string): string {
   const s = String(status || "").toLowerCase();
   if (s === "connected") return "Connected";
   if (s === "unavailable") return "Unavailable";
