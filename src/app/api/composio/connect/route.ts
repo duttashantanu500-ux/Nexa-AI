@@ -9,18 +9,13 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/**
- * POST /api/composio/connect
- * body: { userId, toolkit }
- * Starts Composio authorize / Connect Link. Enforces max 3 accounts.
- */
+/** POST — start app connection. Enforces max 3 accounts. */
 export async function POST(req: NextRequest) {
   if (!composioConfigured()) {
     return NextResponse.json(
       {
         ok: false,
-        error:
-          "Composio is not configured. Set COMPOSIO_API_KEY on the server.",
+        error: "App connections aren’t available right now. Please try again later.",
       },
       { status: 503 }
     );
@@ -41,7 +36,7 @@ export async function POST(req: NextRequest) {
     }
     if (!toolkit) {
       return NextResponse.json(
-        { ok: false, error: "Choose an integration to connect." },
+        { ok: false, error: "Choose an app to connect." },
         { status: 400 }
       );
     }
@@ -51,7 +46,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           ok: false,
-          error: gate.message,
+          error:
+            "You’ve used all 3 connection slots. Disconnect an app to free one.",
           used: gate.used,
           limit: 3,
         },
@@ -60,7 +56,6 @@ export async function POST(req: NextRequest) {
     }
 
     const composio = getComposio();
-    // Preferred: toolkit.authorize creates managed auth + connection request
     const connectionRequest = await composio.toolkits.authorize(userId, toolkit);
 
     const redirectUrl =
@@ -79,11 +74,11 @@ export async function POST(req: NextRequest) {
       used: gate.used,
       remaining: 3 - gate.used,
     });
-  } catch (e: any) {
+  } catch {
     return NextResponse.json(
       {
         ok: false,
-        error: e?.message || "Could not start connection.",
+        error: "Could not start connection. Please try again.",
       },
       { status: 500 }
     );
