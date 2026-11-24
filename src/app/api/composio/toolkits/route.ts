@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { composioConfigured } from "@/lib/composio/client";
+import { composioConfigured, getComposio } from "@/lib/composio/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +12,6 @@ type ToolkitRow = {
   categories: string[];
 };
 
-/** Short in-memory cache so Connections stays fast. */
 let cache: { at: number; items: ToolkitRow[] } | null = null;
 const CACHE_MS = 5 * 60 * 1000;
 
@@ -73,12 +72,24 @@ function nextCursor(raw: any): string | null {
   return c ? String(c) : null;
 }
 
-async function fetchPage(
+function dedupeMap(items: any[]): ToolkitRow[] {
+  const out: ToolkitRow[] = [];
+  const seen = new Set<string>();
+  for (const raw of items) {
+    const row = mapItem(raw);
+    if (!row || seen.has(row.slug)) continue;
+    seen.add(row.slug);
+    out.push(row);
+  }
+  return out;
+}
+
+async function fetchPageRest(
   key: string,
   limit: number,
   cursor?: string | null,
   search?: string
-): Promise<{ items: any[]; cursor: string | null; ok: boolean }> {
+): Promise<{ items: any[]; cursor: string | null; status?: number }> {
   const bases = [
     "https://backend.composio.dev/api/v3.1/toolkits",
     "https://backend.composio.dev/api/v3/toolkits",
@@ -89,7 +100,7 @@ async function fetchPage(
     url.searchParams.set("limit", String(Math.min(1000, Math.max(1, limit))));
     url.searchParams.set("sort_by", "usage");
     if (cursor) url.searchParams.set("cursor", cursor);
-    if (search) url.searchParams.set("search", search);
+    if (search) url.searchParams.set("search", search search);
 
     try {
       const res = await fetch(url.toString(), {
@@ -99,52 +110,84 @@ async function fetchPage(
         },
         cache: "no-store",
       });
-      if (!res.ok) continue;
+      if (!res.ok) {
+        // try next base
+        continue;
+      }
       const raw = await res.json().catch(() => null);
       return {
         items: extractItems(raw),
         cursor: nextCursor(raw),
-        ok: true,
+        status: res.status,
       };
     } catch {
-      /* try next base */
+      /* next */
     }
   }
 
-  return { items: [], cursor: null, ok: false };
+  return { items: [], cursor: null };
 }
 
-/** Load full catalogue with pagination (Composio allows up to 1000 per page). */
+async function loadViaSdk(): Promise<ToolkitRow[]> {
+  try {
+    const composio = getComposio();
+    const tk = composio.toolkits as any;
+    const all: any[] = [];
+    let cursor: string | undefined;
+
+    for (let i = 0; i < 6; i++) {
+      let page: any = null;
+      if (typeof tk.list === "function") {
+        page = await tk.list({
+          limit: 1000,
+          cursor,
+          sortBy: "usage",
+          sort_by: "usage",
+        });
+      } else if (typeof tk.get === "function") {
+        page = await tk.get({ limit: 1000, cursor });
+      }
+      const items = extractItems(page);
+      all.push(...items);
+      const next = nextCursor(page);
+      if (!next || items.length === 0) break;
+      cursor = next;
+    }
+    return dedupeMap(all);
+  } catch {
+    return [];
+  }
+}
+
+async function loadViaRest(key: string): Promise<ToolkitRow[]> {
+  const all: any[] = [];
+  let cursor: string | null = null;
+
+  for (let i = 0; i < 6; i++) {
+    const page = await fetchPageRest(key, 1000, cursor);
+    all.push(...page.items);
+    if (!page.cursor || page.items.length === 0) break;
+    cursor = page.cursor;
+  }
+  return dedupeMap(all);
+}
+
 async function loadAllToolkits(key: string): Promise<ToolkitRow[]> {
   if (cache && Date.now() - cache.at < CACHE_MS) {
     return cache.items;
   }
 
-  const all: ToolkitRow[] = [];
-  const seen = new Set<string>();
-  let cursor: string | null = null;
-  let pages = 0;
-
-  while (pages < 6) {
-    pages += 1;
-    const page = await fetchPage(key, 1000, cursor);
-    if (!page.ok && pages === 1) break;
-
-    for (const raw of page.items) {
-      const row = mapItem(raw);
-      if (!row || seen.has(row.slug)) continue;
-      seen.add(row.slug);
-      all.push(row);
-    }
-
-    if (!page.cursor || page.items.length === 0) break;
-    cursor = page.cursor;
+  // Prefer SDK (v0.31+) then REST pagination
+  let items = await loadViaSdk();
+  if (items.length < 50) {
+    const rest = await loadViaRest(key);
+    if (rest.length > items.length) items = rest;
   }
 
-  if (all.length > 0) {
-    cache = { at: Date.now(), items: all };
+  if (items.length > 0) {
+    cache = { at: Date.now(), items };
   }
-  return all;
+  return items;
 }
 
 /** GET — full app catalogue for Connections. */
@@ -182,19 +225,16 @@ export async function GET(req: NextRequest) {
 
     let toolkits = await loadAllToolkits(key);
 
-    // Search on Composio if local catalogue is empty or user is searching a sparse set
-    if (q && toolkits.length < 50) {
-      const page = await fetchPage(key, 1000, null, q);
-      const seen = new Set(toolkits.map((t) => t.slug));
-      for (const raw of page.items) {
-        const row = mapItem(raw);
-        if (!row || seen.has(row.slug)) continue;
-        seen.add(row.slug);
-        toolkits.push(row);
-      }
-    }
-
+    // Server-side search pass if needed
     if (q) {
+      const remote = await fetchPageRest(key, 1000, null, q);
+      const seen = new Set(toolkits.map((t) => t.slug));
+      for (const row of dedupeMap(remote.items)) {
+        if (!seen.has(row.slug)) {
+          seen.add(row.slug);
+          toolkits.push(row);
+        }
+      }
       toolkits = toolkits.filter(
         (t) =>
           t.slug.includes(q) ||
