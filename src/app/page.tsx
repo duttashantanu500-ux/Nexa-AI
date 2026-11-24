@@ -8,48 +8,89 @@ import { NexaLogo } from "@/components/NexaLogo";
 import { RobotHeroScene } from "@/components/robots/RobotHeroScene";
 import { RobotAvatar } from "@/components/robots/RobotAvatar";
 
-const SHOWCASE_APPS = [
-  "Instagram",
-  "Twitter",
-  "GitHub",
-  "Gmail",
-  "Outlook",
-  "LinkedIn",
-  "Slack",
-  "Notion",
-  "Discord",
-  "Shopify",
-] as const;
+/** Official brand marks (Simple Icons CDN) + display names */
+const SHOWCASE_APPS: { name: string; logo: string }[] = [
+  {
+    name: "Instagram",
+    logo: "https://cdn.simpleicons.org/instagram/E4405F",
+  },
+  {
+    name: "Twitter",
+    logo: "https://cdn.simpleicons.org/x/000000",
+  },
+  {
+    name: "GitHub",
+    logo: "https://cdn.simpleicons.org/github/181717",
+  },
+  {
+    name: "Gmail",
+    logo: "https://cdn.simpleicons.org/gmail/EA4335",
+  },
+  {
+    name: "Outlook",
+    logo: "https://cdn.simpleicons.org/microsoftoutlook/0078D4",
+  },
+  {
+    name: "LinkedIn",
+    logo: "https://cdn.simpleicons.org/linkedin/0A66C2",
+  },
+  {
+    name: "Slack",
+    logo: "https://cdn.simpleicons.org/slack/4A154B",
+  },
+  {
+    name: "Notion",
+    logo: "https://cdn.simpleicons.org/notion/000000",
+  },
+  {
+    name: "Discord",
+    logo: "https://cdn.simpleicons.org/discord/5865F2",
+  },
+  {
+    name: "Shopify",
+    logo: "https://cdn.simpleicons.org/shopify/7AB55C",
+  },
+];
 
-function AppName3D({ name, index }: { name: string; index: number }) {
-  const hues = [
-    "from-pink-500 to-rose-600",
-    "from-sky-400 to-blue-600",
-    "from-zinc-700 to-zinc-900",
-    "from-red-500 to-rose-600",
-    "from-blue-500 to-indigo-700",
-    "from-sky-600 to-blue-800",
-    "from-violet-500 to-purple-700",
-    "from-zinc-600 to-zinc-900",
-    "from-indigo-500 to-violet-700",
-    "from-emerald-500 to-teal-700",
-  ];
-  const gradient = hues[index % hues.length];
-
+function AppLogoCard({ name, logo }: { name: string; logo: string }) {
   return (
     <div
-      className="group relative flex items-center justify-center rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 shadow-sm transition-transform duration-300 hover:-translate-y-1 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
-      style={{ perspective: "800px" }}
+      className="group relative flex flex-col items-center justify-center gap-3 rounded-2xl border border-zinc-200/80 bg-white px-4 py-6 shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
+      style={{ perspective: "900px" }}
     >
-      <span
-        className={`select-none bg-gradient-to-br ${gradient} bg-clip-text text-center text-lg font-extrabold tracking-tight text-transparent sm:text-xl md:text-2xl`}
+      <div
+        className="flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-50 shadow-inner ring-1 ring-zinc-100 transition-transform duration-300 group-hover:scale-110 dark:bg-zinc-800 dark:ring-zinc-700 sm:h-16 sm:w-16"
         style={{
-          transform: "rotateX(18deg) rotateY(-6deg) translateZ(12px)",
-          textShadow:
-            "0 1px 0 rgba(0,0,0,0.06), 0 2px 0 rgba(0,0,0,0.05), 0 3px 0 rgba(0,0,0,0.04), 0 6px 16px rgba(0,0,0,0.12)",
-          WebkitTextStroke: "0.4px rgba(0,0,0,0.04)",
+          transform: "rotateX(12deg) rotateY(-8deg) translateZ(16px)",
+          boxShadow:
+            "0 10px 24px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04)",
         }}
       >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={logo}
+          alt={`${name} logo`}
+          width={36}
+          height={36}
+          className="h-8 w-8 object-contain sm:h-9 sm:w-9"
+          loading="lazy"
+          decoding="async"
+          onError={(e) => {
+            const el = e.target as HTMLImageElement;
+            el.style.display = "none";
+            const parent = el.parentElement;
+            if (parent && !parent.querySelector("[data-fallback]")) {
+              const span = document.createElement("span");
+              span.dataset.fallback = "1";
+              span.className =
+                "text-sm font-bold uppercase tracking-wide text-zinc-500";
+              span.textContent = name.slice(0, 2);
+              parent.appendChild(span);
+            }
+          }}
+        />
+      </div>
+      <span className="text-center text-sm font-semibold tracking-tight text-zinc-800 dark:text-zinc-100 sm:text-base">
         {name}
       </span>
     </div>
@@ -125,7 +166,6 @@ export default function LandingPage() {
           <RobotHeroScene />
         </section>
 
-        {/* Over 1k+ connections — 3D typography showcase */}
         <section
           className="mt-20 space-y-8"
           aria-labelledby="connections-showcase"
@@ -155,8 +195,8 @@ export default function LandingPage() {
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5 md:gap-4">
-            {SHOWCASE_APPS.map((name, i) => (
-              <AppName3D key={name} name={name} index={i} />
+            {SHOWCASE_APPS.map((app) => (
+              <AppLogoCard key={app.name} name={app.name} logo={app.logo} />
             ))}
           </div>
 
