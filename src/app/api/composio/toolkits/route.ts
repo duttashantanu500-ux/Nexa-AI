@@ -13,7 +13,7 @@ type ToolkitRow = {
 };
 
 let cache: { at: number; items: ToolkitRow[] } | null = null;
-const CACHE_MS = 5 * 60 * 1000;
+const CACHE_MS = 10 * 60 * 1000;
 
 function mapItem(t: any): ToolkitRow | null {
   const slug = String(
@@ -57,6 +57,8 @@ function extractItems(raw: any): any[] {
     if (Array.isArray(raw[k])) return raw[k];
   }
   if (raw.data && Array.isArray(raw.data.items)) return raw.data.items;
+  if (raw.toolkits && Array.isArray(raw.toolkits.items))
+    return raw.toolkits.items;
   return [];
 }
 
@@ -68,6 +70,7 @@ function nextCursor(raw: any): string | null {
     raw.cursor?.next ||
     raw.pagination?.next_cursor ||
     raw.pagination?.nextCursor ||
+    raw.next_page_cursor ||
     null;
   return c ? String(c) : null;
 }
@@ -89,7 +92,7 @@ async function fetchPageRest(
   limit: number,
   cursor?: string | null,
   search?: string
-): Promise<{ items: any[]; cursor: string | null }> {
+): Promise<{ items: any[]; cursor: string | null; httpStatus: number }> {
   const bases = [
     "https://backend.composio.dev/api/v3.1/toolkits",
     "https://backend.composio.dev/api/v3/toolkits",
@@ -98,7 +101,7 @@ async function fetchPageRest(
   for (const base of bases) {
     const url = new URL(base);
     url.searchParams.set("limit", String(Math.min(1000, Math.max(1, limit))));
-    url.searchParams.set("sort_by", "usage");
+    // sort_by is optional — some keys reject unknown enums
     if (cursor) url.searchParams.set("cursor", cursor);
     if (search) url.searchParams.set("search", search);
 
@@ -110,38 +113,43 @@ async function fetchPageRest(
         },
         cache: "no-store",
       });
-      if (!res.ok) continue;
+      if (!res.ok) {
+        // try next base
+        if (res.status === 401 || res.status === 403) {
+          return { items: [], cursor: null, httpStatus: res.status };
+        }
+        continue;
+      }
       const raw = await res.json().catch(() => null);
       return {
         items: extractItems(raw),
         cursor: nextCursor(raw),
+        httpStatus: res.status,
       };
     } catch {
       /* next */
     }
   }
 
-  return { items: [], cursor: null };
+  return { items: [], cursor: null, httpStatus: 0 };
 }
 
 async function loadViaSdk(): Promise<ToolkitRow[]> {
   try {
-    const composio = getComposio();
-    const tk = composio.toolkits as any;
+    const composio = getComposio() as any;
+    const tk = composio.toolkits;
+    if (!tk) return [];
     const all: any[] = [];
     let cursor: string | undefined;
 
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 8; i++) {
       let page: any = null;
       if (typeof tk.list === "function") {
-        page = await tk.list({
-          limit: 1000,
-          cursor,
-          sortBy: "usage",
-          sort_by: "usage",
-        });
+        page = await tk.list({ limit: 1000, cursor });
       } else if (typeof tk.get === "function") {
         page = await tk.get({ limit: 1000, cursor });
+      } else {
+        break;
       }
       const items = extractItems(page);
       all.push(...items);
@@ -159,10 +167,18 @@ async function loadViaRest(key: string): Promise<ToolkitRow[]> {
   const all: any[] = [];
   let cursor: string | null = null;
 
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 8; i++) {
     const page = await fetchPageRest(key, 1000, cursor);
+    if (page.httpStatus === 401 || page.httpStatus === 403) break;
     all.push(...page.items);
-    if (!page.cursor || page.items.length === 0) break;
+    // If first page returned a full batch without cursor, assume single page
+    if (!page.cursor) {
+      if (page.items.length >= 1000) {
+        // try offset-style page bump using base64 cursor page/limit if needed
+        break;
+      }
+      break;
+    }
     cursor = page.cursor;
   }
   return dedupeMap(all);
@@ -174,7 +190,7 @@ async function loadAllToolkits(key: string): Promise<ToolkitRow[]> {
   }
 
   let items = await loadViaSdk();
-  if (items.length < 50) {
+  if (items.length < 100) {
     const rest = await loadViaRest(key);
     if (rest.length > items.length) items = rest;
   }
@@ -191,7 +207,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: "App connections aren’t available right now. Please try again later.",
+        error:
+          "App connections aren’t available right now. Please try again later.",
         toolkits: [],
       },
       { status: 503 }
@@ -203,7 +220,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: "App connections aren’t available right now. Please try again later.",
+        error:
+          "App connections aren’t available right now. Please try again later.",
         toolkits: [],
       },
       { status: 503 }
@@ -212,7 +230,10 @@ export async function GET(req: NextRequest) {
 
   try {
     const q = (req.nextUrl.searchParams.get("q") || "").trim().toLowerCase();
-    const limitParam = parseInt(req.nextUrl.searchParams.get("limit") || "2000", 10);
+    const limitParam = parseInt(
+      req.nextUrl.searchParams.get("limit") || "2000",
+      10
+    );
     const limit = Math.min(
       2500,
       Math.max(1, Number.isFinite(limitParam) ? limitParam : 2000)
@@ -246,7 +267,7 @@ export async function GET(req: NextRequest) {
     });
   } catch {
     return NextResponse.json(
-           {
+      {
         ok: false,
         error: "Could not load apps. Please try again.",
         toolkits: [],
