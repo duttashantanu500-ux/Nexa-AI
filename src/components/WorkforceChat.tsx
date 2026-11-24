@@ -7,7 +7,8 @@ import {
   workforceEmptyState,
   type WorkforceContext,
 } from "@/lib/workforceIntent";
-import { loadOperatorState } from "@/lib/operatorStore\nimport {
+import { loadOperatorState } from "@/lib/operatorStore";
+import {
   executeComposioTool,
   listComposioConnections,
 } from "@/lib/composio/chatTools";
@@ -19,7 +20,7 @@ function guessToolSlug(toolkit: string, text: string): string | null {
   const t = text.toLowerCase();
   const tk = toolkit.toLowerCase();
   if (tk === "gmail") {
-    if (/send|compose/.test(t)) return null; // needs more fields — don't fake
+    if (/send|compose/.test(t)) return null;
     return "GMAIL_FETCH_EMAILS";
   }
   if (tk === "slack") {
@@ -95,7 +96,7 @@ export function WorkforceChat({
       const s = loadOperatorState();
       const userId = s.user?.id || "";
       if (!userId) {
-        setLines((prev) => [
+        setLines((prev RegExp: prev) => [
           ...prev,
           {
             role: "assistant",
