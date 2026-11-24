@@ -4,17 +4,13 @@ import { composioConfigured, getComposio } from "@/lib/composio/client";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/**
- * GET /api/composio/toolkits?q=&cursor=&limit=
- * Returns Composio toolkit catalogue (server-side only).
- */
+/** GET — app catalogue for Connections (server-side only). */
 export async function GET(req: NextRequest) {
   if (!composioConfigured()) {
     return NextResponse.json(
       {
         ok: false,
-        error:
-          "Composio is not configured on this server. Set COMPOSIO_API_KEY to enable the marketplace.",
+        error: "App connections aren’t available right now. Please try again later.",
         toolkits: [],
       },
       { status: 503 }
@@ -30,7 +26,6 @@ export async function GET(req: NextRequest) {
     );
     const cursor = req.nextUrl.searchParams.get("cursor") || undefined;
 
-    // Prefer SDK list; fall back to empty on shape differences
     let raw: any = null;
     try {
       raw = await (composio.toolkits as any).get(
@@ -73,7 +68,6 @@ export async function GET(req: NextRequest) {
         logo,
         description,
         categories,
-        authSchemes: t.authSchemes || t.auth_schemes || [],
       };
     });
 
@@ -87,7 +81,6 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Client-side page slice when API returns full list
     const page = toolkits.slice(0, limit);
 
     return NextResponse.json({
@@ -96,11 +89,11 @@ export async function GET(req: NextRequest) {
       total: toolkits.length,
       nextCursor: raw?.nextCursor || raw?.next_cursor || null,
     });
-  } catch (e: any) {
+  } catch {
     return NextResponse.json(
       {
         ok: false,
-        error: e?.message || "Failed to load integrations catalogue",
+        error: "Could not load apps. Please try again.",
         toolkits: [],
       },
       { status: 500 }
