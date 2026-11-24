@@ -8,6 +8,54 @@ import { NexaLogo } from "@/components/NexaLogo";
 import { RobotHeroScene } from "@/components/robots/RobotHeroScene";
 import { RobotAvatar } from "@/components/robots/RobotAvatar";
 
+const SHOWCASE_APPS = [
+  "Instagram",
+  "Twitter",
+  "GitHub",
+  "Gmail",
+  "Outlook",
+  "LinkedIn",
+  "Slack",
+  "Notion",
+  "Discord",
+  "Shopify",
+] as const;
+
+function AppName3D({ name, index }: { name: string; index: number }) {
+  const hues = [
+    "from-pink-500 to-rose-600",
+    "from-sky-400 to-blue-600",
+    "from-zinc-700 to-zinc-900",
+    "from-red-500 to-rose-600",
+    "from-blue-500 to-indigo-700",
+    "from-sky-600 to-blue-800",
+    "from-violet-500 to-purple-700",
+    "from-zinc-600 to-zinc-900",
+    "from-indigo-500 to-violet-700",
+    "from-emerald-500 to-teal-700",
+  ];
+  const gradient = hues[index % hues.length];
+
+  return (
+    <div
+      className="group relative flex items-center justify-center rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 shadow-sm transition-transform duration-300 hover:-translate-y-1 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
+      style={{ perspective: "800px" }}
+    >
+      <span
+        className={`select-none bg-gradient-to-br ${gradient} bg-clip-text text-center text-lg font-extrabold tracking-tight text-transparent sm:text-xl md:text-2xl`}
+        style={{
+          transform: "rotateX(18deg) rotateY(-6deg) translateZ(12px)",
+          textShadow:
+            "0 1px 0 rgba(0,0,0,0.06), 0 2px 0 rgba(0,0,0,0.05), 0 3px 0 rgba(0,0,0,0.04), 0 6px 16px rgba(0,0,0,0.12)",
+          WebkitTextStroke: "0.4px rgba(0,0,0,0.04)",
+        }}
+      >
+        {name}
+      </span>
+    </div>
+  );
+}
+
 export default function LandingPage() {
   const router = useRouter();
 
@@ -55,9 +103,9 @@ export default function LandingPage() {
               Nexa — hire AI employees and build your AI team
             </h1>
             <p className="max-w-lg text-base text-zinc-600 dark:text-zinc-400 md:text-lg">
-              Nexa is an AI employee platform. Create AI agents that connect to
-              Notion, Slack, HubSpot, and Buffer — then assign real work with
-              approvals, schedules, and a shared Work Board.
+              Create AI employees that connect to the apps you already use —
+              then assign real work with approvals, schedules, and a shared Work
+              Board.
             </p>
             <div className="flex flex-wrap gap-3">
               <Link
@@ -77,6 +125,46 @@ export default function LandingPage() {
           <RobotHeroScene />
         </section>
 
+        {/* Over 1k+ connections — 3D typography showcase */}
+        <section
+          className="mt-20 space-y-8"
+          aria-labelledby="connections-showcase"
+        >
+          <div className="text-center">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">
+              App ecosystem
+            </p>
+            <h2
+              id="connections-showcase"
+              className="mt-2 text-3xl font-bold tracking-tight md:text-4xl lg:text-5xl"
+              style={{
+                textShadow:
+                  "0 2px 0 rgba(0,0,0,0.04), 0 8px 24px rgba(79,70,229,0.15)",
+              }}
+            >
+              <span className="bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent">
+                Over 1,000+
+              </span>{" "}
+              <span className="text-zinc-900 dark:text-zinc-50">connections</span>
+            </h2>
+            <p className="mx-auto mt-3 max-w-xl text-sm text-zinc-500 dark:text-zinc-400 md:text-base">
+              Link the tools your team already lives in. Each account uses one
+              of three connection slots — your AI employees only use what you
+              authorize.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5 md:gap-4">
+            {SHOWCASE_APPS.map((name, i) => (
+              <AppName3D key={name} name={name} index={i} />
+            ))}
+          </div>
+
+          <p className="text-center text-xs text-zinc-400">
+            Instagram · Twitter · GitHub · Gmail · Outlook · and many more
+          </p>
+        </section>
+
         <section className="mt-20 space-y-6" aria-labelledby="how-nexa-works">
           <h2
             id="how-nexa-works"
@@ -89,17 +177,17 @@ export default function LandingPage() {
               {
                 avatar: "moss" as const,
                 title: "Connect your tools",
-                body: "Notion, Slack, Buffer, HubSpot, Vault, and more — your AI team works where you already do.",
+                body: "Gmail, Slack, Notion, GitHub, and 1,000+ more — your AI team works where you already do.",
               },
               {
                 avatar: "violet" as const,
                 title: "Build your AI team",
-                body: "Describe the role. Nexa turns it into steps your AI employees and AI agents can run, with approvals when needed.",
+                body: "Describe the role. Nexa turns it into steps your AI employees can run, with approvals when needed.",
               },
               {
                 avatar: "ember" as const,
                 title: "Run and schedule",
-                body: "Run once or on a schedule. Track every AI agent on the Work Board — history, outputs, and what needs you.",
+                body: "Run once or on a schedule. Track every run on the Work Board — history, outputs, and what needs you.",
               },
             ].map((card) => (
               <div key={card.title} className="nexa-card p-5">
@@ -131,27 +219,14 @@ export default function LandingPage() {
               <strong className="font-medium text-zinc-800 dark:text-zinc-200">
                 AI employees
               </strong>
-              . Each AI employee is an AI agent you configure once — role,
-              tools, and workflow — then reuse for ongoing work instead of
-              starting from scratch every time.
+              . Each AI employee is configured once — role, tools, and workflow
+              — then reused for ongoing work instead of starting from scratch
+              every time.
             </p>
             <p>
-              Build an{" "}
-              <strong className="font-medium text-zinc-800 dark:text-zinc-200">
-                AI team
-              </strong>{" "}
-              for research, marketing, sales, or operations. Connect the tools
-              your company already uses. Nexa runs the steps, asks for approval
-              when something is sensitive, and keeps a clear work history.
-            </p>
-            <p>
-              Whether you search for an AI agent platform, AI team software, or
-              a place to hire AI employees, Nexa is built for founders and
-              operators who want real work done — not another chat demo.{" "}
-              <Link href="/blog" className="text-indigo-600 hover:underline">
-                Read the blog
-              </Link>
-              .
+              Hire for research, marketing, sales, or operations. Connect the
+              apps you use, assign real work, and track results on the Work
+              Board.
             </p>
           </div>
         </section>
@@ -193,7 +268,7 @@ export default function LandingPage() {
             Start your AI team free
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-zinc-500">
-            Create your Nexa account, connect a tool, and hire your first AI
+            Create your Nexa account, connect an app, and hire your first AI
             employee in minutes.
           </p>
           <Link
@@ -219,7 +294,6 @@ export default function LandingPage() {
             <Link href="/login">Sign in</Link>
             <Link href="/signup">Sign up</Link>
           </nav>
-          <p>© {new Date().getFullYear()} Nexa</p>
         </div>
       </footer>
     </div>
