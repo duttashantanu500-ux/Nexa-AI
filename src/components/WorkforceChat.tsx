@@ -15,7 +15,6 @@ import {
 
 type Line = { role: "user" | "assistant"; content: string };
 
-/** Best-effort tool slug guesses for common chat requests */
 function guessToolSlug(toolkit: string, text: string): string | null {
   const t = text.toLowerCase();
   const tk = toolkit.toLowerCase();
@@ -96,12 +95,9 @@ export function WorkforceChat({
       const s = loadOperatorState();
       const userId = s.user?.id || "";
       if (!userId) {
-        setLines((prev RegExp: prev) => [
+        setLines((prev) => [
           ...prev,
-          {
-            role: "assistant",
-            content: "Sign in to use connected apps.",
-          },
+          { role: "assistant", content: "Sign in to use connected apps." },
         ]);
         return;
       }
@@ -138,7 +134,7 @@ export function WorkforceChat({
               role: "assistant",
               content: `${toolkit} isn’t connected. You have: ${accounts
                 .map((a) => a.toolkit)
-                .join(", ")}. Open Connections to link ${toolkit} (if you have a free slot — ${listed.used}/${listed.limit} used).`,
+                .join(", ")}. Open Connections to link ${toolkit} (slot ${listed.used}/${listed.limit}).`,
             },
           ]);
           window.setTimeout(() => router.push("/connections"), 500);
