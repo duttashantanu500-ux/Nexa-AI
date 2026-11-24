@@ -82,11 +82,7 @@ export type ConnectorDefinition = {
   actions: ConnectorAction[];
 };
 
-/**
- * Residual action templates for workflow steps.
- * Third-party execution goes through Composio.
- * HubSpot and Vapi native connectors removed — connect HubSpot via Composio marketplace if needed.
- */
+/** Residual action templates for workflow steps. Third-party apps connect via Connections. */
 export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
   {
     id: "notion",
@@ -97,7 +93,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     description: "Notes & docs",
     shortDescription: "Notes & docs",
     detailDescription:
-      "Connect Notion via the Connections marketplace (Composio) so AI employees can search and write pages.",
+      "Connect Notion under Connections so your AI employees can search and write pages.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
     costNote: "Uses your Notion account.",
@@ -157,7 +153,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     description: "Team messages",
     shortDescription: "Team messages",
     detailDescription:
-      "Connect Slack via the Connections marketplace (Composio) so AI employees can list channels and send messages.",
+      "Connect Slack under Connections so your AI employees can list channels and send messages.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
     costNote: "Uses your Slack workspace.",
@@ -202,7 +198,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     description: "Social scheduling",
     shortDescription: "Social scheduling",
     detailDescription:
-      "Connect Buffer via the Connections marketplace (Composio). AI employees can view channels and create or schedule posts.",
+      "Connect Buffer under Connections so AI employees can view channels and create or schedule posts.",
     connectionMethod: "oauth",
     costLabel: "user_paid",
     costNote: "Uses your Buffer account.",
@@ -279,8 +275,7 @@ export const CONNECTOR_REGISTRY: ConnectorDefinition[] = [
     category: "Design & Media",
     description: "AI images",
     shortDescription: "AI images",
-    detailDescription:
-      "Connect image tools via the Connections marketplace when available.",
+    detailDescription: "Connect image tools under Connections when available.",
     connectionMethod: "api_key",
     costLabel: "user_paid",
     costNote: "Uses your image account.",
