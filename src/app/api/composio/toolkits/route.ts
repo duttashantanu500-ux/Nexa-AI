@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { composioConfigured, getComposio } from "@/lib/composio/client";
+import { composioConfigured } from "@/lib/composio/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +12,10 @@ type ToolkitRow = {
   categories: string[];
 };
 
+/** Short in-memory cache so Connections stays fast. */
+let cache: { at: number; items: ToolkitRow[] } | null = null;
+const CACHE_MS = 5 * 60 * 1000;
+
 function mapItem(t: any): ToolkitRow | null {
   const slug = String(
     t.slug || t.key || t.appKey || t.toolkit_slug || t.appName || t.name || ""
@@ -20,7 +24,11 @@ function mapItem(t: any): ToolkitRow | null {
     .toLowerCase()
     .replace(/\s+/g, "");
   if (!slug) return null;
-  const name = String(t.name || t.displayName || t.display_name || t.appName || slug);
+
+  const name = String(
+    t.name || t.displayName || t.display_name || t.appName || slug
+  );
+
   const logo = String(
     t.logo ||
       t.meta?.logo ||
@@ -29,14 +37,17 @@ function mapItem(t: any): ToolkitRow | null {
       t.image ||
       `https://logos.composio.dev/api/${encodeURIComponent(slug)}`
   );
+
   const description = String(
     t.description || t.meta?.description || t.shortDescription || ""
   );
+
   const categories = Array.isArray(t.categories)
-    ? t.categories.map((c: any) => String(c.name || c))
+    ? t.categories.map((c: any) => String(c?.name || c)).filter(Boolean)
     : Array.isArray(t.meta?.categories)
-      ? t.meta.categories.map((c: any) => String(c.name || c))
+      ? t.meta.categories.map((c: any) => String(c?.name || c)).filter(Boolean)
       : [];
+
   return { slug, name, logo, description, categories };
 }
 
@@ -50,87 +61,93 @@ function extractItems(raw: any): any[] {
   return [];
 }
 
-async function fetchJson(url: string, key: string): Promise<any> {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "x-api-key": key,
-        Authorization: `Bearer ${key}`,
-        Accept: "application/json",
-      },
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    return await res.json().catch(() => null);
-  } catch {
-    return null;
-  }
+function nextCursor(raw: any): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const c =
+    raw.next_cursor ||
+    raw.nextCursor ||
+    raw.cursor?.next ||
+    raw.pagination?.next_cursor ||
+    raw.pagination?.nextCursor ||
+    null;
+  return c ? String(c) : null;
 }
 
-async function fetchViaRest(limit: number): Promise<any[]> {
-  const key = process.env.COMPOSIO_API_KEY?.trim();
-  if (!key) return [];
-
-  const urls = [
-    `https://backend.composio.dev/api/v3/toolkits?limit=${limit}`,
-    `https://backend.composio.dev/api/v2/apps?limit=${limit}`,
-    `https://api.composio.dev/api/v1/apps?limit=${limit}`,
-    `https://backend.composio.dev/api/v1/apps?limit=${limit}`,
+async function fetchPage(
+  key: string,
+  limit: number,
+  cursor?: string | null,
+  search?: string
+): Promise<{ items: any[]; cursor: string | null; ok: boolean }> {
+  const bases = [
+    "https://backend.composio.dev/api/v3.1/toolkits",
+    "https://backend.composio.dev/api/v3/toolkits",
   ];
 
-  for (const url of urls) {
-    const raw = await fetchJson(url, key);
-    const items = extractItems(raw);
-    if (items.length) return items;
-  }
-  return [];
-}
+  for (const base of bases) {
+    const url = new URL(base);
+    url.searchParams.set("limit", String(Math.min(1000, Math.max(1, limit))));
+    url.searchParams.set("sort_by", "usage");
+    if (cursor) url.searchParams.set("cursor", cursor);
+    if (search) url.searchParams.set("search", search);
 
-async function fetchViaSdk(limit: number): Promise<any[]> {
-  try {
-    const composio = getComposio();
-    const tk = composio.toolkits as any;
-    const tools = (composio as any).tools;
-
-    const attempts: Array<() => Promise<any>> = [
-      () => tk?.get?.({ limit }),
-      () => tk?.list?.({ limit }),
-      () => tools?.getToolkits?.({ limit }),
-      () => tools?.listToolkits?.({ limit }),
-    ];
-
-    for (const fn of attempts) {
-      try {
-        const raw = await fn();
-        const items = extractItems(raw);
-        if (items.length) return items;
-      } catch {
-        /* next */
-      }
+    try {
+      const res = await fetch(url.toString(), {
+        headers: {
+          "x-api-key": key,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      });
+      if (!res.ok) continue;
+      const raw = await res.json().catch(() => null);
+      return {
+        items: extractItems(raw),
+        cursor: nextCursor(raw),
+        ok: true,
+      };
+    } catch {
+      /* try next base */
     }
-  } catch {
-    /* */
   }
-  return [];
+
+  return { items: [], cursor: null, ok: false };
 }
 
-/** Popular apps shown when the remote catalogue is temporarily empty. */
-const FALLBACK_APPS: ToolkitRow[] = [
-  { slug: "gmail", name: "Gmail", logo: "https://logos.composio.dev/api/gmail", description: "Email", categories: ["Communication"] },
-  { slug: "outlook", name: "Outlook", logo: "https://logos.composio.dev/api/outlook", description: "Email & calendar", categories: ["Communication"] },
-  { slug: "github", name: "GitHub", logo: "https://logos.composio.dev/api/github", description: "Code & issues", categories: ["Developer Tools"] },
-  { slug: "instagram", name: "Instagram", logo: "https://logos.composio.dev/api/instagram", description: "Social", categories: ["Marketing"] },
-  { slug: "twitter", name: "Twitter", logo: "https://logos.composio.dev/api/twitter", description: "Social", categories: ["Marketing"] },
-  { slug: "slack", name: "Slack", logo: "https://logos.composio.dev/api/slack", description: "Team chat", categories: ["Communication"] },
-  { slug: "notion", name: "Notion", logo: "https://logos.composio.dev/api/notion", description: "Docs & notes", categories: ["Documents"] },
-  { slug: "linkedin", name: "LinkedIn", logo: "https://logos.composio.dev/api/linkedin", description: "Professional network", categories: ["Marketing"] },
-  { slug: "discord", name: "Discord", logo: "https://logos.composio.dev/api/discord", description: "Community chat", categories: ["Communication"] },
-  { slug: "shopify", name: "Shopify", logo: "https://logos.composio.dev/api/shopify", description: "Commerce", categories: ["Sales"] },
-  { slug: "googlecalendar", name: "Google Calendar", logo: "https://logos.composio.dev/api/googlecalendar", description: "Calendar", categories: ["Productivity"] },
-  { slug: "googledrive", name: "Google Drive", logo: "https://logos.composio.dev/api/googledrive", description: "Files", categories: ["Productivity"] },
-];
+/** Load full catalogue with pagination (Composio allows up to 1000 per page). */
+async function loadAllToolkits(key: string): Promise<ToolkitRow[]> {
+  if (cache && Date.now() - cache.at < CACHE_MS) {
+    return cache.items;
+  }
 
-/** GET — app catalogue for Connections (server-side only). */
+  const all: ToolkitRow[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+  let pages = 0;
+
+  while (pages < 6) {
+    pages += 1;
+    const page = await fetchPage(key, 1000, cursor);
+    if (!page.ok && pages === 1) break;
+
+    for (const raw of page.items) {
+      const row = mapItem(raw);
+      if (!row || seen.has(row.slug)) continue;
+      seen.add(row.slug);
+      all.push(row);
+    }
+
+    if (!page.cursor || page.items.length === 0) break;
+    cursor = page.cursor;
+  }
+
+  if (all.length > 0) {
+    cache = { at: Date.now(), items: all };
+  }
+  return all;
+}
+
+/** GET — full app catalogue for Connections. */
 export async function GET(req: NextRequest) {
   if (!composioConfigured()) {
     return NextResponse.json(
@@ -143,30 +160,38 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const key = process.env.COMPOSIO_API_KEY?.trim() || "";
+  if (!key) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "App connections aren’t available right now. Please try again later.",
+        toolkits: [],
+      },
+      { status: 503 }
+    );
+  }
+
   try {
     const q = (req.nextUrl.searchParams.get("q") || "").trim().toLowerCase();
+    const limitParam = parseInt(req.nextUrl.searchParams.get("limit") || "2000", 10);
     const limit = Math.min(
-      100,
-      Math.max(1, parseInt(req.nextUrl.searchParams.get("limit") || "48", 10) || 48)
+      2500,
+      Math.max(1, Number.isFinite(limitParam) ? limitParam : 2000)
     );
 
-    let items = await fetchViaRest(Math.max(limit, 60));
-    if (!items.length) items = await fetchViaSdk(Math.max(limit, 60));
+    let toolkits = await loadAllToolkits(key);
 
-    let toolkits = items
-      .map(mapItem)
-      .filter((t): t is ToolkitRow => Boolean(t));
-
-    const seen = new Set<string>();
-    toolkits = toolkits.filter((t) => {
-      if (seen.has(t.slug)) return false;
-      seen.add(t.slug);
-      return true;
-    });
-
-    // If remote catalogue is empty, still surface popular connectable apps
-    if (!toolkits.length) {
-      toolkits = [...FALLBACK_APPS];
+    // Search on Composio if local catalogue is empty or user is searching a sparse set
+    if (q && toolkits.length < 50) {
+      const page = await fetchPage(key, 1000, null, q);
+      const seen = new Set(toolkits.map((t) => t.slug));
+      for (const raw of page.items) {
+        const row = mapItem(raw);
+        if (!row || seen.has(row.slug)) continue;
+        seen.add(row.slug);
+        toolkits.push(row);
+      }
     }
 
     if (q) {
@@ -177,15 +202,6 @@ export async function GET(req: NextRequest) {
           t.description.toLowerCase().includes(q) ||
           t.categories.some((c) => c.toLowerCase().includes(q))
       );
-    } else {
-      const prefer = FALLBACK_APPS.map((a) => a.slug);
-      toolkits.sort((a, b) => {
-        const ia = prefer.indexOf(a.slug);
-        const ib = prefer.indexOf(b.slug);
-        const sa = ia === -1 ? 999 : ia;
-        const sb = ib === -1 ? 999 : ib;
-        return sa - sb || a.name.localeCompare(b.name);
-      });
     }
 
     return NextResponse.json({
