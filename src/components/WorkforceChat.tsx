@@ -15,6 +15,24 @@ import {
 
 type Line = { role: "user" | "assistant"; content: string };
 
+function friendlyAppName(raw: string): string {
+  const s = String(raw || "").trim();
+  if (!s) return "app";
+  const map: Record<string, string> = {
+    gmail: "Gmail",
+    slack: "Slack",
+    notion: "Notion",
+    hubspot: "HubSpot",
+    github: "GitHub",
+    googledrive: "Google Drive",
+    googlecalendar: "Google Calendar",
+    buffer: "Buffer",
+  };
+  const key = s.toLowerCase().replace(/\s+/g, "");
+  if (map[key]) return map[key];
+  return s.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function guessToolSlug(toolkit: string, text: string): string | null {
   const t = text.toLowerCase();
   const tk = toolkit.toLowerCase();
@@ -37,12 +55,35 @@ function guessToolSlug(toolkit: string, text: string): string | null {
 
 function formatToolResult(result: unknown): string {
   try {
-    const s = JSON.stringify(result, null, 2);
-    if (s.length > 1800) return s.slice(0, 1800) + "\n…";
-    return s;
+    if (result == null) return "Done.";
+    if (typeof result === "string") return result.slice(0, 1200);
+    const obj = result as Record<string, unknown>;
+    // Prefer human-ish fields when present
+    const data = (obj.data ?? obj.result ?? obj) as Record<string, unknown>;
+    if (Array.isArray(data)) {
+      return `Found ${data.length} item${data.length === 1 ? "" : "s"}.`;
+    }
+    if (data && typeof data === "object") {
+      const keys = Object.keys(data);
+      if (keys.length === 0) return "Done.";
+      return "Here’s what came back from the app. Open the app itself for full details.";
+    }
+    return "Done.";
   } catch {
-    return String(result);
+    return "Done.";
   }
+}
+
+function softError(msg: string): string {
+  const m = String(msg || "");
+  if (/COMPOSIO|API_KEY|not configured/i.test(m)) {
+    return "App connections aren’t available right now. Please try again later.";
+  }
+  return m
+    .replace(/\bComposio\b/gi, "")
+    .replace(/\bOAuth\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim() || "Something went wrong. Please try again.";
 }
 
 export function WorkforceChat({
@@ -122,19 +163,19 @@ export function WorkforceChat({
       }
 
       if (toolkit) {
+        const label = friendlyAppName(toolkit);
         const match = accounts.find(
           (a) =>
             a.toolkit.toLowerCase() === toolkit ||
             a.toolkit.toLowerCase().includes(toolkit)
         );
         if (!match) {
+          const have = accounts.map((a) => friendlyAppName(a.toolkit)).join(", ");
           setLines((prev) => [
             ...prev,
             {
               role: "assistant",
-              content: `${toolkit} isn’t connected. You have: ${accounts
-                .map((a) => a.toolkit)
-                .join(", ")}. Open Connections to link ${toolkit} (slot ${listed.used}/${listed.limit}).`,
+              content: `${label} isn’t connected. You currently have: ${have}. Open Connections to link ${label} (${listed.used} of ${listed.limit} slots used).`,
             },
           ]);
           window.setTimeout(() => router.push("/connections"), 500);
@@ -147,7 +188,7 @@ export function WorkforceChat({
             ...prev,
             {
               role: "assistant",
-              content: `${toolkit} is connected. For this request I need a clearer action or an AI employee with that tool assigned — I won’t guess write actions from chat alone.`,
+              content: `${label} is connected. Tell me more clearly what to do, or open an AI employee that uses ${label} — I won’t guess write actions from chat alone.`,
             },
           ]);
           return;
@@ -165,7 +206,7 @@ export function WorkforceChat({
             ...prev,
             {
               role: "assistant",
-              content: `Couldn’t complete that with ${toolkit}: ${exec.error}`,
+              content: `Couldn’t complete that with ${label}. ${softError(exec.error)}`,
             },
           ]);
           return;
@@ -175,7 +216,7 @@ export function WorkforceChat({
           ...prev,
           {
             role: "assistant",
-            content: `Result from ${toolkit}:\n${formatToolResult(exec.result)}`,
+            content: `${label}: ${formatToolResult(exec.result)}`,
           },
         ]);
         return;
@@ -185,8 +226,8 @@ export function WorkforceChat({
         ...prev,
         {
           role: "assistant",
-          content: `Connected apps (${listed.used}/${listed.limit}): ${accounts
-            .map((a) => a.toolkit)
+          content: `Connected apps (${listed.used} of ${listed.limit}): ${accounts
+            .map((a) => friendlyAppName(a.toolkit))
             .join(", ")}. Name the app and what you want done.`,
         },
       ]);
