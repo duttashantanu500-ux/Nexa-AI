@@ -89,7 +89,7 @@ async function fetchPageRest(
   limit: number,
   cursor?: string | null,
   search?: string
-): Promise<{ items: any[]; cursor: string | null; status?: number }> {
+): Promise<{ items: any[]; cursor: string | null }> {
   const bases = [
     "https://backend.composio.dev/api/v3.1/toolkits",
     "https://backend.composio.dev/api/v3/toolkits",
@@ -100,7 +100,7 @@ async function fetchPageRest(
     url.searchParams.set("limit", String(Math.min(1000, Math.max(1, limit))));
     url.searchParams.set("sort_by", "usage");
     if (cursor) url.searchParams.set("cursor", cursor);
-    if (search) url.searchParams.set("search", search search);
+    if (search) url.searchParams.set("search", search);
 
     try {
       const res = await fetch(url.toString(), {
@@ -110,15 +110,11 @@ async function fetchPageRest(
         },
         cache: "no-store",
       });
-      if (!res.ok) {
-        // try next base
-        continue;
-      }
+      if (!res.ok) continue;
       const raw = await res.json().catch(() => null);
       return {
         items: extractItems(raw),
         cursor: nextCursor(raw),
-        status: res.status,
       };
     } catch {
       /* next */
@@ -177,7 +173,6 @@ async function loadAllToolkits(key: string): Promise<ToolkitRow[]> {
     return cache.items;
   }
 
-  // Prefer SDK (v0.31+) then REST pagination
   let items = await loadViaSdk();
   if (items.length < 50) {
     const rest = await loadViaRest(key);
@@ -225,7 +220,6 @@ export async function GET(req: NextRequest) {
 
     let toolkits = await loadAllToolkits(key);
 
-    // Server-side search pass if needed
     if (q) {
       const remote = await fetchPageRest(key, 1000, null, q);
       const seen = new Set(toolkits.map((t) => t.slug));
@@ -252,7 +246,7 @@ export async function GET(req: NextRequest) {
     });
   } catch {
     return NextResponse.json(
-      {
+           {
         ok: false,
         error: "Could not load apps. Please try again.",
         toolkits: [],
