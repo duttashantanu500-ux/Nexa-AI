@@ -23,7 +23,6 @@ type Account = {
   isDisabled?: boolean;
 };
 
-/** Friendly display name for an app id (never show raw technical ids). */
 function friendlyAppName(raw: string): string {
   const s = String(raw || "").trim();
   if (!s) return "App";
@@ -62,7 +61,6 @@ function friendlyStatus(status: string, isDisabled?: boolean): string {
   return "Connected";
 }
 
-/** Soften provider/API errors before showing them. */
 function friendlyError(msg: string): string {
   const m = String(msg || "");
   if (/COMPOSIO|API_KEY|api key|not configured/i.test(m)) {
@@ -74,13 +72,14 @@ function friendlyError(msg: string): string {
   if (/unauthorized|401|403|auth/i.test(m)) {
     return "Sign in again, then try connecting the app.";
   }
-  // Strip obvious technical tokens
-  return m
-    .replace(/\bComposio\b/gi, "")
-    .replace(/\bOAuth\b/gi, "")
-    .replace(/\bAPI[_ ]?key\b/gi, "")
-    .replace(/\s{2,}/g, " ")
-    .trim() || "Something went wrong. Please try again.";
+  return (
+    m
+      .replace(/\bComposio\b/gi, "")
+      .replace(/\bOAuth\b/gi, "")
+      .replace(/\bAPI[_ ]?key\b/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .trim() || "Something went wrong. Please try again."
+  );
 }
 
 export default function ConnectionsPage() {
@@ -88,6 +87,7 @@ export default function ConnectionsPage() {
   const [userId, setUserId] = useState("");
   const [q, setQ] = useState("");
   const [toolkits, setToolkits] = useState<Toolkit[]>([]);
+  const [totalApps, setTotalApps] = useState(0);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [used, setUsed] = useState(0);
   const [loadingCat, setLoadingCat] = useState(true);
@@ -122,7 +122,7 @@ export default function ConnectionsPage() {
     setLoadingCat(true);
     try {
       const res = await fetch(
-        `/api/composio/toolkits?limit=60&q=${encodeURIComponent(query)}`,
+        `/api/composio/toolkits?limit=2000&q=${encodeURIComponent(query)}`,
         { cache: "no-store" }
       );
       const data = await res.json().catch(() => ({}));
@@ -130,12 +130,18 @@ export default function ConnectionsPage() {
         setConfigured(false);
         setError(friendlyError(data.error || "Could not load apps."));
         setToolkits([]);
+        setTotalApps(0);
       } else {
-        setToolkits(Array.isArray(data.toolkits) ? data.toolkits : []);
+        const list = Array.isArray(data.toolkits) ? data.toolkits : [];
+        setToolkits(list);
+        setTotalApps(
+          typeof data.total === "number" ? data.total : list.length
+        );
         setError("");
       }
     } catch {
       setToolkits([]);
+      setTotalApps(0);
       setError("Could not load apps. Please try again.");
     }
     setLoadingCat(false);
@@ -313,6 +319,11 @@ export default function ConnectionsPage() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
               Available apps
+              {!loadingCat && totalApps > 0 && (
+                <span className="ml-2 font-normal normal-case tracking-normal text-zinc-400">
+                  ({totalApps.toLocaleString()})
+                </span>
+              )}
             </h2>
             <input
               value={q}
@@ -351,7 +362,8 @@ export default function ConnectionsPage() {
                           className="h-7 w-7 object-contain"
                           loading="lazy"
                           onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = "none";
+                            (e.target as HTMLImageElement).style.display =
+                              "none";
                           }}
                         />
                       ) : (
