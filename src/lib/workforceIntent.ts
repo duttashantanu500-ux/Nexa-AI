@@ -1,6 +1,6 @@
 /**
  * Main Nexa chat intent — Digital Workforce command understanding.
- * Deterministic first first. Never invents tool results or completed work.
+ * Deterministic first. Never invents tool results or completed work.
  */
 
 export type WorkforceIntent =
@@ -10,6 +10,7 @@ export type WorkforceIntent =
   | "work_status"
   | "run_employee"
   | "connections"
+  | "app_operation"
   | "configure_hint"
   | "refuse"
   | "clarify"
@@ -27,14 +28,14 @@ export type WorkforceContext = {
 export type WorkforceResult = {
   intent: WorkforceIntent;
   message: string;
-  /** Soft navigation targets for the UI */
   navigateTo?: string;
-  /** Prefill for hire desk */
   hireHint?: string;
-  /** Employee id when run_employee */
   agentId?: string;
-  /** When true, UI may call LLM for a richer conversational reply */
   useModel?: boolean;
+  /** Suggested Composio toolkit when app_operation */
+  toolkit?: string;
+  /** Suggested tool slug when known */
+  toolSlug?: string;
 };
 
 const REFUSE =
@@ -50,10 +51,23 @@ const STATUS =
   /\b(what (did|have) (my )?(employees?|agents?|team) (do|done|accomplish)|work (board|history|status)|failed runs?|needs attention|today'?s (work|results?))\b/i;
 
 const CONNECTIONS =
-  /\b(connect(ions?|ed)?|integrat|oauth|notion|slack|hubspot|buffer)\b.*\b(status|connected|connect|link)\b|\b(connect|link)\b.*\b(notion|slack|hubspot|buffer)\b|\bmanage connections\b/i;
+  /\b(connect(ions?|ed)?|integrat|oauth)\b|\b(connect|link)\b.*\b(gmail|notion|slack|hubspot|buffer|github|google)\b|\bmanage connections\b|\bwhich apps? (are )?(connected|linked)\b/i;
 
-const UNSUPPORTED_TOOL =
-  /\b(gmail|outlook|email|whatsapp|twitter|x\.com|instagram|shopify|stripe|quickbooks|asana|jira|linear|discord)\b/i;
+/** Detect ask to use a connected app (not just open Connections). */
+const APP_OP =
+  /\b(check|fetch|get|list|read|show|summarize|send|post|create|find|search)\b.*\b(gmail|email|slack|notion|hubspot|github|google drive|calendar|leads?|contacts?|messages?|inbox)\b|\b(gmail|slack|notion|hubspot|github)\b.*\b(messages?|emails?|pages?|contacts?|leads?|issues?)\b/i;
+
+function detectToolkit(t: string): string | undefined {
+  const lower = t.toLowerCase();
+  if (/\bgmail\b|\binbox\b|\bemail\b/.test(lower)) return "gmail";
+  if (/\bslack\b/.test(lower)) return "slack";
+  if (/\bnotion\b/.test(lower)) return "notion";
+  if (/\bhubspot\b|\bleads?\b|\bcontacts?\b/.test(lower)) return "hubspot";
+  if (/\bgithub\b/.test(lower)) return "github";
+  if (/\bgoogle drive\b|\bgdrive\b/.test(lower)) return "googledrive";
+  if (/\bcalendar\b/.test(lower)) return "googlecalendar";
+  return undefined;
+}
 
 function findAgentId(text: string, ctx: WorkforceContext): string | undefined {
   const lower = text.toLowerCase();
@@ -73,7 +87,7 @@ export function classifyWorkforceMessage(
   if (!t) {
     return {
       intent: "clarify",
-      message: `What do you need${name}? You can hire an AI employee, check your team, open connections, or ask about recent work.`,
+      message: `What do you need${name}? You can hire an AI employee, check your team, use connected apps, or ask about recent work.`,
     };
   }
 
@@ -85,9 +99,7 @@ export function classifyWorkforceMessage(
     };
   }
 
-  if (
-    /^(hi|hello|hey|yo|good (morning|afternoon|evening))[\s!.]*$/i.test(t)
-  ) {
+  if (/^(hi|hello|hey|yo|good (morning|afternoon|evening))[\s!.]*$/i.test(t)) {
     const team =
       ctx.agentNames.length > 0
         ? ` You have ${ctx.agentNames.length} AI employee${ctx.agentNames.length === 1 ? "" : "s"} on the team.`
@@ -102,12 +114,17 @@ export function classifyWorkforceMessage(
     return {
       intent: "chat",
       message:
-        "I can chat briefly, but Nexa is built for your digital workforce — hiring AI employees, connecting tools, and running real work.\n\nTry: “Hire a research employee”, “What did my team do today?”, or “Connect Notion”.",
+        "I can chat briefly, but Nexa is built for your digital workforce — hiring AI employees, connecting apps, and running real work.\n\nTry: “Hire a research employee”, “What did my team do today?”, or “Connect Gmail”.",
       useModel: false,
     };
   }
 
-  if (HIRE.test(t) || /\b(social media|content|research|sales|ops|operations)\b.*\b(employee|agent|role)\b/i.test(t)) {
+  if (
+    HIRE.test(t) ||
+    /\b(social media|content|research|sales|ops|operations)\b.*\b(employee|agent|role)\b/i.test(
+      t
+    )
+  ) {
     return {
       intent: "hire",
       message:
@@ -155,10 +172,7 @@ export function classifyWorkforceMessage(
   }
 
   const agentId = findAgentId(t, ctx);
-  if (
-    agentId &&
-    /\b(run|start|execute|do (the )?work)\b/i.test(t)
-  ) {
+  if (agentId && /\b(run|start|execute|do (the )?work)\b/i.test(t)) {
     return {
       intent: "run_employee",
       message: "Opening that employee so you can start their assigned work.",
@@ -176,36 +190,31 @@ export function classifyWorkforceMessage(
     };
   }
 
+  // App operation before generic connections / unsupported
+  if (APP_OP.test(t)) {
+    const toolkit = detectToolkit(t);
+    return {
+      intent: "app_operation",
+      message: toolkit
+        ? `I'll use your connected ${toolkit} account if it's linked. Checking Connections…`
+        : "I'll check your connected apps for that request.",
+      toolkit,
+    };
+  }
+
   if (CONNECTIONS.test(t)) {
     return {
       intent: "connections",
       message:
-        "Open Connections to link Notion, Slack, HubSpot, Buffer, and more. Status there is the source of truth.",
+        "Open Connections to browse the app marketplace and link up to 3 accounts. Status there is the source of truth.",
       navigateTo: "/connections",
-    };
-  }
-
-  if (UNSUPPORTED_TOOL.test(t) && /\b(connect|integrate|use|via|through)\b/i.test(t)) {
-    return {
-      intent: "unsupported",
-      message:
-        "That app isn’t a built-in Nexa connection yet. Today you can connect Notion, Slack, HubSpot, Buffer, Ideogram, Voice calling, and Custom tools.\n\nOpen Connections to see what’s available, or hire an employee that uses a supported tool.",
-      navigateTo: "/connections",
-    };
-  }
-
-  if (/\b(email|send (an? )?email)\b/i.test(t)) {
-    return {
-      intent: "unsupported",
-      message:
-        "Nexa doesn’t send email yet. For team messages, connect Slack and hire or configure an employee with a send-message step.",
     };
   }
 
   return {
     intent: "chat",
     message:
-      "I can help you hire AI employees, review your team, check work status, or open connections.\n\nExamples:\n• Hire a social media employee\n• What did my team do today?\n• Connect Notion\n• List my employees",
+      "I can help you hire AI employees, review your team, check work status, or use connected apps.\n\nExamples:\n• Hire a social media employee\n• What did my team do today?\n• Check my latest Gmail messages\n• Connect Slack",
     useModel: false,
   };
 }
@@ -224,19 +233,19 @@ export function workforceEmptyState(ctx: WorkforceContext): {
     n === 0
       ? [
           "Hire a research employee",
-          "Hire a social media employee",
-          "Connect Notion",
+          "Connect Gmail",
           "What can Nexa do?",
+          "Manage connections",
         ]
       : [
           "What did my team do today?",
           "List my employees",
-          "Hire another employee",
+          "Check my latest Gmail messages",
           "Manage connections",
         ];
   return {
     headline: "Command your AI team",
-    body: `${teamLine} Hire roles, assign real work through connected tools, and track results on the Work Board — not simulated chat demos.`,
+    body: `${teamLine} Hire roles, connect apps (up to 3), and run real work — not simulated demos.`,
     suggestions,
   };
 }
