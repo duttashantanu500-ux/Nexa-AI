@@ -2,7 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { isSupabaseConfigured, signInWithEmail } from "@/lib/auth";
+import {
+  isSupabaseConfigured,
+  resendSignupEmail,
+  signInWithEmail,
+} from "@/lib/auth";
 import { loadAppState } from "@/lib/conversationStore";
 import { loadOperatorState } from "@/lib/operatorStore";
 import { persistUserProfile, getStableUserId } from "@/lib/sessionUser";
@@ -14,7 +18,10 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
+  const [resending, setResending] = useState(false);
   const supabaseReady = isSupabaseConfigured();
 
   const goAfterLogin = () => {
@@ -30,6 +37,8 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setInfo("");
+    setNeedsConfirm(false);
     setLoading(true);
 
     if (!supabaseReady) {
@@ -41,6 +50,7 @@ export default function LoginPage() {
     const result = await signInWithEmail({ email, password });
     if (result.error) {
       setError(result.error);
+      setNeedsConfirm(Boolean(result.needsEmailConfirm));
       setLoading(false);
       return;
     }
@@ -57,7 +67,6 @@ export default function LoginPage() {
       });
     }
 
-    // Never persist passwords in localStorage.
     try {
       localStorage.removeItem("nexa_auth");
     } catch {
@@ -66,6 +75,20 @@ export default function LoginPage() {
 
     setLoading(false);
     goAfterLogin();
+  };
+
+  const handleResend = async () => {
+    if (!email.trim() || resending) return;
+    setResending(true);
+    setError("");
+    setInfo("");
+    const r = await resendSignupEmail(email);
+    setResending(false);
+    if (r.error) {
+      setError(r.error);
+      return;
+    }
+    setInfo("Verification email sent. Check your inbox and spam folder.");
   };
 
   return (
@@ -113,6 +136,18 @@ export default function LoginPage() {
           </div>
 
           {error && <p className="text-sm text-red-500">{error}</p>}
+          {info && <p className="text-sm text-emerald-600">{info}</p>}
+
+          {needsConfirm && (
+            <button
+              type="button"
+              onClick={() => void handleResend()}
+              disabled={resending || !email.trim()}
+              className="w-full rounded-lg border border-zinc-200 py-2 text-sm text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200"
+            >
+              {resending ? "Sending…" : "Resend verification email"}
+            </button>
+          )}
 
           <button
             type="submit"
