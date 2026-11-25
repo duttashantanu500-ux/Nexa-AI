@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { listUserAccounts } from "@/lib/composio/accounts";
 import {
   composioConfigured,
+  composioFetch,
   composioUserId,
-  getComposio,
 } from "@/lib/composio/client";
 
 export const runtime = "nodejs";
@@ -13,7 +13,11 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   if (!composioConfigured()) {
     return NextResponse.json(
-      { ok: false, error: "Composio is not configured." },
+      {
+        ok: false,
+        error:
+          "App connections aren’t available right now. Please try again later.",
+      },
       { status: 503 }
     );
   }
@@ -38,7 +42,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Ownership: account must belong to this user
     const accounts = await listUserAccounts(userId);
     const owned = accounts.find((a) => a.id === connectedAccountId);
     if (!owned) {
@@ -48,13 +51,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const composio = getComposio();
-    await composio.connectedAccounts.delete(connectedAccountId);
+    const deleted = await composioFetch(
+      `/connected_accounts/${encodeURIComponent(connectedAccountId)}`,
+      { method: "DELETE" }
+    );
+
+    if (!deleted.ok && deleted.status !== 404) {
+      return NextResponse.json(
+        { ok: false, error: "Could not disconnect. Please try again." },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ ok: true });
-  } catch (e: any) {
+  } catch {
     return NextResponse.json(
-      { ok: false, error: e?.message || "Could not disconnect." },
+      { ok: false, error: "Could not disconnect. Please try again." },
       { status: 500 }
     );
   }
