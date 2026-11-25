@@ -1,10 +1,10 @@
 /**
- * Composio connected-account helpers (server-only).
+ * Composio connected-account helpers (REST only).
  * Enforces max 3 active connected accounts per Nexa user.
  */
 
 import { MAX_COMPOSIO_CONNECTIONS } from "@/lib/plans";
-import { composioUserId, getComposio } from "./client";
+import { composioFetch, composioUserId } from "./client";
 
 export type ComposioAccountView = {
   id: string;
@@ -43,52 +43,22 @@ function mapAccount(a: any): ComposioAccountView {
   };
 }
 
-async function listViaRest(userId: string): Promise<ComposioAccountView[]> {
-  const key = process.env.COMPOSIO_API_KEY?.trim() || "";
-  if (!key) return [];
-  const bases = [
-    "https://backend.composio.dev/api/v3.1",
-    "https://backend.composio.dev/api/v3",
-  ];
-  for (const base of bases) {
-    try {
-      const url = `${base}/connected_accounts?user_ids=${encodeURIComponent(userId)}&limit=50`;
-      const res = await fetch(url, {
-        headers: { "x-api-key": key, Accept: "application/json" },
-        cache: "no-store",
-      });
-      if (!res.ok) continue;
-      const data = await res.json().catch(() => ({}));
-      const items = data.items || data.data || data.connected_accounts || [];
-      if (Array.isArray(items)) return items.map(mapAccount);
-    } catch {
-      /* next */
-    }
-  }
-  return [];
-}
-
 export async function listUserAccounts(
   nexaUserId: string
 ): Promise<ComposioAccountView[]> {
   const userId = composioUserId(nexaUserId);
   if (!userId) return [];
 
-  try {
-    const composio = getComposio() as any;
-    const res = await composio.connectedAccounts.list({
-      userIds: [userId],
-      user_ids: [userId],
-    });
-    const items = (res as any)?.items || (res as any)?.data || [];
-    if (Array.isArray(items) && items.length) {
-      return items.map(mapAccount);
-    }
-  } catch {
-    /* REST fallback */
-  }
-
-  return listViaRest(userId);
+  const res = await composioFetch(
+    `/connected_accounts?user_ids=${encodeURIComponent(userId)}&limit=50`
+  );
+  const items =
+    res.data?.items ||
+    res.data?.data ||
+    res.data?.connected_accounts ||
+    (Array.isArray(res.data) ? res.data : []);
+  if (!Array.isArray(items)) return [];
+  return items.map(mapAccount);
 }
 
 export async function countActiveConnections(
