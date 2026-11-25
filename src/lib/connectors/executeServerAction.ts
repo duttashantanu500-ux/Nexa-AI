@@ -1,7 +1,6 @@
 /**
  * Server-side action execution for background / employee runs.
- * Third-party apps run only through Composio. No native Notion/Slack/Buffer/HubSpot/Ideogram tokens.
- * Never fabricates success. Never uses another user's credentials.
+ * Third-party apps run only through Composio REST.
  */
 
 import type { NormalizedProviderError } from "@/types";
@@ -9,7 +8,7 @@ import { listUserAccounts } from "@/lib/composio/accounts";
 import {
   composioConfigured,
   composioUserId,
-  getComposio,
+  executeComposioTool,
 } from "@/lib/composio/client";
 
 export type ServerActionResult = {
@@ -19,7 +18,6 @@ export type ServerActionResult = {
   error?: NormalizedProviderError;
 };
 
-/** Map legacy registry actionIds → common Composio tool slugs (best-effort). */
 const LEGACY_TO_COMPOSIO: Record<string, string> = {
   "notion.create_page": "NOTION_CREATE_PAGE",
   "notion.search": "NOTION_SEARCH",
@@ -37,7 +35,7 @@ const LEGACY_TO_COMPOSIO: Record<string, string> = {
 function notConnected(name: string): ServerActionResult {
   return {
     ok: false,
-    message: `Connect ${name} under Connections (Composio marketplace) first.`,
+    message: `Connect ${name} under Connections first.`,
     error: { category: "auth" },
   };
 }
@@ -62,9 +60,6 @@ function toComposioSlug(actionId: string): string {
     .join("_");
 }
 
-/**
- * Execute a registry actionId for a specific user via Composio when third-party.
- */
 export async function executeServerAction(params: {
   userId: string;
   actionId: string;
@@ -105,7 +100,7 @@ export async function executeServerAction(params: {
     return {
       ok: false,
       message:
-        "App integrations require Composio. Set COMPOSIO_API_KEY on the server, then connect the app under Connections.",
+        "App integrations aren’t available right now. Please try again later.",
       error: { category: "not_configured" },
     };
   }
@@ -138,31 +133,18 @@ export async function executeServerAction(params: {
       args.parent_id = params.notionDefaultParent;
     }
 
-    const composio = getComposio();
-    const result = await composio.tools.execute(toolSlug, {
+    const result = await executeComposioTool({
+      toolSlug,
       userId,
       arguments: args,
-      ...(connectedAccountId ? { connectedAccountId } : {}),
-      dangerouslySkipVersionCheck: true,
-    } as any);
+      connectedAccountId,
+    });
 
-    if (result == null) {
+    if (!result.ok) {
       return {
         ok: false,
-        message: "Composio returned no result.",
-        error: { category: "server_error" },
-      };
-    }
-
-    if ((result as any).error || (result as any).successful === false) {
-      const msg =
-        (result as any).error ||
-        (result as any).message ||
-        "Tool execution failed";
-      return {
-        ok: false,
-        message: String(msg),
-        data: result,
+        message: result.error || "Tool execution failed",
+        data: result.data,
         error: { category: "server_error" },
       };
     }
@@ -170,7 +152,7 @@ export async function executeServerAction(params: {
     return {
       ok: true,
       message: "Completed via connected app.",
-      data: result,
+      data: result.data,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Provider call failed";
@@ -210,7 +192,7 @@ async function runMcp(
   } catch {
     return {
       ok: false,
-      message: "Could not run this MCP tool.",
+      message: "Could not run this tool.",
       error: { category: "server_error" },
     };
   }
