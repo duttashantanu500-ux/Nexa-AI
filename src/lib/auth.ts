@@ -107,7 +107,7 @@ export async function resendSignupEmail(
 export async function signInWithEmail(params: {
   email: string;
   password: string;
-}): Promise<{ error?: string }> {
+}): Promise<{ error?: string; needsEmailConfirm?: boolean }> {
   const sb = getSupabase();
   if (!sb) return { error: "Account service is not available." };
 
@@ -118,15 +118,18 @@ export async function signInWithEmail(params: {
 
   if (error) {
     const msg = error.message || "Login failed.";
-    if (/confirm|verified|not confirmed/i.test(msg)) {
+    // Only when Supabase explicitly says the email is unconfirmed
+    if (/email not confirmed|not confirmed|confirm your email/i.test(msg)) {
       return {
+        needsEmailConfirm: true,
         error:
-          "Please confirm your email first. Check your inbox for the confirmation link.",
+          "This account still needs email verification. Check your inbox (and spam) for the link, or use Resend below.",
       };
     }
-    if (/invalid/i.test(msg)) {
+    if (/invalid login credentials|invalid email or password|invalid/i.test(msg)) {
       return { error: "Invalid email or password." };
     }
+    // Never show confirmation-link copy for generic auth errors
     return { error: msg };
   }
   if (!data.user) return { error: "Login failed." };
