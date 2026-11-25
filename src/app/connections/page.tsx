@@ -55,7 +55,7 @@ function friendlyStatus(status: string, isDisabled?: boolean): string {
   if (isDisabled) return "Paused";
   const s = String(status || "").toUpperCase();
   if (/ACTIVE|CONNECTED|SUCCESS|ENABLED/.test(s)) return "Connected";
-  if (/EXPIRED|REVOKED/.test( ident)) return "Needs reconnect";
+  if (/EXPIRED|REVOKED/.test(s)) return "Needs reconnect";
   if (/FAILED|ERROR/.test(s)) return "Needs attention";
   if (/PENDING|INITIATED/.test(s)) return "Connecting…";
   return "Connected";
@@ -73,7 +73,6 @@ function friendlyError(msg: string): string {
   if (/limit|slot|3 of 3|already have/i.test(m)) {
     return "You’ve used all 3 connection slots. Disconnect an app to free one.";
   }
-  // Session missing only — never treat upstream 401 as "sign in again"
   if (/sign in required|not signed in|session expired|no session/i.test(m)) {
     return "Sign in again, then try connecting the app.";
   }
