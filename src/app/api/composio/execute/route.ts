@@ -3,22 +3,22 @@ import { listUserAccounts } from "@/lib/composio/accounts";
 import {
   composioConfigured,
   composioUserId,
-  getComposio,
+  executeComposioTool,
 } from "@/lib/composio/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/**
- * POST /api/composio/execute
- * body: { userId, toolSlug, arguments?, connectedAccountId? }
- * Never simulates success — returns Composio result or error as-is.
- */
+/** POST /api/composio/execute */
 export async function POST(req: NextRequest) {
   if (!composioConfigured()) {
     return NextResponse.json(
-      { ok: false, error: "Composio is not configured." },
+      {
+        ok: false,
+        error:
+          "App connections aren’t available right now. Please try again later.",
+      },
       { status: 503 }
     );
   }
@@ -43,12 +43,11 @@ export async function POST(req: NextRequest) {
     }
     if (!toolSlug) {
       return NextResponse.json(
-        { ok: false, error: "toolSlug is required." },
+        { ok: false, error: "Choose an action to run." },
         { status: 400 }
       );
     }
 
-    // Require at least one active connection for this user
     const accounts = await listUserAccounts(userId);
     const active = accounts.filter((a) =>
       /ACTIVE|CONNECTED|SUCCESS/i.test(a.status)
@@ -68,33 +67,33 @@ export async function POST(req: NextRequest) {
       const owned = active.find((a) => a.id === connectedAccountId);
       if (!owned) {
         return NextResponse.json(
-          { ok: false, error: "That connection is not available on your account." },
+          {
+            ok: false,
+            error: "That connection is not available on your account.",
+          },
           { status: 403 }
         );
       }
     }
 
-    const composio = getComposio();
-    const result = await composio.tools.execute(toolSlug, {
+    const result = await executeComposioTool({
+      toolSlug,
       userId,
       arguments: args,
-      ...(connectedAccountId ? { connectedAccountId } : {}),
-      // Prefer explicit version when callers pass it; otherwise skip version check for managed tools
-      ...(body.version
-        ? { version: String(body.version) }
-        : { dangerouslySkipVersionCheck: true }),
-    } as any);
-
-    return NextResponse.json({
-      ok: true,
-      result,
+      connectedAccountId,
     });
-  } catch (e: any) {
+
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error || "Tool execution failed" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, result: result.data });
+  } catch {
     return NextResponse.json(
-      {
-        ok: false,
-        error: e?.message || "Tool execution failed",
-      },
+      { ok: false, error: "Tool execution failed" },
       { status: 500 }
     );
   }
