@@ -113,10 +113,7 @@ async function fetchPageRest(
         cache: "no-store",
       });
       if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          return { items: [], cursor: null, httpStatus: res.status };
-        }
-        continue;
+        return { items: [], cursor: null, httpStatus: res.status };
       }
       const raw = await res.json().catch(() => null);
       return {
@@ -132,30 +129,24 @@ async function fetchPageRest(
   return { items: [], cursor: null, httpStatus: 0 };
 }
 
-async function loadViaRest(key: string): Promise<ToolkitRow[]> {
+async function loadViaRest(
+  key: string
+): Promise<{ items: ToolkitRow[]; authFailed: boolean }> {
   const all: any[] = [];
   let cursor: string | null = null;
+  let authFailed = false;
 
   for (let i = 0; i < 8; i++) {
     const page = await fetchPageRest(key, 1000, cursor);
-    if (page.httpStatus === 401 || page.httpStatus === 403) break;
+    if (page.httpStatus === 401 || page.httpStatus === 403) {
+      authFailed = true;
+      break;
+    }
     all.push(...page.items);
     if (!page.cursor || page.items.length === 0) break;
     cursor = page.cursor;
   }
-  return dedupeMap(all);
-}
-
-async function loadAllToolkits(key: string): Promise<ToolkitRow[]> {
-  if (cache && Date.now() - cache.at < CACHE_MS) {
-    return cache.items;
-  }
-
-  const items = await loadViaRest(key);
-  if (items.length > 0) {
-    cache = { at: Date.now(), items };
-  }
-  return items;
+  return { items: dedupeMap(all), authFailed };
 }
 
 /** GET — full app catalogue for Connections. */
@@ -196,7 +187,31 @@ export async function GET(req: NextRequest) {
       Math.max(1, Number.isFinite(limitParam) ? limitParam : 2000)
     );
 
-    let toolkits = await loadAllToolkits(key);
+    if (cache && Date.now() - cache.at < CACHE_MS && !q) {
+      return NextResponse.json({
+        ok: true,
+        toolkits: cache.items.slice(0, limit),
+        total: cache.items.length,
+        nextCursor: null,
+      });
+    }
+
+    const loaded = await loadViaRest(key);
+
+    if (loaded.authFailed) {
+      return NextResponse.json(
+        {
+          ok: false,
+          toolkits: [],
+          total: 0,
+          error:
+            "App connections couldn’t be authorized. Update the server key and redeploy.",
+        },
+        { status: 401 }
+      );
+    }
+
+    let toolkits = loaded.items;
 
     if (q) {
       const remote = await fetchPageRest(key, 1000, null, q);
@@ -214,6 +229,8 @@ export async function GET(req: NextRequest) {
           t.description.toLowerCase().includes(q) ||
           t.categories.some((c) => c.toLowerCase().includes(q))
       );
+    } else if (toolkits.length > 0) {
+      cache = { at: Date.now(), items: toolkits };
     }
 
     return NextResponse.json({
