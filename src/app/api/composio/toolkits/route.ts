@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { composioConfigured, getComposio } from "@/lib/composio/client";
+import { composioConfigured, composioApiKey } from "@/lib/composio/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -101,7 +101,6 @@ async function fetchPageRest(
   for (const base of bases) {
     const url = new URL(base);
     url.searchParams.set("limit", String(Math.min(1000, Math.max(1, limit))));
-    // sort_by is optional — some keys reject unknown enums
     if (cursor) url.searchParams.set("cursor", cursor);
     if (search) url.searchParams.set("search", search);
 
@@ -114,7 +113,6 @@ async function fetchPageRest(
         cache: "no-store",
       });
       if (!res.ok) {
-        // try next base
         if (res.status === 401 || res.status === 403) {
           return { items: [], cursor: null, httpStatus: res.status };
         }
@@ -134,35 +132,6 @@ async function fetchPageRest(
   return { items: [], cursor: null, httpStatus: 0 };
 }
 
-async function loadViaSdk(): Promise<ToolkitRow[]> {
-  try {
-    const composio = getComposio() as any;
-    const tk = composio.toolkits;
-    if (!tk) return [];
-    const all: any[] = [];
-    let cursor: string | undefined;
-
-    for (let i = 0; i < 8; i++) {
-      let page: any = null;
-      if (typeof tk.list === "function") {
-        page = await tk.list({ limit: 1000, cursor });
-      } else if (typeof tk.get === "function") {
-        page = await tk.get({ limit: 1000, cursor });
-      } else {
-        break;
-      }
-      const items = extractItems(page);
-      all.push(...items);
-      const next = nextCursor(page);
-      if (!next || items.length === 0) break;
-      cursor = next;
-    }
-    return dedupeMap(all);
-  } catch {
-    return [];
-  }
-}
-
 async function loadViaRest(key: string): Promise<ToolkitRow[]> {
   const all: any[] = [];
   let cursor: string | null = null;
@@ -171,14 +140,7 @@ async function loadViaRest(key: string): Promise<ToolkitRow[]> {
     const page = await fetchPageRest(key, 1000, cursor);
     if (page.httpStatus === 401 || page.httpStatus === 403) break;
     all.push(...page.items);
-    // If first page returned a full batch without cursor, assume single page
-    if (!page.cursor) {
-      if (page.items.length >= 1000) {
-        // try offset-style page bump using base64 cursor page/limit if needed
-        break;
-      }
-      break;
-    }
+    if (!page.cursor || page.items.length === 0) break;
     cursor = page.cursor;
   }
   return dedupeMap(all);
@@ -189,12 +151,7 @@ async function loadAllToolkits(key: string): Promise<ToolkitRow[]> {
     return cache.items;
   }
 
-  let items = await loadViaSdk();
-  if (items.length < 100) {
-    const rest = await loadViaRest(key);
-    if (rest.length > items.length) items = rest;
-  }
-
+  const items = await loadViaRest(key);
   if (items.length > 0) {
     cache = { at: Date.now(), items };
   }
@@ -215,7 +172,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const key = process.env.COMPOSIO_API_KEY?.trim() || "";
+  const key = composioApiKey();
   if (!key) {
     return NextResponse.json(
       {
