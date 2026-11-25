@@ -9,17 +9,43 @@ const BASES = [
   "https://backend.composio.dev/api/v3",
 ] as const;
 
+/** Strip quotes/whitespace people often paste into Vercel env. */
+function normalizeKey(raw: string): string {
+  let k = String(raw || "").trim();
+  if (
+    (k.startsWith('"') && k.endsWith('"')) ||
+    (k.startsWith("'") && k.endsWith("'"))
+  ) {
+    k = k.slice(1, -1).trim();
+  }
+  if (/^bearer\s+/i.test(k)) k = k.replace(/^bearer\s+/i, "").trim();
+  return k;
+}
+
 export function composioConfigured(): boolean {
-  return Boolean(process.env.COMPOSIO_API_KEY?.trim());
+  return Boolean(normalizeKey(process.env.COMPOSIO_API_KEY || ""));
 }
 
 export function composioApiKey(): string {
-  return process.env.COMPOSIO_API_KEY?.trim() || "";
+  return normalizeKey(process.env.COMPOSIO_API_KEY || "");
 }
 
 /** Map Nexa user id → Composio userId (1:1 isolation). */
 export function composioUserId(nexaUserId: string): string {
   return String(nexaUserId || "").trim();
+}
+
+function authHeaderSets(key: string): Record<string, string>[] {
+  const sets: Record<string, string>[] = [{ "x-api-key": key }];
+  // Org keys must use x-org-api-key (common mix-up → 401)
+  if (/^org[_-]?/i.test(key) || key.length > 40) {
+    sets.push({ "x-org-api-key": key });
+  }
+  // User keys must use x-user-api-key — will still fail for toolkits, but clearer
+  if (/^uak_/i.test(key)) {
+    sets.unshift({ "x-user-api-key": key });
+  }
+  return sets;
 }
 
 export async function composioFetch(
@@ -30,25 +56,29 @@ export async function composioFetch(
   if (!key) return { ok: false, status: 0, data: {} };
 
   for (const base of BASES) {
-    try {
-      const res = await fetch(`${base}${path}`, {
-        ...init,
-        headers: {
-          "x-api-key": key,
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          ...(init?.headers || {}),
-        },
-        cache: "no-store",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) return { ok: true, status: res.status, data };
-      if (res.status !== 404) return { ok: false, status: res.status, data };
-    } catch {
-      /* try next base */
+    for (const auth of authHeaderSets(key)) {
+      try {
+        const res = await fetch(`${base}${path}`, {
+          ...init,
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...auth,
+            ...(init?.headers || {}),
+          },
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) return { ok: true, status: res.status, data };
+        // Auth failure: try next header style before next base
+        if (res.status === 401 || res.status === 403) continue;
+        if (res.status !== 404) return { ok: false, status: res.status, data };
+      } catch {
+        /* try next */
+      }
     }
   }
-  return { ok: false, status: 0, data: {} };
+  return { ok: false, status: 401, data: { message: "unauthorized" } };
 }
 
 /** Execute a tool via Composio REST. */
@@ -66,7 +96,6 @@ export async function executeComposioTool(params: {
     body.connected_account_id = params.connectedAccountId;
   }
 
-  // Prefer slug path variants used across v3 / v3.1
   const attempts = [
     `/tools/execute/${encodeURIComponent(params.toolSlug)}`,
     `/tools/${encodeURIComponent(params.toolSlug)}/execute`,
@@ -89,7 +118,6 @@ export async function executeComposioTool(params: {
     }
   }
 
-  // Generic execute with tool_slug in body
   const generic = await composioFetch(`/tools/execute`, {
     method: "POST",
     body: JSON.stringify({
