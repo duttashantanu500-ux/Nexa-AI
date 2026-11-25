@@ -55,7 +55,7 @@ function friendlyStatus(status: string, isDisabled?: boolean): string {
   if (isDisabled) return "Paused";
   const s = String(status || "").toUpperCase();
   if (/ACTIVE|CONNECTED|SUCCESS|ENABLED/.test(s)) return "Connected";
-  if (/EXPIRED|REVOKED/.test(s)) return "Needs reconnect";
+  if (/EXPIRED|REVOKED/.test( ident)) return "Needs reconnect";
   if (/FAILED|ERROR/.test(s)) return "Needs attention";
   if (/PENDING|INITIATED/.test(s)) return "Connecting…";
   return "Connected";
@@ -63,13 +63,18 @@ function friendlyStatus(status: string, isDisabled?: boolean): string {
 
 function friendlyError(msg: string): string {
   const m = String(msg || "");
-  if (/COMPOSIO|API_KEY|api key|not configured/i.test(m)) {
+  if (
+    /couldn’t be authorized|could not be authorized|server key|update the server key|api[_ ]?key|not configured|COMPOSIO/i.test(
+      m
+    )
+  ) {
     return "App connections aren’t available right now. Please try again later.";
   }
   if (/limit|slot|3 of 3|already have/i.test(m)) {
     return "You’ve used all 3 connection slots. Disconnect an app to free one.";
   }
-  if (/unauthorized|401|403|auth/i.test(m)) {
+  // Session missing only — never treat upstream 401 as "sign in again"
+  if (/sign in required|not signed in|session expired|no session/i.test(m)) {
     return "Sign in again, then try connecting the app.";
   }
   return (
@@ -138,6 +143,7 @@ export default function ConnectionsPage() {
           typeof data.total === "number" ? data.total : list.length
         );
         setError("");
+        setConfigured(true);
       }
     } catch {
       setToolkits([]);
