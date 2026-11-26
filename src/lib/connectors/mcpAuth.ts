@@ -27,6 +27,29 @@ export async function resolveMcpConnection(
   };
 }
 
+/** Alias used by plan gates and status routes. */
+export async function getMcpConnection(
+  userId: string
+): Promise<StoredConnection | null> {
+  return loadConnection(userId, "mcp");
+}
+
+export async function testMcpConnection(params: {
+  userId?: string;
+  endpoint?: string;
+  authHeader?: string;
+}): Promise<{ ok: boolean; message: string }> {
+  const endpoint =
+    params.endpoint ||
+    (params.userId
+      ? (await loadConnection(params.userId, "mcp"))?.accessToken
+      : "");
+  if (!endpoint) {
+    return { ok: false, message: "No custom tools endpoint configured." };
+  }
+  return { ok: true, message: "Custom tools endpoint is saved." };
+}
+
 export async function saveMcpConnection(params: {
   userId: string;
   endpoint: string;
@@ -53,7 +76,6 @@ export async function removeMcpConnection(userId: string): Promise<void> {
   await deleteConnection(userId, "mcp");
 }
 
-/** Tools the user has approved for agent use (stored in scopes JSON). */
 export function parseApprovedTools(conn: StoredConnection | null): string[] {
   const scopes = conn?.scopes || [];
   return scopes.filter(Boolean);
@@ -77,7 +99,6 @@ export async function setApprovedTools(
   }
 }
 
-/** Alias used by the approve API route. */
 export async function approveMcpTools(
   userId: string,
   tools: string[]
