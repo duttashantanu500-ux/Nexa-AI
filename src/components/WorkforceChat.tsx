@@ -26,7 +26,17 @@ function friendlyAppName(raw: string): string {
     github: "GitHub",
     googledrive: "Google Drive",
     googlecalendar: "Google Calendar",
+    googlesheets: "Google Sheets",
+    googledocs: "Google Docs",
+    outlook: "Outlook",
+    discord: "Discord",
+    linear: "Linear",
+    asana: "Asana",
+    trello: "Trello",
+    jira: "Jira",
     buffer: "Buffer",
+    twitter: "X",
+    linkedin: "LinkedIn",
   };
   const key = s.toLowerCase().replace(/\s+/g, "");
   if (map[key]) return map[key];
@@ -50,6 +60,18 @@ function guessToolSlug(toolkit: string, text: string): string | null {
   }
   if (tk === "hubspot") return "HUBSPOT_LIST_CONTACTS";
   if (tk === "github") return "GITHUB_LIST_REPOS_FOR_AUTHENTICATED_USER";
+  if (tk === "googlecalendar") return "GOOGLECALENDAR_LIST_EVENTS";
+  if (tk === "googledrive") return "GOOGLEDRIVE_LIST_FILES";
+  if (tk === "googlesheets") return "GOOGLESHEETS_LIST_SPREADSHEETS";
+  if (tk === "outlook") {
+    if (/send/.test(t)) return null;
+    return "OUTLOOK_LIST_MESSAGES";
+  }
+  if (tk === "discord") return "DISCORD_LIST_CHANNELS";
+  if (tk === "linear") return "LINEAR_LIST_ISSUES";
+  if (tk === "asana") return "ASANA_GET_TASKS";
+  if (tk === "trello") return "TRELLO_GET_BOARDS";
+  if (tk === "jira") return "JIRA_GET_ALL_PROJECTS";
   return null;
 }
 
@@ -58,7 +80,6 @@ function formatToolResult(result: unknown): string {
     if (result == null) return "Done.";
     if (typeof result === "string") return result.slice(0, 1200);
     const obj = result as Record<string, unknown>;
-    // Prefer human-ish fields when present
     const data = (obj.data ?? obj.result ?? obj) as Record<string, unknown>;
     if (Array.isArray(data)) {
       return `Found ${data.length} item${data.length === 1 ? "" : "s"}.`;
