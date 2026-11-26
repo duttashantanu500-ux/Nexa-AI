@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader } from "@/components/PageHeader";
 import { loadOperatorState } from "@/lib/operatorStore";
@@ -97,7 +97,6 @@ function friendlyError(msg: string): string {
 
 export default function ConnectionsPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [userId, setUserId] = useState("");
   const [q, setQ] = useState("");
   const [toolkits, setToolkits] = useState<Toolkit[]>([]);
@@ -179,16 +178,26 @@ export default function ConnectionsPage() {
   }, [router, refreshAccounts, loadCatalogue]);
 
   useEffect(() => {
-    const err = searchParams.get("error");
-    const connected = searchParams.get("connected");
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get("error");
+    const connected = params.get("connected");
     if (err) setError(friendlyError(err));
     if (connected) {
       setBanner(
         `${friendlyAppName(connected)} connected. You can assign it to an AI employee anytime.`
       );
-      if (userId) void refreshAccounts(userId);
     }
-  }, [searchParams, userId, refreshAccounts]);
+  }, []);
+
+  useEffect(() => {
+    if (userId && typeof window !== "undefined") {
+      const connected = new URLSearchParams(window.location.search).get(
+        "connected"
+      );
+      if (connected) void refreshAccounts(userId);
+    }
+  }, [userId, refreshAccounts]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -199,7 +208,6 @@ export default function ConnectionsPage() {
 
   const remaining = Math.max(0, MAX_COMPOSIO_CONNECTIONS - used);
 
-  /** Show connected + in-progress; hide pure expired noise unless reconnect needed */
   const visibleAccounts = useMemo(() => {
     return accounts.filter(
       (a) =>
