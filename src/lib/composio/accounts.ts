@@ -1,6 +1,7 @@
 /**
  * Composio connected-account helpers (REST only).
- * Enforces max 3 active connected accounts per Nexa user.
+ * Enforces max 3 *fully connected* accounts per Nexa user.
+ * Pending / connecting / expired do not consume slots.
  */
 
 import { MAX_COMPOSIO_CONNECTIONS } from "@/lib/plans";
@@ -14,15 +15,16 @@ export type ComposioAccountView = {
   isDisabled?: boolean;
 };
 
-function isActiveStatus(status: string, isDisabled?: boolean): boolean {
+/** True only when the user finished sign-in and the account is usable. */
+export function isFullyConnected(
+  status: string,
+  isDisabled?: boolean
+): boolean {
   if (isDisabled) return false;
   const s = String(status || "").toUpperCase();
+  // Do NOT count INITIALIZING / INITIATED / PENDING / EXPIRED / FAILED
   return (
-    s === "ACTIVE" ||
-    s === "CONNECTED" ||
-    s === "ENABLED" ||
-    s === "SUCCESS" ||
-    s === "INITIATED"
+    s === "ACTIVE" || s === "CONNECTED" || s === "ENABLED" || s === "SUCCESS"
   );
 }
 
@@ -65,7 +67,8 @@ export async function countActiveConnections(
   nexaUserId: string
 ): Promise<number> {
   const accounts = await listUserAccounts(nexaUserId);
-  return accounts.filter((a) => isActiveStatus(a.status, a.isDisabled)).length;
+  return accounts.filter((a) => isFullyConnected(a.status, a.isDisabled))
+    .length;
 }
 
 export async function assertCanAddConnection(
