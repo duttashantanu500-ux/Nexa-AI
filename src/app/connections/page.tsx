@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader } from "@/components/PageHeader";
 import { loadOperatorState } from "@/lib/operatorStore";
@@ -88,6 +88,7 @@ function friendlyError(msg: string): string {
 
 export default function ConnectionsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [userId, setUserId] = useState("");
   const [q, setQ] = useState("");
   const [toolkits, setToolkits] = useState<Toolkit[]>([]);
@@ -169,6 +170,18 @@ export default function ConnectionsPage() {
   }, [router, refreshAccounts, loadCatalogue]);
 
   useEffect(() => {
+    const err = searchParams.get("error");
+    const connected = searchParams.get("connected");
+    if (err) setError(friendlyError(err));
+    if (connected) {
+      setBanner(
+        `${friendlyAppName(connected)} connected. You can assign it to an AI employee anytime.`
+      );
+      if (userId) void refreshAccounts(userId);
+    }
+  }, [searchParams, userId, refreshAccounts]);
+
+  useEffect(() => {
     const t = setTimeout(() => {
       void loadCatalogue(q.trim());
     }, 280);
@@ -188,30 +201,8 @@ export default function ConnectionsPage() {
     setConnecting(slug);
     setBanner("");
     setError("");
-    try {
-      const res = await fetch("/api/composio/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, toolkit: slug }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!data.ok) {
-        setError(friendlyError(data.error || "Could not start connection."));
-        setConnecting(null);
-        return;
-      }
-      if (data.redirectUrl) {
-        window.location.href = data.redirectUrl;
-        return;
-      }
-      setBanner(
-        "Almost done — finish signing in with the app in the window that opened, then come back here."
-      );
-      await refreshAccounts(userId);
-    } catch {
-      setError("Could not start connection. Please try again.");
-    }
-    setConnecting(null);
+    // Nexa-owned entry URL — starts on your domain, then opens the app’s sign-in
+    window.location.href = `/connect/${encodeURIComponent(slug)}?userId=${encodeURIComponent(userId)}`;
   };
 
   const disconnect = async (id: string) => {
