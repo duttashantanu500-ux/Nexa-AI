@@ -10,10 +10,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function deepPickRedirect(obj: any, depth = 0): string | null {
-  if (!obj || depth > 4) return null;
+  if (!obj || depth > 5) return null;
   if (typeof obj === "string") {
-    if (/^https?:\/\//i.test(obj) && /composio|oauth|authorize|connect/i.test(obj))
-      return obj;
+    if (/^https?:\/\//i.test(obj)) return obj;
     return null;
   }
   if (typeof obj !== "object") return null;
@@ -82,7 +81,6 @@ async function listAuthConfigsForToolkit(toolkit: string): Promise<any[]> {
     const items = extractItems(res.data);
     if (!items.length) continue;
 
-    // Prefer configs for this toolkit when listing unfiltered
     const matched = items.filter((a: any) => {
       const slug = String(
         a.toolkit?.slug || a.toolkit_slug || a.appName || a.app || ""
@@ -97,8 +95,7 @@ async function listAuthConfigsForToolkit(toolkit: string): Promise<any[]> {
 
 async function createManagedAuthConfig(
   toolkit: string
-): Promise<{ id: string | null; error?: string }> {
-  // Docs default: { toolkit: { slug }, auth_config: { type: use_composio_managed_auth } }
+): Promise<{ id: string | null; status?: number; error?: string }> {
   const bodies = [
     {
       toolkit: { slug: toolkit },
@@ -111,56 +108,58 @@ async function createManagedAuthConfig(
       toolkit: { slug: toolkit },
       auth_config: { type: "use_composio_managed_auth" },
     },
-    {
-      toolkit: { slug: toolkit },
-    },
+    { toolkit: { slug: toolkit } },
   ];
+
+  let lastStatus = 0;
+  let lastMsg = "";
 
   for (const body of bodies) {
     const created = await composioFetch(`/auth_configs`, {
       method: "POST",
       body: JSON.stringify(body),
     });
-    const id = extractAuthConfigId(created.data);
-    if (created.ok && id) return { id };
-
-    // If already exists, list again
-    const msg = String(
+    lastStatus = created.status;
+    lastMsg = String(
       created.data?.error?.message ||
         created.data?.message ||
         created.data?.error ||
         ""
-    ).toLowerCase();
-    if (/exist|already|duplicate/i.test(msg)) {
+    );
+    const id = extractAuthConfigId(created.data);
+    if (created.ok && id) return { id, status: created.status };
+
+    if (/exist|already|duplicate/i.test(lastMsg)) {
       const listed = await listAuthConfigsForToolkit(toolkit);
       const existing = extractAuthConfigId(listed[0]);
       if (existing) return { id: existing };
     }
   }
 
-  // Final list attempt
   const listed = await listAuthConfigsForToolkit(toolkit);
   const existing = extractAuthConfigId(listed[0]);
   if (existing) return { id: existing };
 
   return {
     id: null,
-    error: "Could not prepare sign-in for this app.",
+    status: lastStatus,
+    error: lastMsg || "Could not prepare sign-in for this app.",
   };
 }
 
 async function resolveAuthConfigId(
   toolkit: string
-): Promise<{ id: string | null; error?: string }> {
+): Promise<{ id: string | null; status?: number; error?: string }> {
   const listed = await listAuthConfigsForToolkit(toolkit);
   if (listed.length) {
     const preferred =
-      listed.find((a: any) =>
-        a.is_composio_managed === true ||
-        a.isComposioManaged === true ||
-        /composio|managed|default|nexa/i.test(
-          String(a.name || a.type || a.auth_scheme || "")
-        )
+      listed.find(
+        (a: any) =>
+          a.is_composio_managed === true ||
+          a.isComposioManaged === true ||
+          /composio|managed|default|nexa/i.test(
+            String(a.name || a.type || a.auth_scheme || "")
+          )
       ) || listed[0];
     const id = extractAuthConfigId(preferred);
     if (id) return { id };
@@ -183,11 +182,6 @@ async function createLinkSession(
       auth_config_id: authConfigId,
       user_id: userId,
     },
-    {
-      authConfigId: authConfigId,
-      userId: userId,
-      callbackUrl: callbackUrl,
-    },
   ];
 
   for (const body of bodies) {
@@ -208,7 +202,6 @@ async function createLinkSession(
     }
   }
 
-  // Fallback: initiate (custom / non-OAuth still supported)
   const initiatedBodies = [
     {
       auth_config: { id: authConfigId },
@@ -240,6 +233,125 @@ async function createLinkSession(
     id: null,
     error: "Couldn’t open the sign-in page for that app.",
   };
+}
+
+/** Session-based authorize (does not require pre-created auth configs). */
+async function authorizeViaSession(
+  userId: string,
+  toolkit: string,
+  callbackUrl: string
+): Promise<{ redirectUrl: string | null; id: string | null }> {
+  const sessionBodies = [
+    { user_id: userId },
+    { userId },
+    { user_id: userId, toolkits: [toolkit] },
+    { user_id: userId, manage_connections: false },
+  ];
+
+  const sessionPaths = [
+    `/tool_router/session`,
+    `/sessions`,
+    `/tool_router/sessions`,
+  ];
+
+  let sessionId: string | null = null;
+  let sessionData: any = null;
+
+  for (const path of sessionPaths) {
+    for (const body of sessionBodies) {
+      const created = await composioFetch(path, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      if (!created.ok) continue;
+      sessionData = created.data;
+      sessionId =
+        created.data?.session_id ||
+        created.data?.id ||
+        created.data?.sessionId ||
+        created.data?.data?.id ||
+        null;
+      // Sometimes create response already includes authorize URL for toolkit
+      const early = deepPickRedirect(created.data);
+      if (early) return { redirectUrl: early, id: sessionId };
+      if (sessionId) break;
+    }
+    if (sessionId) break;
+  }
+
+  // Authorize toolkit on session
+  const authorizePaths = sessionId
+    ? [
+        `/tool_router/session/${encodeURIComponent(sessionId)}/authorize`,
+        `/sessions/${encodeURIComponent(sessionId)}/authorize`,
+        `/tool_router/sessions/${encodeURIComponent(sessionId)}/authorize`,
+      ]
+    : [];
+
+  const authorizeBodies = [
+    { toolkit },
+    { toolkit_slug: toolkit },
+    { toolkit, callback_url: callbackUrl },
+    { toolkit_slug: toolkit, callback_url: callbackUrl },
+    { slug: toolkit, callback_url: callbackUrl },
+  ];
+
+  for (const path of authorizePaths) {
+    for (const body of authorizeBodies) {
+      const auth = await composioFetch(path, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      const url = deepPickRedirect(auth.data);
+      if (auth.ok && url) {
+        return {
+          redirectUrl: url,
+          id:
+            auth.data?.id ||
+            auth.data?.connected_account_id ||
+            sessionId ||
+            null,
+        };
+      }
+    }
+  }
+
+  // Single-shot authorize endpoints (no session id)
+  const oneShot = [
+    {
+      path: `/toolkits/authorize`,
+      body: { user_id: userId, toolkit, callback_url: callbackUrl },
+    },
+    {
+      path: `/toolkits/${encodeURIComponent(toolkit)}/authorize`,
+      body: { user_id: userId, callback_url: callbackUrl },
+    },
+    {
+      path: `/connected_accounts/link`,
+      body: {
+        user_id: userId,
+        toolkit,
+        toolkit_slug: toolkit,
+        callback_url: callbackUrl,
+      },
+    },
+  ];
+
+  for (const attempt of oneShot) {
+    const res = await composioFetch(attempt.path, {
+      method: "POST",
+      body: JSON.stringify(attempt.body),
+    });
+    const url = deepPickRedirect(res.data);
+    if (res.ok && url) {
+      return {
+        redirectUrl: url,
+        id: res.data?.id || res.data?.connected_account_id || null,
+      };
+    }
+  }
+
+  return { redirectUrl: null, id: null };
 }
 
 /** POST — start app connection. Enforces max 3 accounts. */
@@ -300,41 +412,47 @@ export async function POST(req: NextRequest) {
       toolkit
     )}`;
 
+    // 1) Preferred: existing/created auth config + link session
     const auth = await resolveAuthConfigId(toolkit);
-    if (!auth.id) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            auth.error ||
-            "This app isn’t ready to connect yet. Try another app or try again in a moment.",
-          step: "auth_config",
-        },
-        { status: 502 }
-      );
+    if (auth.id) {
+      const result = await createLinkSession(auth.id, userId, callbackUrl);
+      if (result.redirectUrl) {
+        return NextResponse.json({
+          ok: true,
+          redirectUrl: result.redirectUrl,
+          connectionRequestId: result.id,
+          used: gate.used,
+          remaining: Math.max(0, 3 - gate.used),
+        });
+      }
     }
 
-    const result = await createLinkSession(auth.id, userId, callbackUrl);
-    if (!result.redirectUrl) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            result.error ||
-            "Couldn’t open the sign-in page for that app. Try another app or try again in a moment.",
-          step: "link",
-        },
-        { status: 502 }
-      );
+    // 2) Fallback: session / toolkit authorize (no pre-made auth config)
+    const sessionAuth = await authorizeViaSession(userId, toolkit, callbackUrl);
+    if (sessionAuth.redirectUrl) {
+      return NextResponse.json({
+        ok: true,
+        redirectUrl: sessionAuth.redirectUrl,
+        connectionRequestId: sessionAuth.id,
+        used: gate.used,
+        remaining: Math.max(0, 3 - gate.used),
+      });
     }
 
-    return NextResponse.json({
-      ok: true,
-      redirectUrl: result.redirectUrl,
-      connectionRequestId: result.id,
-      used: gate.used,
-      remaining: Math.max(0, 3 - gate.used),
-    });
+    const permissionHint =
+      auth.status === 401 || auth.status === 403
+        ? " Your project key can’t create app sign-in setups. In the connections dashboard, create a full Project API key (not a limited/scoped one), or add Auth Configs for the apps you need, then try again."
+        : "";
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          `Couldn’t open the sign-in page for that app.${permissionHint}`.trim(),
+        step: auth.id ? "link" : "auth_config",
+      },
+      { status: 502 }
+    );
   } catch {
     return NextResponse.json(
       {
