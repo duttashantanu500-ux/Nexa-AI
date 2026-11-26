@@ -58,6 +58,19 @@ function extractAuthConfigId(data: any): string | null {
   return null;
 }
 
+function toolkitSlugOf(a: any): string {
+  return String(
+    a?.toolkit?.slug ||
+      a?.toolkit_slug ||
+      a?.appName ||
+      a?.app ||
+      a?.app_name ||
+      ""
+  )
+    .trim()
+    .toLowerCase();
+}
+
 function extractItems(data: any): any[] {
   if (!data) return [];
   if (Array.isArray(data)) return data;
@@ -68,27 +81,30 @@ function extractItems(data: any): any[] {
   return [];
 }
 
+/** Only return auth configs that belong to this exact toolkit. */
 async function listAuthConfigsForToolkit(toolkit: string): Promise<any[]> {
+  const tk = toolkit.toLowerCase();
   const queries = [
-    `/auth_configs?toolkit_slug=${encodeURIComponent(toolkit)}&limit=20`,
-    `/auth_configs?toolkit=${encodeURIComponent(toolkit)}&limit=20`,
-    `/auth_configs?limit=50`,
+    `/auth_configs?toolkit_slug=${encodeURIComponent(tk)}&limit=20`,
+    `/auth_configs?toolkit=${encodeURIComponent(tk)}&limit=20`,
   ];
 
   for (const path of queries) {
     const res = await composioFetch(path);
     if (!res.ok) continue;
     const items = extractItems(res.data);
-    if (!items.length) continue;
-
     const matched = items.filter((a: any) => {
-      const slug = String(
-        a.toolkit?.slug || a.toolkit_slug || a.appName || a.app || ""
-      ).toLowerCase();
-      return !slug || slug === toolkit;
+      const slug = toolkitSlugOf(a);
+      // Strict: must match. Never accept empty slug (that caused Gmail reuse).
+      return slug === tk;
     });
     if (matched.length) return matched;
-    if (path.includes("toolkit")) return items;
+  }
+
+  // Unfiltered list — still strict match only
+  const all = await composioFetch(`/auth_configs?limit=100`);
+  if (all.ok) {
+    return extractItems(all.data).filter((a: any) => toolkitSlugOf(a) === tk);
   }
   return [];
 }
@@ -96,19 +112,20 @@ async function listAuthConfigsForToolkit(toolkit: string): Promise<any[]> {
 async function createManagedAuthConfig(
   toolkit: string
 ): Promise<{ id: string | null; status?: number; error?: string }> {
+  const tk = toolkit.toLowerCase();
   const bodies = [
     {
-      toolkit: { slug: toolkit },
+      toolkit: { slug: tk },
       auth_config: {
         type: "use_composio_managed_auth",
-        name: `${toolkit}-nexa`,
+        name: `${tk}-nexa`,
       },
     },
     {
-      toolkit: { slug: toolkit },
+      toolkit: { slug: tk },
       auth_config: { type: "use_composio_managed_auth" },
     },
-    { toolkit: { slug: toolkit } },
+    { toolkit: { slug: tk } },
   ];
 
   let lastStatus = 0;
@@ -127,16 +144,20 @@ async function createManagedAuthConfig(
         ""
     );
     const id = extractAuthConfigId(created.data);
-    if (created.ok && id) return { id, status: created.status };
+    // Prefer id from response; verify toolkit when present
+    const respSlug = toolkitSlugOf(created.data?.toolkit || created.data);
+    if (created.ok && id && (!respSlug || respSlug === tk)) {
+      return { id, status: created.status };
+    }
 
     if (/exist|already|duplicate/i.test(lastMsg)) {
-      const listed = await listAuthConfigsForToolkit(toolkit);
+      const listed = await listAuthConfigsForToolkit(tk);
       const existing = extractAuthConfigId(listed[0]);
       if (existing) return { id: existing };
     }
   }
 
-  const listed = await listAuthConfigsForToolkit(toolkit);
+  const listed = await listAuthConfigsForToolkit(tk);
   const existing = extractAuthConfigId(listed[0]);
   if (existing) return { id: existing };
 
@@ -164,13 +185,15 @@ async function resolveAuthConfigId(
     const id = extractAuthConfigId(preferred);
     if (id) return { id };
   }
+  // Always create for this toolkit — never fall back to another app’s config
   return createManagedAuthConfig(toolkit);
 }
 
 async function createLinkSession(
   authConfigId: string,
   userId: string,
-  callbackUrl: string
+  callbackUrl: string,
+  toolkit: string
 ): Promise<{ redirectUrl: string | null; id: string | null; error?: string }> {
   const bodies = [
     {
@@ -211,6 +234,7 @@ async function createLinkSession(
       auth_config_id: authConfigId,
       user_id: userId,
       callback_url: callbackUrl,
+      toolkit,
     },
   ];
 
@@ -233,125 +257,6 @@ async function createLinkSession(
     id: null,
     error: "Couldn’t open the sign-in page for that app.",
   };
-}
-
-/** Session-based authorize (does not require pre-created auth configs). */
-async function authorizeViaSession(
-  userId: string,
-  toolkit: string,
-  callbackUrl: string
-): Promise<{ redirectUrl: string | null; id: string | null }> {
-  const sessionBodies = [
-    { user_id: userId },
-    { userId },
-    { user_id: userId, toolkits: [toolkit] },
-    { user_id: userId, manage_connections: false },
-  ];
-
-  const sessionPaths = [
-    `/tool_router/session`,
-    `/sessions`,
-    `/tool_router/sessions`,
-  ];
-
-  let sessionId: string | null = null;
-  let sessionData: any = null;
-
-  for (const path of sessionPaths) {
-    for (const body of sessionBodies) {
-      const created = await composioFetch(path, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      if (!created.ok) continue;
-      sessionData = created.data;
-      sessionId =
-        created.data?.session_id ||
-        created.data?.id ||
-        created.data?.sessionId ||
-        created.data?.data?.id ||
-        null;
-      // Sometimes create response already includes authorize URL for toolkit
-      const early = deepPickRedirect(created.data);
-      if (early) return { redirectUrl: early, id: sessionId };
-      if (sessionId) break;
-    }
-    if (sessionId) break;
-  }
-
-  // Authorize toolkit on session
-  const authorizePaths = sessionId
-    ? [
-        `/tool_router/session/${encodeURIComponent(sessionId)}/authorize`,
-        `/sessions/${encodeURIComponent(sessionId)}/authorize`,
-        `/tool_router/sessions/${encodeURIComponent(sessionId)}/authorize`,
-      ]
-    : [];
-
-  const authorizeBodies = [
-    { toolkit },
-    { toolkit_slug: toolkit },
-    { toolkit, callback_url: callbackUrl },
-    { toolkit_slug: toolkit, callback_url: callbackUrl },
-    { slug: toolkit, callback_url: callbackUrl },
-  ];
-
-  for (const path of authorizePaths) {
-    for (const body of authorizeBodies) {
-      const auth = await composioFetch(path, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      const url = deepPickRedirect(auth.data);
-      if (auth.ok && url) {
-        return {
-          redirectUrl: url,
-          id:
-            auth.data?.id ||
-            auth.data?.connected_account_id ||
-            sessionId ||
-            null,
-        };
-      }
-    }
-  }
-
-  // Single-shot authorize endpoints (no session id)
-  const oneShot = [
-    {
-      path: `/toolkits/authorize`,
-      body: { user_id: userId, toolkit, callback_url: callbackUrl },
-    },
-    {
-      path: `/toolkits/${encodeURIComponent(toolkit)}/authorize`,
-      body: { user_id: userId, callback_url: callbackUrl },
-    },
-    {
-      path: `/connected_accounts/link`,
-      body: {
-        user_id: userId,
-        toolkit,
-        toolkit_slug: toolkit,
-        callback_url: callbackUrl,
-      },
-    },
-  ];
-
-  for (const attempt of oneShot) {
-    const res = await composioFetch(attempt.path, {
-      method: "POST",
-      body: JSON.stringify(attempt.body),
-    });
-    const url = deepPickRedirect(res.data);
-    if (res.ok && url) {
-      return {
-        redirectUrl: url,
-        id: res.data?.id || res.data?.connected_account_id || null,
-      };
-    }
-  }
-
-  return { redirectUrl: null, id: null };
 }
 
 /** POST — start app connection. Enforces max 3 accounts. */
@@ -412,47 +317,49 @@ export async function POST(req: NextRequest) {
       toolkit
     )}`;
 
-    // 1) Preferred: existing/created auth config + link session
     const auth = await resolveAuthConfigId(toolkit);
-    if (auth.id) {
-      const result = await createLinkSession(auth.id, userId, callbackUrl);
-      if (result.redirectUrl) {
-        return NextResponse.json({
-          ok: true,
-          redirectUrl: result.redirectUrl,
-          connectionRequestId: result.id,
-          used: gate.used,
-          remaining: Math.max(0, 3 - gate.used),
-        });
-      }
+    if (!auth.id) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            auth.error ||
+            "Couldn’t prepare sign-in for that app. Try another app or try again.",
+          step: "auth_config",
+          toolkit,
+        },
+        { status: 502 }
+      );
     }
 
-    // 2) Fallback: session / toolkit authorize (no pre-made auth config)
-    const sessionAuth = await authorizeViaSession(userId, toolkit, callbackUrl);
-    if (sessionAuth.redirectUrl) {
-      return NextResponse.json({
-        ok: true,
-        redirectUrl: sessionAuth.redirectUrl,
-        connectionRequestId: sessionAuth.id,
-        used: gate.used,
-        remaining: Math.max(0, 3 - gate.used),
-      });
-    }
-
-    const permissionHint =
-      auth.status === 401 || auth.status === 403
-        ? " Your project key can’t create app sign-in setups. In the connections dashboard, create a full Project API key (not a limited/scoped one), or add Auth Configs for the apps you need, then try again."
-        : "";
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          `Couldn’t open the sign-in page for that app.${permissionHint}`.trim(),
-        step: auth.id ? "link" : "auth_config",
-      },
-      { status: 502 }
+    const result = await createLinkSession(
+      auth.id,
+      userId,
+      callbackUrl,
+      toolkit
     );
+    if (!result.redirectUrl) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            result.error ||
+            "Couldn’t open the sign-in page for that app. Try again in a moment.",
+          step: "link",
+          toolkit,
+        },
+        { status: 502 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      redirectUrl: result.redirectUrl,
+      connectionRequestId: result.id,
+      toolkit,
+      used: gate.used,
+      remaining: Math.max(0, 3 - gate.used),
+    });
   } catch {
     return NextResponse.json(
       {
