@@ -51,14 +51,23 @@ function friendlyAppName(raw: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function isFullyConnected(status: string, isDisabled?: boolean): boolean {
+  if (isDisabled) return false;
+  return /^(ACTIVE|CONNECTED|SUCCESS|ENABLED)$/i.test(String(status || ""));
+}
+
+function isConnecting(status: string): boolean {
+  return /INITIALIZING|INITIATED|PENDING/i.test(String(status || ""));
+}
+
 function friendlyStatus(status: string, isDisabled?: boolean): string {
   if (isDisabled) return "Paused";
   const s = String(status || "").toUpperCase();
   if (/ACTIVE|CONNECTED|SUCCESS|ENABLED/.test(s)) return "Connected";
   if (/EXPIRED|REVOKED/.test(s)) return "Needs reconnect";
   if (/FAILED|ERROR/.test(s)) return "Needs attention";
-  if (/PENDING|INITIATED/.test(s)) return "Connecting…";
-  return "Connected";
+  if (/INITIALIZING|INITIATED|PENDING/.test(s)) return "Connecting…";
+  return s || "Unknown";
 }
 
 function friendlyError(msg: string): string {
@@ -190,6 +199,14 @@ export default function ConnectionsPage() {
 
   const remaining = Math.max(0, MAX_COMPOSIO_CONNECTIONS - used);
 
+  /** Show connected + in-progress; hide pure expired noise unless reconnect needed */
+  const visibleAccounts = useMemo(() => {
+    return accounts.filter(
+      (a) =>
+        isFullyConnected(a.status, a.isDisabled) || isConnecting(a.status)
+    );
+  }, [accounts]);
+
   const connect = async (slug: string) => {
     if (!userId || connecting) return;
     if (used >= MAX_COMPOSIO_CONNECTIONS) {
@@ -201,7 +218,6 @@ export default function ConnectionsPage() {
     setConnecting(slug);
     setBanner("");
     setError("");
-    // Nexa-owned entry URL — starts on your domain, then opens the app’s sign-in
     window.location.href = `/connect/${encodeURIComponent(slug)}?userId=${encodeURIComponent(userId)}`;
   };
 
@@ -231,7 +247,7 @@ export default function ConnectionsPage() {
   const connectedSlugs = useMemo(() => {
     const set = new Set<string>();
     for (const a of accounts) {
-      if (/ACTIVE|CONNECTED|SUCCESS/i.test(a.status) && !a.isDisabled) {
+      if (isFullyConnected(a.status, a.isDisabled)) {
         set.add(a.toolkit.toLowerCase());
       }
     }
@@ -257,7 +273,7 @@ export default function ConnectionsPage() {
             </span>
           </div>
           <p className="mt-1 text-xs text-zinc-500">
-            Each connected app account uses one slot. Disconnecting frees a slot.
+            Only finished connections use a slot. “Connecting…” does not count.
           </p>
         </div>
 
@@ -278,13 +294,13 @@ export default function ConnectionsPage() {
           </h2>
           {loadingAcc ? (
             <p className="text-sm text-zinc-500">Loading…</p>
-          ) : accounts.length === 0 ? (
+          ) : visibleAccounts.length === 0 ? (
             <p className="text-sm text-zinc-500">
               None yet. Search below and connect an app.
             </p>
           ) : (
             <ul className="space-y-2">
-              {accounts.map((a) => (
+              {visibleAccounts.map((a) => (
                 <li
                   key={a.id}
                   className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
@@ -303,7 +319,11 @@ export default function ConnectionsPage() {
                     onClick={() => void disconnect(a.id)}
                     className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200"
                   >
-                    {disconnecting === a.id ? "…" : "Disconnect"}
+                    {disconnecting === a.id
+                      ? "…"
+                      : isConnecting(a.status)
+                        ? "Cancel"
+                        : "Disconnect"}
                   </button>
                 </li>
               ))}
