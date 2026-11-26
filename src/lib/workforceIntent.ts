@@ -32,9 +32,7 @@ export type WorkforceResult = {
   hireHint?: string;
   agentId?: string;
   useModel?: boolean;
-  /** Suggested Composio toolkit when app_operation */
   toolkit?: string;
-  /** Suggested tool slug when known */
   toolSlug?: string;
 };
 
@@ -51,21 +49,31 @@ const STATUS =
   /\b(what (did|have) (my )?(employees?|agents?|team) (do|done|accomplish)|work (board|history|status)|failed runs?|needs attention|today'?s (work|results?))\b/i;
 
 const CONNECTIONS =
-  /\b(connect(ions?|ed)?|integrat|oauth)\b|\b(connect|link)\b.*\b(gmail|notion|slack|hubspot|buffer|github|google)\b|\bmanage connections\b|\bwhich apps? (are )?(connected|linked)\b/i;
+  /\b(connect(ions?|ed)?|integrat)\b|\b(connect|link)\b.*\b(gmail|notion|slack|hubspot|buffer|github|google|outlook|discord|linear|asana|trello|jira)\b|\bmanage connections\b|\bwhich apps? (are )?(connected|linked)\b/i;
 
-/** Detect ask to use a connected app (not just open Connections). */
 const APP_OP =
-  /\b(check|fetch|get|list|read|show|summarize|send|post|create|find|search)\b.*\b(gmail|email|slack|notion|hubspot|github|google drive|calendar|leads?|contacts?|messages?|inbox)\b|\b(gmail|slack|notion|hubspot|github)\b.*\b(messages?|emails?|pages?|contacts?|leads?|issues?)\b/i;
+  /\b(check|fetch|get|list|read|show|summarize|send|post|create|find|search)\b.*\b(gmail|email|slack|notion|hubspot|github|google drive|calendar|outlook|discord|linear|asana|trello|jira|sheets?|docs?)\b|\b(gmail|slack|notion|hubspot|github|outlook|discord|linear)\b.*\b(messages?|emails?|pages?|contacts?|leads?|issues?|tasks?)\b/i;
 
 function detectToolkit(t: string): string | undefined {
   const lower = t.toLowerCase();
-  if (/\bgmail\b|\binbox\b|\bemail\b/.test(lower)) return "gmail";
+  if (/\bgmail\b|\binbox\b/.test(lower) && !/outlook/.test(lower)) return "gmail";
+  if (/\boutlook\b/.test(lower)) return "outlook";
   if (/\bslack\b/.test(lower)) return "slack";
   if (/\bnotion\b/.test(lower)) return "notion";
-  if (/\bhubspot\b|\bleads?\b|\bcontacts?\b/.test(lower)) return "hubspot";
+  if (/\bhubspot\b/.test(lower)) return "hubspot";
   if (/\bgithub\b/.test(lower)) return "github";
   if (/\bgoogle drive\b|\bgdrive\b/.test(lower)) return "googledrive";
-  if (/\bcalendar\b/.test(lower)) return "googlecalendar";
+  if (/\bgoogle calendar\b|\bcalendar\b/.test(lower)) return "googlecalendar";
+  if (/\bgoogle sheets?\b|\bsheets?\b/.test(lower)) return "googlesheets";
+  if (/\bgoogle docs?\b/.test(lower)) return "googledocs";
+  if (/\bdiscord\b/.test(lower)) return "discord";
+  if (/\blinear\b/.test(lower)) return "linear";
+  if (/\basana\b/.test(lower)) return "asana";
+  if (/\btrello\b/.test(lower)) return "trello";
+  if (/\bjira\b/.test(lower)) return "jira";
+  if (/\btwitter\b|\b\bx\b.*\b(post|tweet)/.test(lower)) return "twitter";
+  if (/\blinkedin\b/.test(lower)) return "linkedin";
+  if (/\bemail\b/.test(lower)) return "gmail";
   return undefined;
 }
 
@@ -114,7 +122,7 @@ export function classifyWorkforceMessage(
     return {
       intent: "chat",
       message:
-        "I can chat briefly, but Nexa is built for your digital workforce — hiring AI employees, connecting apps, and running real work.\n\nTry: “Hire a research employee”, “What did my team do today?”, or “Connect Gmail”.",
+        "I can chat briefly, but Nexa is built for your digital workforce — hiring AI employees, connecting apps, and running real work.\n\nTry: “Hire a research employee”, “What did my team do today?”, or “Connect Slack”.",
       useModel: false,
     };
   }
@@ -190,13 +198,12 @@ export function classifyWorkforceMessage(
     };
   }
 
-  // App operation before generic connections / unsupported
   if (APP_OP.test(t)) {
     const toolkit = detectToolkit(t);
     return {
       intent: "app_operation",
       message: toolkit
-        ? `I'll use your connected ${toolkit} account if it's linked. Checking Connections…`
+        ? `I'll use your connected ${toolkit} account if it's linked. Checking…`
         : "I'll check your connected apps for that request.",
       toolkit,
     };
@@ -206,7 +213,7 @@ export function classifyWorkforceMessage(
     return {
       intent: "connections",
       message:
-        "Open Connections to browse the app marketplace and link up to 3 accounts. Status there is the source of truth.",
+        "Open Connections to browse available apps and link up to 3 accounts. Status there is the source of truth.",
       navigateTo: "/connections",
     };
   }
