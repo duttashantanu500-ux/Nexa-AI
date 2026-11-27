@@ -11,6 +11,7 @@ import {
   executeComposioTool,
   listComposioConnections,
 } from "@/lib/composio/chatTools";
+import { formatToolResult } from "@/lib/composio/formatToolResult";
 
 type Line = { role: "user" | "assistant"; content: string };
 
@@ -81,48 +82,6 @@ function guessToolSlug(toolkit: string, text: string): string | null {
   if (tk === "jira") return "JIRA_GET_ALL_PROJECTS";
   if (tk === "airtable") return "AIRTABLE_LIST_BASES";
   return null;
-}
-
-function formatToolResult(result: unknown): string {
-  try {
-    if (result == null) return "Done.";
-    if (typeof result === "string") return result.slice(0, 1600);
-    const obj = result as Record<string, unknown>;
-    const data = (obj.data ?? obj.result ?? obj) as unknown;
-    if (Array.isArray(data)) {
-      return `Found ${data.length} item${data.length === 1 ? "" : "s"}.`;
-    }
-    if (data && typeof data === "object") {
-      const d = data as Record<string, unknown>;
-      // Common list shapes
-      for (const k of [
-        "messages",
-        "emails",
-        "channels",
-        "items",
-        "files",
-        "events",
-        "repos",
-        "repositories",
-        "issues",
-        "tasks",
-        "boards",
-        "contacts",
-        "pages",
-      ]) {
-        if (Array.isArray(d[k])) {
-          const n = (d[k] as unknown[]).length;
-          return `Found ${n} ${k}.`;
-        }
-      }
-      const keys = Object.keys(d);
-      if (keys.length === 0) return "Done.";
-      return "Got a response from the app.";
-    }
-    return "Done.";
-  } catch {
-    return "Done.";
-  }
 }
 
 function softError(msg: string): string {
@@ -214,7 +173,6 @@ export function WorkforceChat({
       return;
     }
 
-    // Refresh so we don't use stale connection state
     const listed = await listComposioConnections(userId);
     const active = listed.accounts.filter((a) => isActive(a.status));
     setAccounts(active);
