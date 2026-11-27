@@ -49,7 +49,7 @@ const STATUS =
   /\b(what (did|have) (my )?(employees?|agents?|team) (do|done|accomplish)|work (board|history|status)|failed runs?|needs attention|today'?s (work|results?))\b/i;
 
 const CONNECTIONS =
-  /\b(connect(ions?|ed)?|integrat)\b|\b(connect|link)\b.*\b(gmail|notion|slack|hubspot|buffer|github|google|outlook|discord|linear|asana|trello|jira)\b|\bmanage connections\b|\bwhich apps? (are )?(connected|linked)\b/i;
+  /\b(connect(ions?|ed)?|integrat)\b|\b(connect|link)\b.*\b[a-z0-9_-]{2,}\b|\bmanage connections\b|\bwhich apps? (are )?(connected|linked)\b/i;
 
 const APP_OP =
   /\b(check|fetch|get|list|read|show|summarize|send|post|create|find|search)\b.*\b(gmail|email|slack|notion|hubspot|github|google drive|calendar|outlook|discord|linear|asana|trello|jira|sheets?|docs?)\b|\b(gmail|slack|notion|hubspot|github|outlook|discord|linear)\b.*\b(messages?|emails?|pages?|contacts?|leads?|issues?|tasks?)\b/i;
@@ -93,36 +93,27 @@ export function classifyWorkforceMessage(
   const name = ctx.userName ? `, ${ctx.userName}` : "";
 
   if (!t) {
-    return {
-      intent: "clarify",
-      message: `What do you need${name}? You can hire an AI employee, check your team, use connected apps, or ask about recent work.`,
-    };
+    return { intent: "clarify", message: `What do you need${name}?` };
   }
 
   if (REFUSE.test(t)) {
     return {
       intent: "refuse",
-      message:
-        "I can't help with that. Nexa only runs authorized work with your connected tools and hired AI employees.",
+      message: "I can’t help with that.",
     };
   }
 
   if (/^(hi|hello|hey|yo|good (morning|afternoon|evening))[\s!.]*$/i.test(t)) {
-    const team =
-      ctx.agentNames.length > 0
-        ? ` You have ${ctx.agentNames.length} AI employee${ctx.agentNames.length === 1 ? "" : "s"} on the team.`
-        : " Your digital team is empty — hire a role when you're ready.";
     return {
       intent: "chat",
-      message: `Hi${name}.${team} Hire talent, assign real work, or manage connections. What should we do?`,
+      message: `Hi${name}.`,
     };
   }
 
   if (/\b(joke|poem|weather|lyrics|recipe|homework|capital of)\b/i.test(t)) {
     return {
       intent: "chat",
-      message:
-        "I can chat briefly, but Nexa is built for your digital workforce — hiring AI employees, connecting apps, and running real work.\n\nTry: “Hire a research employee”, “What did my team do today?”, or “Connect Slack”.",
+      message: "I’m here for your AI team, apps, and real work.",
       useModel: false,
     };
   }
@@ -135,8 +126,7 @@ export function classifyWorkforceMessage(
   ) {
     return {
       intent: "hire",
-      message:
-        "Opening the Hiring Desk with your request. Describe the role there — or keep typing if you want to refine it first.",
+      message: "Opening Hiring Desk.",
       navigateTo: "/agents/new",
       hireHint: t,
     };
@@ -147,14 +137,12 @@ export function classifyWorkforceMessage(
     const recent = ctx.recentRunCount || 0;
     let line =
       recent > 0
-        ? `There ${recent === 1 ? "is" : "are"} ${recent} recent run${recent === 1 ? "" : "s"} on the Work Board.`
+        ? `${recent} recent run${recent === 1 ? "" : "s"} on the Work Board.`
         : "No recent work runs yet.";
-    if (failed > 0) {
-      line += ` ${failed} need attention.`;
-    }
+    if (failed > 0) line += ` ${failed} need attention.`;
     return {
       intent: "work_status",
-      message: `${line}\n\nOpen the Work Board for full history — I never invent completed tasks.`,
+      message: line,
       navigateTo: "/activity",
     };
   }
@@ -163,8 +151,7 @@ export function classifyWorkforceMessage(
     if (!ctx.agentNames.length) {
       return {
         intent: "list_team",
-        message:
-          "You don't have any AI employees yet. Open the Hiring Desk to hire your first role.",
+        message: "No AI employees yet.",
         navigateTo: "/agents/new",
       };
     }
@@ -174,7 +161,7 @@ export function classifyWorkforceMessage(
       .join("\n");
     return {
       intent: "list_team",
-      message: `Your AI team:\n${list}\n\nOpen AI Team to manage them, or name someone to run their work.`,
+      message: list,
       navigateTo: "/agents",
     };
   }
@@ -183,7 +170,7 @@ export function classifyWorkforceMessage(
   if (agentId && /\b(run|start|execute|do (the )?work)\b/i.test(t)) {
     return {
       intent: "run_employee",
-      message: "Opening that employee so you can start their assigned work.",
+      message: "Opening that employee.",
       navigateTo: `/agents/${agentId}`,
       agentId,
     };
@@ -192,7 +179,7 @@ export function classifyWorkforceMessage(
   if (agentId && /\b(open|manage|edit|talk to|configure)\b/i.test(t)) {
     return {
       intent: "configure_hint",
-      message: "Opening that employee’s management chat.",
+      message: "Opening that employee.",
       navigateTo: `/agents/${agentId}`,
       agentId,
     };
@@ -202,9 +189,7 @@ export function classifyWorkforceMessage(
     const toolkit = detectToolkit(t);
     return {
       intent: "app_operation",
-      message: toolkit
-        ? `I'll use your connected ${toolkit} account if it's linked. Checking…`
-        : "I'll check your connected apps for that request.",
+      message: toolkit ? `Checking ${toolkit}…` : "Checking connected apps…",
       toolkit,
     };
   }
@@ -212,47 +197,23 @@ export function classifyWorkforceMessage(
   if (CONNECTIONS.test(t)) {
     return {
       intent: "connections",
-      message:
-        "Open Connections to browse available apps and link up to 3 accounts. Status there is the source of truth.",
+      message: "Opening Connections.",
       navigateTo: "/connections",
     };
   }
 
   return {
     intent: "chat",
-    message:
-      "I can help you hire AI employees, review your team, check work status, or use connected apps.\n\nExamples:\n• Hire a social media employee\n• What did my team do today?\n• Check my latest Gmail messages\n• Connect Slack",
+    message: "Tell me what you need — team, work, or a connected app.",
     useModel: false,
   };
 }
 
-export function workforceEmptyState(ctx: WorkforceContext): {
+/** @deprecated Phase 1: empty state chips removed from UI */
+export function workforceEmptyState(_ctx: WorkforceContext): {
   headline: string;
   body: string;
   suggestions: string[];
 } {
-  const n = ctx.agentNames.length;
-  const teamLine =
-    n === 0
-      ? "Your digital team is empty."
-      : `You have ${n} AI employee${n === 1 ? "" : "s"}.`;
-  const suggestions =
-    n === 0
-      ? [
-          "Hire a research employee",
-          "Connect Gmail",
-          "What can Nexa do?",
-          "Manage connections",
-        ]
-      : [
-          "What did my team do today?",
-          "List my employees",
-          "Check my latest Gmail messages",
-          "Manage connections",
-        ];
-  return {
-    headline: "Command your AI team",
-    body: `${teamLine} Hire roles, connect apps (up to 3), and run real work — not simulated demos.`,
-    suggestions,
-  };
+  return { headline: "", body: "", suggestions: [] };
 }
