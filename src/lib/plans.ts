@@ -18,6 +18,8 @@ export interface PlanLimits {
   maxAgents: number;
   maxConnections: number;
   maxRunsPerMonth: number;
+  /** User + assistant messages counted per calendar month (UTC). */
+  maxChatMessagesPerMonth: number;
   vaultBytes: number;
   advancedWorkflow: boolean;
   priorityExecution: boolean;
@@ -46,7 +48,8 @@ export const PLAN_FREE: PlanDefinition = {
   limits: {
     maxAgents: 3,
     maxConnections: MAX_FREE_CONNECTIONS,
-    maxRunsPerMonth: 100,
+    maxRunsPerMonth: 250,
+    maxChatMessagesPerMonth: 5_000,
     vaultBytes: 500 * 1024 * 1024,
     advancedWorkflow: false,
     priorityExecution: false,
@@ -54,7 +57,8 @@ export const PLAN_FREE: PlanDefinition = {
   features: [
     "Up to 3 AI employees",
     "Up to 5 app connections",
-    "100 work runs per month",
+    "250 work runs per month",
+    "5,000 chat messages per month",
     "500 MB Vault storage",
     "Scheduling",
     "AI Employee Builder",
@@ -68,18 +72,20 @@ export const PLAN_PRO: PlanDefinition = {
   priceMonthlyCents: 900,
   priceLabel: "$9/month",
   limits: {
-    maxAgents: 20,
+    maxAgents: 50,
     maxConnections: Number.POSITIVE_INFINITY,
-    maxRunsPerMonth: 1000,
-    vaultBytes: 5 * 1024 * 1024 * 1024,
+    maxRunsPerMonth: 10_000,
+    maxChatMessagesPerMonth: 200_000,
+    vaultBytes: 10 * 1024 * 1024 * 1024,
     advancedWorkflow: true,
     priorityExecution: true,
   },
   features: [
-    "Up to 20 AI employees",
+    "Up to 50 AI employees",
     "Unlimited app connections",
-    "1,000 work runs per month",
-    "5 GB Vault storage",
+    "10,000 work runs per month",
+    "200,000 chat messages per month",
+    "10 GB Vault storage",
     "Scheduling",
     "AI Employee Builder",
     "Work history",
@@ -124,6 +130,7 @@ export const LIMIT_MESSAGES = {
   connections:
     "You’ve used all connection slots on Free (5). Disconnect one or upgrade to Pro for unlimited connections.",
   runs: "You’ve used all work runs for this month. Upgrade to Pro for more.",
+  chat: "You’ve used all chat messages for this month. Upgrade to Pro for a much higher limit.",
   vault: "Your Vault is full. Upgrade to Pro for more storage.",
   advancedWorkflow: "Advanced workflow options need Pro.",
   priorityExecution: "Priority execution needs Pro.",
