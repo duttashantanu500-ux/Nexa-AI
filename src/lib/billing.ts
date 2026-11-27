@@ -1,5 +1,5 @@
 /**
- * Nexa billing helpers — Dodo Payments + plan resolution.
+ * Nexa billing helpers — Dodo Payments + plan resolution + usage.
  * Server-side only for secrets; status reads may run from API routes.
  */
 
@@ -56,6 +56,7 @@ export interface BillingSnapshot {
   periodEnd: string | null;
   cancelAtPeriodEnd: boolean;
   runsUsedThisPeriod: number;
+  chatMessagesThisPeriod: number;
 }
 
 function defaultFreeSnapshot(): BillingSnapshot {
@@ -68,6 +69,7 @@ function defaultFreeSnapshot(): BillingSnapshot {
     periodEnd: null,
     cancelAtPeriodEnd: false,
     runsUsedThisPeriod: 0,
+    chatMessagesThisPeriod: 0,
   };
 }
 
@@ -112,6 +114,22 @@ export async function getRunsUsed(
   return typeof data?.runs_count === "number" ? data.runs_count : 0;
 }
 
+export async function getChatMessagesUsed(
+  userId: string,
+  periodStart?: string | null
+): Promise<number> {
+  const sb = adminDb();
+  if (!sb || !userId) return 0;
+  const key = currentPeriodKey(periodStart);
+  const { data } = await sb
+    .from("nexa_usage_monthly")
+    .select("chat_messages")
+    .eq("user_id", userId)
+    .eq("period_key", key)
+    .maybeSingle();
+  return typeof data?.chat_messages === "number" ? data.chat_messages : 0;
+}
+
 export async function incrementRunCount(
   userId: string,
   periodStart?: string | null
@@ -133,14 +151,48 @@ export async function incrementRunCount(
   return next;
 }
 
+/** Count chat turns (user and/or assistant) for this user this month. */
+export async function incrementChatMessages(
+  userId: string,
+  by = 1,
+  periodStart?: string | null
+): Promise<number> {
+  const sb = adminDb();
+  if (!sb || !userId) return 0;
+  const n = Math.max(1, Math.min(20, Math.floor(by || 1)));
+  const key = currentPeriodKey(periodStart);
+  const existing = await getChatMessagesUsed(userId, periodStart);
+  const runs = await getRunsUsed(userId, periodStart);
+  const next = existing + n;
+  await sb.from("nexa_usage_monthly").upsert(
+    {
+      user_id: userId,
+      period_key: key,
+      runs_count: runs,
+      chat_messages: next,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,period_key" }
+  );
+  return next;
+}
+
 export async function getBillingSnapshot(userId: string): Promise<BillingSnapshot> {
   if (!userId) return defaultFreeSnapshot();
   const row = await getUserSubscription(userId);
-  if (!row) return defaultFreeSnapshot();
+  if (!row) {
+    const runs = await getRunsUsed(userId, null);
+    const chat = await getChatMessagesUsed(userId, null);
+    return { ...defaultFreeSnapshot(), runsUsedThisPeriod: runs, chatMessagesThisPeriod: chat };
+  }
 
   const planId = effectivePlanId(row.status);
   const plan = getPlan(planId);
   const runsUsedThisPeriod = await getRunsUsed(userId, row.current_period_start);
+  const chatMessagesThisPeriod = await getChatMessagesUsed(
+    userId,
+    row.current_period_start
+  );
 
   return {
     planId,
@@ -150,6 +202,7 @@ export async function getBillingSnapshot(userId: string): Promise<BillingSnapsho
     periodEnd: row.current_period_end,
     cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
     runsUsedThisPeriod,
+    chatMessagesThisPeriod,
   };
 }
 
@@ -174,7 +227,6 @@ export async function ensureFreeSubscription(userId: string): Promise<void> {
   );
 }
 
-/** Map Dodo subscription status → Nexa status */
 export function mapDodoStatus(
   dodoStatus: string | undefined,
   cancelAtPeriodEnd?: boolean
@@ -284,10 +336,6 @@ export async function createCheckoutSession(params: {
   }
 }
 
-/**
- * Verify Standard Webhooks signature (Dodo).
- * signed_content = `${webhook-id}.${webhook-timestamp}.${rawBody}`
- */
 export function verifyDodoWebhookSignature(params: {
   rawBody: string;
   webhookId: string;
