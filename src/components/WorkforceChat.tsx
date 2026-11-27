@@ -98,6 +98,15 @@ function softError(msg: string): string {
   );
 }
 
+function recordChatUsage(userId: string, by = 2) {
+  if (!userId) return;
+  void fetch("/api/usage/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, by }),
+  }).catch(() => {});
+}
+
 export function WorkforceChat({
   agentNames = [],
   agentIdsByName = {},
@@ -297,6 +306,8 @@ export function WorkforceChat({
     setBusy(true);
     try {
       await handleResult(t);
+      const uid = loadOperatorState().user?.id || "";
+      recordChatUsage(uid, 2);
     } finally {
       setBusy(false);
     }
