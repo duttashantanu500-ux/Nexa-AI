@@ -57,12 +57,14 @@ export async function GET(req: NextRequest) {
             ? null
             : plan.limits.maxConnections,
         maxRunsPerMonth: plan.limits.maxRunsPerMonth,
+        maxChatMessagesPerMonth: plan.limits.maxChatMessagesPerMonth,
         vaultBytes: plan.limits.vaultBytes,
         advancedWorkflow: plan.limits.advancedWorkflow,
         priorityExecution: plan.limits.priorityExecution,
       },
       features: plan.features,
       runsUsedThisPeriod: snap.runsUsedThisPeriod,
+      chatMessagesThisPeriod: snap.chatMessagesThisPeriod,
       periodEnd: snap.periodEnd,
       cancelAtPeriodEnd: snap.cancelAtPeriodEnd,
       plans: {
