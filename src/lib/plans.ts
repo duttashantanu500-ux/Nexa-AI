@@ -1,9 +1,6 @@
 /**
  * Nexa plan definitions — Free + Pro only.
  * Source of truth for limits and feature flags.
- *
- * Connections: hard max of 3 connected app accounts for every plan
- * (Composio marketplace policy — not raised for Pro).
  */
 
 export type PlanId = "free" | "pro";
@@ -35,8 +32,11 @@ export interface PlanDefinition {
   features: string[];
 }
 
-/** Product-wide connection slot limit (Composio-connected accounts). */
-export const MAX_COMPOSIO_CONNECTIONS = 3;
+/** Free-plan connection slots (Composio-connected accounts). */
+export const MAX_FREE_CONNECTIONS = 5;
+
+/** @deprecated use plan-aware limits; kept for older imports */
+export const MAX_COMPOSIO_CONNECTIONS = MAX_FREE_CONNECTIONS;
 
 export const PLAN_FREE: PlanDefinition = {
   id: "free",
@@ -45,7 +45,7 @@ export const PLAN_FREE: PlanDefinition = {
   priceLabel: "$0/month",
   limits: {
     maxAgents: 3,
-    maxConnections: MAX_COMPOSIO_CONNECTIONS,
+    maxConnections: MAX_FREE_CONNECTIONS,
     maxRunsPerMonth: 100,
     vaultBytes: 500 * 1024 * 1024,
     advancedWorkflow: false,
@@ -53,7 +53,7 @@ export const PLAN_FREE: PlanDefinition = {
   },
   features: [
     "Up to 3 AI employees",
-    "Up to 3 app connections",
+    "Up to 5 app connections",
     "100 work runs per month",
     "500 MB Vault storage",
     "Scheduling",
@@ -69,7 +69,7 @@ export const PLAN_PRO: PlanDefinition = {
   priceLabel: "$9/month",
   limits: {
     maxAgents: 20,
-    maxConnections: MAX_COMPOSIO_CONNECTIONS,
+    maxConnections: Number.POSITIVE_INFINITY,
     maxRunsPerMonth: 1000,
     vaultBytes: 5 * 1024 * 1024 * 1024,
     advancedWorkflow: true,
@@ -77,7 +77,7 @@ export const PLAN_PRO: PlanDefinition = {
   },
   features: [
     "Up to 20 AI employees",
-    "Up to 3 app connections",
+    "Unlimited app connections",
     "1,000 work runs per month",
     "5 GB Vault storage",
     "Scheduling",
@@ -120,16 +120,13 @@ export function formatBytesLimit(bytes: number): string {
 
 export const LIMIT_MESSAGES = {
   agents:
-    "Uh oh — you don't have enough space for another AI employee. Unlock more by upgrading to Pro.",
+    "You’ve reached your AI employee limit. Upgrade to Pro for more seats.",
   connections:
-    "You can connect up to 3 app accounts. Disconnect one to free a slot, then try again.",
-  runs: "Uh oh — you've used all work runs for this month. Unlock more by upgrading to Pro.",
-  vault:
-    "Uh oh — your Vault is full. Unlock more storage by upgrading to Pro.",
-  advancedWorkflow:
-    "Uh oh — advanced workflow options need Pro. Unlock them by upgrading.",
-  priorityExecution:
-    "Uh oh — priority execution needs Pro. Unlock it by upgrading.",
+    "You’ve used all connection slots on Free (5). Disconnect one or upgrade to Pro for unlimited connections.",
+  runs: "You’ve used all work runs for this month. Upgrade to Pro for more.",
+  vault: "Your Vault is full. Upgrade to Pro for more storage.",
+  advancedWorkflow: "Advanced workflow options need Pro.",
+  priorityExecution: "Priority execution needs Pro.",
 } as const;
 
 export type LimitKind = keyof typeof LIMIT_MESSAGES;
