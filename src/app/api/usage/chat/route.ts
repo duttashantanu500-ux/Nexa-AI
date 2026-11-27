@@ -3,6 +3,7 @@ import {
   getBillingSnapshot,
   incrementChatMessages,
 } from "@/lib/billing";
+import { LIMIT_MESSAGES } from "@/lib/plans";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,8 +17,31 @@ export async function POST(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ ok: false, error: "Sign in required." }, { status: 401 });
     }
+
+    const snap = await getBillingSnapshot(userId);
+    const max = snap.limits.maxChatMessagesPerMonth;
+    const used = snap.chatMessagesThisPeriod;
+
+    if (Number.isFinite(max) && used >= max) {
+      return NextResponse.json(
+        {
+          ok: false,
+          limitReached: true,
+          error: LIMIT_MESSAGES.chat,
+          chatMessages: used,
+          maxChatMessagesPerMonth: max,
+        },
+        { status: 429 }
+      );
+    }
+
     const total = await incrementChatMessages(userId, by);
-    return NextResponse.json({ ok: true, chatMessages: total });
+    return NextResponse.json({
+      ok: true,
+      chatMessages: total,
+      maxChatMessagesPerMonth: max,
+      remaining: Number.isFinite(max) ? Math.max(0, max - total) : null,
+    });
   } catch {
     return NextResponse.json({ ok: false, error: "Could not record usage." }, { status: 500 });
   }
@@ -31,12 +55,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Sign in required." }, { status: 401 });
     }
     const snap = await getBillingSnapshot(userId);
+    const maxChat = snap.limits.maxChatMessagesPerMonth;
     return NextResponse.json({
       ok: true,
       planId: snap.planId,
       runsUsedThisPeriod: snap.runsUsedThisPeriod,
       maxRunsPerMonth: snap.limits.maxRunsPerMonth,
       chatMessagesThisPeriod: snap.chatMessagesThisPeriod,
+      maxChatMessagesPerMonth: maxChat,
+      chatRemaining: Number.isFinite(maxChat)
+        ? Math.max(0, maxChat - snap.chatMessagesThisPeriod)
+        : null,
     });
   } catch {
     return NextResponse.json({ ok: false, error: "Could not load usage." }, { status: 500 });
