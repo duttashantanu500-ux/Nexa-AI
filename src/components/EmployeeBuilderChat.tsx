@@ -16,35 +16,23 @@ import {
 } from "@/lib/operatorStore";
 import { patchServerAgent } from "@/lib/serverAgentClient";
 import {
-  LiveAccountPicker,
-  livePickToMessage,
-  type LivePick,
-} from "@/components/LiveAccountPicker";
-import {
   injectNotionParentIntoSteps,
   resolveNotionParentForHire,
-  setNotionParent,
 } from "@/lib/notionParent";
 import {
   classifyEmployeeMessage,
-  emptyStateForEmployee,
   type IntentContext,
 } from "@/lib/employeeIntent";
+import { listComposioConnections } from "@/lib/composio/chatTools";
 
-/** In-memory connection status cache to avoid repeated status fetches */
 let connectedCache: { at: number; map: Record<string, boolean> } | null = null;
 const CONNECTED_TTL_MS = 30_000;
 
-/**
- * Chat for an EXISTING AI employee.
- * Understands intent: conversation, real work, configuration, history, refusal.
- */
 export function EmployeeBuilderChat({
   agentId,
   onRequestWork,
 }: {
   agentId: string;
-  /** Called when the user clearly asks to run assigned work */
   onRequestWork?: () => void | Promise<void>;
 }) {
   const [lines, setLines] = useState<BuilderLine[]>([]);
@@ -61,11 +49,9 @@ export function EmployeeBuilderChat({
     const schedule = a?.schedule;
     let scheduleLabel = "";
     if (schedule?.enabled && schedule.frequency && schedule.frequency !== "once") {
-      scheduleLabel = `${schedule.frequency}${schedule.time ? ` at ${schedule.time}` : ""}${
-        schedule.timezone ? ` (${schedule.timezone})` : ""
-      }`;
-    } else if (schedule?.frequency === "once" || !schedule?.enabled) {
-      scheduleLabel = "manual / on demand";
+      scheduleLabel = `${schedule.frequency}${schedule.time ? ` at ${schedule.time}` : ""}`;
+    } else {
+      scheduleLabel = "on demand";
     }
     return {
       agentName: a?.name || "this employee",
@@ -77,11 +63,6 @@ export function EmployeeBuilderChat({
       scheduleLabel,
     };
   }, [agentId, lines, ready, busy]);
-
-  const empty = useMemo(
-    () => emptyStateForEmployee({ ...intentCtxBase, connected: {} }),
-    [intentCtxBase]
-  );
 
   const agentName = intentCtxBase.agentName;
 
@@ -111,14 +92,12 @@ export function EmployeeBuilderChat({
       const s = loadOperatorState();
       const uid = s.user?.id || "";
       if (!uid) return out;
-      const res = await fetch(
-        `/api/connections/status?userId=${encodeURIComponent(uid)}`,
-        { cache: "no-store" }
-      );
-      const data = await res.json().catch(() => ({}));
-      const statuses = data?.statuses || {};
-      for (const [k, v] of Object.entries(statuses)) {
-        out[k] = String((v as { status?: string })?.status || "") === "connected";
+      const listed = await listComposioConnections(uid);
+      for (const a of listed.accounts) {
+        const tk = String(a.toolkit || "").toLowerCase();
+        if (/ACTIVE|CONNECTED|SUCCESS|ENABLED/i.test(a.status)) {
+          out[tk] = true;
+        }
       }
       connectedCache = { at: now, map: out };
     } catch {
@@ -200,7 +179,7 @@ export function EmployeeBuilderChat({
     const content =
       data.message ||
       (data.declined
-        ? "I can only help update this AI employee — schedule, tools, or steps."
+        ? "I can only help update this AI employee."
         : "Could not update this employee.");
     setLines((prev) => [
       ...prev,
@@ -219,14 +198,7 @@ export function EmployeeBuilderChat({
     setLines(next);
     setBusy(true);
     try {
-      const needsConnectionCheck =
-        /\b(start|run|work|publish|post|create|list|send|hubspot|notion|slack|buffer|connect)\b/i.test(
-          trimmed
-        );
-      const connected = needsConnectionCheck
-        ? await loadConnectedMap()
-        : connectedCache?.map || {};
-
+      const connected = await loadConnectedMap();
       const ctx: IntentContext = {
         ...intentCtxBase,
         connected,
@@ -271,63 +243,18 @@ export function EmployeeBuilderChat({
     await sendText(text);
   };
 
-  const onPick = (pick: LivePick) => {
-    if (busy) return;
-    if (pick.kind === "notion_page" && pick.option?.id) {
-      setNotionParent(pick.option.id);
-      const agentRow = getAgent(agentId);
-      if (agentRow?.steps?.length) {
-        const steps = injectNotionParentIntoSteps(
-          agentRow.steps.map((st) => ({
-            ...st,
-            config: (st.config || {}) as Record<string, unknown>,
-          })),
-          pick.option.id,
-          pick.option.label
-        );
-        updateAgent(agentId, { steps: steps as any });
-        void patchServerAgent(agentId, { steps });
-      }
-    }
-    void sendText(livePickToMessage(pick));
-  };
-
   return (
     <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
       <div className="border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-          Talk to this employee
+          {agentName}
         </h2>
-        <p className="text-xs text-zinc-500">
-          Manage {agentName} — work, schedule, steps, or history.
-        </p>
       </div>
-      <div className="border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
-        <LiveAccountPicker onPick={onPick} />
-      </div>
-      <div className="flex max-h-96 flex-col gap-2 overflow-y-auto px-4 py-3">
+      <div className="flex max-h-96 min-h-[10rem] flex-col gap-2 overflow-y-auto px-4 py-3">
         {lines.length === 0 && !busy && (
-          <div className="space-y-3 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950">
-            <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">
-              {empty.headline}
-            </p>
-            <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
-              {empty.body}
-            </pre>
-            <div className="flex flex-wrap gap-2 pt-1">
-              {empty.suggestions.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void sendText(s)}
-                  className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-indigo-600"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
+          <p className="text-sm text-zinc-400 dark:text-zinc-500">
+            Message this employee…
+          </p>
         )}
         {lines.map((l, i) => (
           <div
@@ -338,13 +265,9 @@ export function EmployeeBuilderChat({
                 : "mr-6 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
             }
           >
-            {l.role === "assistant" ? (
-              <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                {l.content}
-              </pre>
-            ) : (
-              l.content
-            )}
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+              {l.content}
+            </pre>
           </div>
         ))}
         {busy && <p className="text-xs text-zinc-500">Working…</p>}
@@ -361,7 +284,7 @@ export function EmployeeBuilderChat({
               void send();
             }
           }}
-          placeholder='e.g. "Start work" · "Every Friday at 5 PM" · "What did you work on?"'
+          placeholder="Message…"
           className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
           disabled={busy}
         />
