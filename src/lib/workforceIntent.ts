@@ -10,8 +10,10 @@ export type WorkforceIntent =
   | "work_status"
   | "run_employee"
   | "connections"
+  | "list_connected"
   | "app_operation"
   | "configure_hint"
+  | "capabilities"
   | "refuse"
   | "clarify"
   | "unsupported";
@@ -22,7 +24,12 @@ export type WorkforceContext = {
   agentIdsByName: Record<string, string>;
   recentRunCount?: number;
   failedRunCount?: number;
+  /** Friendly labels of fully connected apps, e.g. ["Gmail","Slack"] */
   connectedLabels?: string[];
+  /** toolkit slugs that are fully connected */
+  connectedSlugs?: string[];
+  connectionUsed?: number;
+  connectionLimit?: number;
 };
 
 export type WorkforceResult = {
@@ -48,32 +55,58 @@ const LIST_TEAM =
 const STATUS =
   /\b(what (did|have) (my )?(employees?|agents?|team) (do|done|accomplish)|work (board|history|status)|failed runs?|needs attention|today'?s (work|results?))\b/i;
 
-const CONNECTIONS =
-  /\b(connect(ions?|ed)?|integrat)\b|\b(connect|link)\b.*\b[a-z0-9_-]{2,}\b|\bmanage connections\b|\bwhich apps? (are )?(connected|linked)\b/i;
+const LIST_CONNECTED =
+  /\b(what('?s| is| are)? (my )?(connected|linked) (apps?|accounts?|tools?)|which apps? (are )?(connected|linked)|show (my )?connections?|list (my )?(connected )?apps?)\b/i;
+
+const CONNECTIONS_NAV =
+  /\b(open connections?|manage connections?|go to connections?|connect (an? )?app)\b/i;
+
+const CAPABILITIES =
+  /\b(what can you do|what do you do|how (do|can) (i|you)|help me|capabilities|what (apps?|tools?) (can|do) you)\b/i;
 
 const APP_OP =
-  /\b(check|fetch|get|list|read|show|summarize|send|post|create|find|search)\b.*\b(gmail|email|slack|notion|hubspot|github|google drive|calendar|outlook|discord|linear|asana|trello|jira|sheets?|docs?)\b|\b(gmail|slack|notion|hubspot|github|outlook|discord|linear)\b.*\b(messages?|emails?|pages?|contacts?|leads?|issues?|tasks?)\b/i;
+  /\b(check|fetch|get|list|read|show|summarize|send|post|create|find|search|open)\b/i;
 
-function detectToolkit(t: string): string | undefined {
+const KNOWN_TOOLKITS: { re: RegExp; slug: string }[] = [
+  { re: /\bgmail\b|\binbox\b(?!.*outlook)/i, slug: "gmail" },
+  { re: /\boutlook\b/i, slug: "outlook" },
+  { re: /\bslack\b/i, slug: "slack" },
+  { re: /\bnotion\b/i, slug: "notion" },
+  { re: /\bhubspot\b/i, slug: "hubspot" },
+  { re: /\bgithub\b/i, slug: "github" },
+  { re: /\bgoogle drive\b|\bgdrive\b/i, slug: "googledrive" },
+  { re: /\bgoogle calendar\b|\bcalendar\b/i, slug: "googlecalendar" },
+  { re: /\bgoogle sheets?\b|\bsheets?\b/i, slug: "googlesheets" },
+  { re: /\bgoogle docs?\b/i, slug: "googledocs" },
+  { re: /\bdiscord\b/i, slug: "discord" },
+  { re: /\blinear\b/i, slug: "linear" },
+  { re: /\basana\b/i, slug: "asana" },
+  { re: /\btrello\b/i, slug: "trello" },
+  { re: /\bjira\b/i, slug: "jira" },
+  { re: /\btwitter\b|\btweet/i, slug: "twitter" },
+  { re: /\blinkedin\b/i, slug: "linkedin" },
+  { re: /\bairtable\b/i, slug: "airtable" },
+  { re: /\byoutube\b/i, slug: "youtube" },
+  { re: /\bemail\b/i, slug: "gmail" },
+];
+
+export function detectToolkit(
+  t: string,
+  connectedSlugs?: string[]
+): string | undefined {
   const lower = t.toLowerCase();
-  if (/\bgmail\b|\binbox\b/.test(lower) && !/outlook/.test(lower)) return "gmail";
-  if (/\boutlook\b/.test(lower)) return "outlook";
-  if (/\bslack\b/.test(lower)) return "slack";
-  if (/\bnotion\b/.test(lower)) return "notion";
-  if (/\bhubspot\b/.test(lower)) return "hubspot";
-  if (/\bgithub\b/.test(lower)) return "github";
-  if (/\bgoogle drive\b|\bgdrive\b/.test(lower)) return "googledrive";
-  if (/\bgoogle calendar\b|\bcalendar\b/.test(lower)) return "googlecalendar";
-  if (/\bgoogle sheets?\b|\bsheets?\b/.test(lower)) return "googlesheets";
-  if (/\bgoogle docs?\b/.test(lower)) return "googledocs";
-  if (/\bdiscord\b/.test(lower)) return "discord";
-  if (/\blinear\b/.test(lower)) return "linear";
-  if (/\basana\b/.test(lower)) return "asana";
-  if (/\btrello\b/.test(lower)) return "trello";
-  if (/\bjira\b/.test(lower)) return "jira";
-  if (/\btwitter\b|\b\bx\b.*\b(post|tweet)/.test(lower)) return "twitter";
-  if (/\blinkedin\b/.test(lower)) return "linkedin";
-  if (/\bemail\b/.test(lower)) return "gmail";
+  for (const { re, slug } of KNOWN_TOOLKITS) {
+    if (re.test(lower)) return slug;
+  }
+  // Match against connected toolkit names appearing in the message
+  if (connectedSlugs?.length) {
+    for (const slug of connectedSlugs) {
+      const s = slug.toLowerCase();
+      if (s && lower.includes(s)) return s;
+      const spaced = s.replace(/[_-]+/g, " ");
+      if (spaced.length > 2 && lower.includes(spaced)) return s;
+    }
+  }
   return undefined;
 }
 
@@ -91,30 +124,55 @@ export function classifyWorkforceMessage(
 ): WorkforceResult {
   const t = (text || "").trim();
   const name = ctx.userName ? `, ${ctx.userName}` : "";
+  const labels = ctx.connectedLabels || [];
+  const used = ctx.connectionUsed ?? labels.length;
+  const limit = ctx.connectionLimit ?? 3;
 
   if (!t) {
     return { intent: "clarify", message: `What do you need${name}?` };
   }
 
   if (REFUSE.test(t)) {
-    return {
-      intent: "refuse",
-      message: "I can’t help with that.",
-    };
+    return { intent: "refuse", message: "I can’t help with that." };
   }
 
   if (/^(hi|hello|hey|yo|good (morning|afternoon|evening))[\s!.]*$/i.test(t)) {
+    return { intent: "chat", message: `Hi${name}.` };
+  }
+
+  if (CAPABILITIES.test(t) || /\bwhat can nexa do\b/i.test(t)) {
+    const apps =
+      labels.length > 0
+        ? `Connected apps (${used}/${limit}): ${labels.join(", ")}.`
+        : `No apps connected yet (${used}/${limit} slots).`;
+    const team =
+      ctx.agentNames.length > 0
+        ? ` Team: ${ctx.agentNames.length} AI employee${ctx.agentNames.length === 1 ? "" : "s"}.`
+        : " No AI employees yet.";
     return {
-      intent: "chat",
-      message: `Hi${name}.`,
+      intent: "capabilities",
+      message: `${apps}${team} I can work with connected apps, your team, and the Work Board — only real actions, never fake results.`,
     };
   }
 
-  if (/\b(joke|poem|weather|lyrics|recipe|homework|capital of)\b/i.test(t)) {
+  if (LIST_CONNECTED.test(t)) {
+    if (!labels.length) {
+      return {
+        intent: "list_connected",
+        message: `Nothing connected (${used}/${limit} slots). Open Connections to link an app.`,
+      };
+    }
     return {
-      intent: "chat",
-      message: "I’m here for your AI team, apps, and real work.",
-      useModel: false,
+      intent: "list_connected",
+      message: `Connected (${used}/${limit}): ${labels.join(", ")}.`,
+    };
+  }
+
+  if (CONNECTIONS_NAV.test(t)) {
+    return {
+      intent: "connections",
+      message: "Opening Connections.",
+      navigateTo: "/connections",
     };
   }
 
@@ -185,31 +243,39 @@ export function classifyWorkforceMessage(
     };
   }
 
-  if (APP_OP.test(t)) {
-    const toolkit = detectToolkit(t);
+  const toolkit = detectToolkit(t, ctx.connectedSlugs);
+  if (toolkit && APP_OP.test(t)) {
     return {
       intent: "app_operation",
-      message: toolkit ? `Checking ${toolkit}…` : "Checking connected apps…",
+      message: `Working with ${toolkit}…`,
       toolkit,
     };
   }
 
-  if (CONNECTIONS.test(t)) {
+  // App name alone with connected account → treat as app operation prompt
+  if (toolkit && (ctx.connectedSlugs || []).includes(toolkit)) {
     return {
-      intent: "connections",
-      message: "Opening Connections.",
-      navigateTo: "/connections",
+      intent: "app_operation",
+      message: `Working with ${toolkit}…`,
+      toolkit,
+    };
+  }
+
+  if (/\b(joke|poem|weather|lyrics|recipe|homework|capital of)\b/i.test(t)) {
+    return {
+      intent: "chat",
+      message: "I’m here for your AI team, apps, and real work.",
+      useModel: false,
     };
   }
 
   return {
     intent: "chat",
-    message: "Tell me what you need — team, work, or a connected app.",
+    message: "Tell me what you need.",
     useModel: false,
   };
 }
 
-/** @deprecated Phase 1: empty state chips removed from UI */
 export function workforceEmptyState(_ctx: WorkforceContext): {
   headline: string;
   body: string;
