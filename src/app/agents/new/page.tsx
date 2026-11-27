@@ -104,7 +104,6 @@ function NewAgentInner() {
     void fetchBillingStatus().then(setBilling).catch(() => null);
   }, [router]);
 
-  // Accept hire intent from Home WorkforceChat
   useEffect(() => {
     if (!chatReady || hireHintStarted.current) return;
     let hint = "";
@@ -310,11 +309,9 @@ function NewAgentInner() {
             );
             saveOperatorState(st);
           }
-        } else if (!saved.ok) {
-          console.warn("[Nexa] server hire save:", saved.message);
         }
-      } catch (e) {
-        console.warn("[Nexa] server hire save failed", e);
+      } catch {
+        /* */
       }
       if (scopeRef.current && agentId) {
         migrateBuilderChat(scopeRef.current, employeeScopeId(agentId));
@@ -362,16 +359,10 @@ function NewAgentInner() {
           <h1 className="mt-1 text-xl font-semibold text-zinc-900 dark:text-zinc-50">
             Hiring Desk
           </h1>
-          <p className="mt-0.5 text-sm text-zinc-500">
-            Pick a role template or describe the job — hire once, reuse for ongoing work.
-          </p>
         </div>
 
         {showDesk && lines.length === 0 && !busy && (
           <section className="mb-6 space-y-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-              Role templates
-            </h2>
             <div className="grid gap-2 sm:grid-cols-2">
               {ROLE_TEMPLATES.map((t) => (
                 <button
@@ -386,13 +377,9 @@ function NewAgentInner() {
                     {t.role} · {t.department}
                   </div>
                   <p className="mt-1 text-xs text-zinc-500 line-clamp-2">{t.description}</p>
-                  <p className="mt-1 text-[11px] text-zinc-400 line-clamp-2">{t.constraints}</p>
                 </button>
               ))}
             </div>
-            <p className="text-xs text-zinc-400">
-              Or describe a custom role below. Templates only use tools Nexa already supports.
-            </p>
           </section>
         )}
 
@@ -406,13 +393,6 @@ function NewAgentInner() {
                   : "mr-4 rounded-xl border border-zinc-100 bg-white px-3 py-2 text-sm text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
               }
             >
-              {l.thinking && l.thinking.length > 0 && (
-                <ul className="mb-2 space-y-0.5 text-xs text-zinc-400">
-                  {l.thinking.map((t, j) => (
-                    <li key={j}>✓ {t}</li>
-                  ))}
-                </ul>
-              )}
               <div className="whitespace-pre-wrap">{l.content}</div>
             </div>
           ))}
@@ -468,7 +448,7 @@ function NewAgentInner() {
                   void sendMessage(input);
                 }
               }}
-              placeholder="Describe the employee you want to hire…"
+              placeholder="Describe the role…"
               className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               disabled={busy || creating}
             />
@@ -481,9 +461,6 @@ function NewAgentInner() {
               Send
             </button>
           </div>
-          <p className="mt-2 text-[11px] text-zinc-400">
-            Hire once. Reuse the same employee for ongoing work — no need to rehire for every task.
-          </p>
         </div>
       </div>
       <UpgradeLimitModal open={limitOpen} message={error || LIMIT_MESSAGES.agents} onClose={() => setLimitOpen(false)} />
