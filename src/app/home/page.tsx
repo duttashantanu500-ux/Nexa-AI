@@ -7,7 +7,6 @@ import { AppShell } from "@/components/AppShell";
 import { PageHeader } from "@/components/PageHeader";
 import { loadOperatorState, saveOperatorState } from "@/lib/operatorStore";
 import { fetchServerAgents } from "@/lib/serverAgentClient";
-import { CONNECTOR_REGISTRY } from "@/lib/connectors/registry";
 import { Agent, AgentRun, defaultPermissions } from "@/types";
 import { WorkforceChat } from "@/components/WorkforceChat";
 
@@ -119,9 +118,6 @@ export default function HomePage() {
 
   const active = agents.filter((a) => a.status === "active" || a.status === "ready");
   const failedRuns = runs.filter((r) => r.status === "failed");
-  const priority = CONNECTOR_REGISTRY.filter((c) =>
-    ["slack", "notion", "github", "local_data"].includes(c.id)
-  );
 
   if (!ready) {
     return (
@@ -137,20 +133,20 @@ export default function HomePage() {
         <PageHeader
           page="home"
           title={`${greeting()}${name ? `, ${name}` : ""}.`}
-          subtitle="Hire digital talent. Assign real work. Manage your AI company."
+          subtitle="Hire AI employees. Connect apps. Get real work done."
           actions={
             <>
               <Link
                 href="/agents/new"
                 className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm shadow-indigo-600/20 hover:bg-indigo-500"
               >
-                Hire role
+                Hire employee
               </Link>
               <Link
                 href="/connections"
                 className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               >
-                Manage connections
+                Connections
               </Link>
             </>
           }
@@ -165,57 +161,61 @@ export default function HomePage() {
           failedRunCount={failedRuns.length}
         />
 
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Services</h2>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {priority.map((c) => (
-              <Link
-                key={c.id}
-                href={`/connections/${c.id}`}
-                className="nexa-card p-3"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{c.name}</span>
-                  <span className="text-[10px] font-medium text-zinc-500">Open</span>
-                </div>
-                <p className="mt-1 text-xs text-zinc-500 line-clamp-2">{c.description}</p>
-              </Link>
-            ))}
-          </div>
+        <section className="grid gap-3 sm:grid-cols-3">
+          <Link
+            href="/agents/new"
+            className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+          >
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Hire</div>
+            <p className="mt-1 text-xs text-zinc-500">Create an AI employee for real work</p>
+          </Link>
+          <Link
+            href="/connections"
+            className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+          >
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Connect</div>
+            <p className="mt-1 text-xs text-zinc-500">Link Gmail, Slack, Notion, and more</p>
+          </Link>
+          <Link
+            href="/activity"
+            className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+          >
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Work Board</div>
+            <p className="mt-1 text-xs text-zinc-500">See runs, results, and issues</p>
+          </Link>
         </section>
 
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              Digital team ({agents.length})
+              AI team ({agents.length})
             </h2>
             <span className="text-xs text-zinc-500">{active.length} active</span>
           </div>
           {agents.length === 0 ? (
             <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-center dark:border-zinc-700">
               <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                Your digital team is empty
+                No AI employees yet
               </p>
               <p className="mt-1 text-sm text-zinc-500">
-                Hire your first AI employee to assign real work — research, marketing,
-                sales, or operations.
+                Hire one for research, marketing, sales, or ops — with real app access.
               </p>
               <Link
                 href="/agents/new"
                 className="mt-3 inline-block rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
               >
-                Open Hiring Desk →
+                Open Hiring Desk
               </Link>
             </div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
-              {agents.slice(0, 4).map((a) => (
+              {agents.slice(0, 6).map((a) => (
                 <Link
                   key={a.id}
                   href={`/agents/${a.id}`}
-                  className="nexa-card p-4"
+                  className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
                 >
-                  <div className="font-medium">{a.name}</div>
+                  <div className="font-medium text-zinc-900 dark:text-zinc-50">{a.name}</div>
                   <p className="mt-1 line-clamp-2 text-xs text-zinc-500">
                     {a.purpose || a.description || `${a.steps?.length || 0} steps`}
                   </p>
