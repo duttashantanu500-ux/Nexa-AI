@@ -7,43 +7,64 @@ import { loadLiveAccountOptions } from "@/lib/agentBuilder/liveAccountOptions";
 function sanitizePublicThinking(lines?: string[]): string[] {
   if (!Array.isArray(lines)) return [];
   const blocked =
-    /\b(model\s*ok|model routes?|ollama|openrouter|openai|gpt-|gemini|groq|deepseek|api keys?|provider|nexa-local|local_fallback)\b/i;
+    /\b(model\s*ok|model routes?|ollama|openrouter|openai|gpt-|gemini|groq|deepseek|api keys?|provider|nexa-local|local_fallback|composio)\b/i;
   return lines
     .map((s) => String(s || "").trim())
     .filter((s) => s.length > 0 && !blocked.test(s))
     .slice(0, 12);
 }
 
-const STATUS_PROVIDERS = [
-  "notion",
-  "slack",
-  "buffer",
-  "hubspot",
-  "ideogram",
-  "mcp",
-] as const;
+function isActiveStatus(status: string): boolean {
+  return /ACTIVE|CONNECTED|SUCCESS|ENABLED/i.test(String(status || ""));
+}
 
+/** Load connected app map from the live connections API (not legacy natives). */
 async function loadConnectionMap(
   userId: string,
   origin: string
 ): Promise<Record<string, string>> {
   if (!userId) return {};
   const out: Record<string, string> = {};
-  await Promise.all(
-    STATUS_PROVIDERS.map(async (p) => {
-      try {
-        const res = await fetch(
-          `${origin}/api/connections/${p}/status?userId=${encodeURIComponent(userId)}`,
-          { cache: "no-store" }
-        );
-        const data = await res.json().catch(() => ({}));
-        out[p] = String(data.status || "available");
-      } catch {
-        out[p] = "available";
+  try {
+    const res = await fetch(
+      `${origin}/api/composio/connections?userId=${encodeURIComponent(userId)}`,
+      { cache: "no-store" }
+    );
+    const data = await res.json().catch(() => ({}));
+    const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+    for (const a of accounts) {
+      const slug = String(a.toolkit || a.app || a.slug || "")
+        .toLowerCase()
+        .trim();
+      if (!slug) continue;
+      if (isActiveStatus(String(a.status || ""))) {
+        out[slug] = "connected";
       }
-    })
-  );
+    }
+  } catch {
+    /* empty map */
+  }
   return out;
+}
+
+function friendlyApp(slug: string): string {
+  const map: Record<string, string> = {
+    gmail: "Gmail",
+    slack: "Slack",
+    notion: "Notion",
+    github: "GitHub",
+    outlook: "Outlook",
+    googledrive: "Google Drive",
+    googlecalendar: "Google Calendar",
+    googlesheets: "Google Sheets",
+    discord: "Discord",
+    linear: "Linear",
+    asana: "Asana",
+    trello: "Trello",
+    jira: "Jira",
+    buffer: "Buffer",
+  };
+  return map[slug] || slug.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export async function POST(req: NextRequest) {
@@ -121,45 +142,43 @@ export async function POST(req: NextRequest) {
     const validated = validateProposal(result.proposal, connections);
     const connectorNotes = validated.requiredConnectors
       .filter((c) => c.status !== "connected")
-      .map((c) =>
-        c.status === "coming_soon"
-          ? `${c.name} is coming soon`
-          : `${c.name} is not connected yet — connect it under Connections`
-      );
+      .map((c) => `${friendlyApp(c.id || c.name)} is not connected yet`);
 
-    let message = result.message;
+    let message = String(result.message || "")
+      .replace(/\bAI agent\b/gi, "AI employee")
+      .replace(/\bagent\b/gi, "employee")
+      .replace(/\bComposio\b/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
     if (connectorNotes.length) {
-      message += `\n\nConnectors needed:\n• ${connectorNotes.join("\n• ")}`;
+      message += `\n\nApps needed:\n• ${connectorNotes.join("\n• ")}`;
     }
-    // Soften connector setup messaging when accounts are already connected
+
     if (connections.notion === "connected") {
       message = message.replace(
         /set a default page[^\n.]*/gi,
-        "pick a Notion parent page from your workspace (or name the page)"
+        "pick a Notion page from your workspace"
       );
     }
+
     if (validated.issues.filter((i) => i.severity === "warning").length) {
       const warns = validated.issues
         .filter((i) => i.severity === "warning")
         .map((i) => {
           let m = i.message;
-          if (
-            connections.notion === "connected" &&
-            /default page|parent page/i.test(m)
-          ) {
-            m =
-              "Notion is connected — pick a parent page from the account list or tell me the page name.";
+          if (connections.notion === "connected" && /default page|parent page/i.test(m)) {
+            m = "Notion is connected — pick a parent page or name it.";
           }
           if (connections.slack === "connected" && /channel/i.test(m)) {
-            m = "Slack is connected — pick a channel from your workspace list.";
+            m = "Slack is connected — pick a channel.";
           }
-          if (
-            connections.buffer === "connected" &&
-            /channel|buffer/i.test(m)
-          ) {
-            m = "Buffer is connected — pick a channel from your account list.";
+          if (connections.buffer === "connected" && /channel|buffer/i.test(m)) {
+            m = "Buffer is connected — pick a channel.";
           }
-          return m;
+          return m
+            .replace(/\bComposio\b/gi, "")
+            .replace(/\bagent\b/gi, "employee");
         })
         .slice(0, 4);
       if (warns.length) {
@@ -167,21 +186,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const liveSummary = liveOptions
-      ? {
-          notionPages: liveOptions.notionPages?.length || 0,
-          slackChannels: liveOptions.slackChannels?.length || 0,
-          bufferChannels: liveOptions.bufferChannels?.length || 0,
-          hubspotContacts: liveOptions.hubspotContacts?.length || 0,
-          hubspotDeals: liveOptions.hubspotDeals?.length || 0,
-        }
-      : null;
+    const connectedList = Object.keys(connections)
+      .filter((k) => connections[k] === "connected")
+      .map(friendlyApp);
 
     return NextResponse.json({
       ok: true,
       declined: false,
       message,
       proposal: validated.canDraft ? validated.proposal : null,
+      requiredConnectors: validated.requiredConnectors,
       validation: {
         canActivate: validated.canActivate,
         canDraft: validated.canDraft,
@@ -189,7 +203,7 @@ export async function POST(req: NextRequest) {
         requiredConnectors: validated.requiredConnectors,
         approvalSteps: validated.approvalSteps,
       },
-      liveSummary,
+      connectedApps: connectedList,
       thinking: sanitizePublicThinking(result.thinking),
     });
   } catch (err) {
@@ -197,7 +211,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        message: "AI Employee Builder failed. Try again.",
+        message: "Could not draft this employee. Try again.",
       },
       { status: 500 }
     );
