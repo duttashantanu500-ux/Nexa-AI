@@ -1,7 +1,7 @@
 /**
  * Deterministic workflow runner.
- * Browser: calls /api/connections/{provider}/execute with user JWT.
- * Server: executeServerAction for every connector (Notion, Slack, Buffer, HubSpot, Ideogram, Vapi, MCP).
+ * End-to-end: employee steps → Composio-connected apps (preferred) → Work Board.
+ * Falls back to legacy provider routes only when no bridge exists.
  */
 
 import { getAction } from "./actionRegistry";
@@ -9,6 +9,7 @@ import type { WorkflowStep, WorkflowStepResult, NormalizedProviderError } from "
 import { resolveConfig } from "./mapping";
 import { takeToken } from "./rateLimit";
 import { redactStepResult } from "./redact";
+import { resolveBridgedTool } from "./composio/actionBridge";
 
 export interface WorkflowContext {
   list: string[];
@@ -140,14 +141,16 @@ export async function runWorkflow(params: {
     const maxAttempts =
       onError === "retry" ? Math.max(1, step.retryPolicy?.maxAttempts ?? 2) : 1;
 
-    if (!def) {
+    // Unknown registry action: still try Composio bridge
+    const bridged = resolveBridgedTool(step.actionId);
+    if (!def && !bridged) {
       results.push(failResult(step, started, inputSent, "Unknown action.", simulate));
       if (onError === "continue") softFail = true;
       else hardFail = true;
       continue;
     }
 
-    if (!def.implemented || !def.available) {
+    if (def && (!def.implemented || !def.available) && !bridged) {
       results.push(
         failResult(
           step,
@@ -164,7 +167,7 @@ export async function runWorkflow(params: {
     }
 
     if (
-      (step.requiresApproval || def.requiresApproval) &&
+      (step.requiresApproval || def?.requiresApproval) &&
       !simulate &&
       params.approvalGrantedForStepId !== step.id
     ) {
@@ -188,7 +191,8 @@ export async function runWorkflow(params: {
     let lastError = "";
     let lastNorm: NormalizedProviderError | undefined;
     let succeeded = false;
-    const connectorId = def.connectionId || step.connectorId || "local_data";
+    const connectorId =
+      def?.connectionId || step.connectorId || bridged?.toolkit || "local_data";
 
     for (let attempts = 1; attempts <= maxAttempts; attempts++) {
       try {
@@ -311,11 +315,122 @@ const PROVIDER_EXECUTE = [
   "mcp",
 ] as const;
 
+/** Prefer Composio for mapped actions so connected apps actually run. */
+async function executeViaComposioBridge(
+  actionId: string,
+  config: Record<string, string>,
+  ctx: WorkflowContext,
+  connections: RuntimeConnectionConfig
+): Promise<ActionExecResult | null> {
+  const bridged = resolveBridgedTool(actionId);
+  if (!bridged) return null;
+
+  const userId = (connections.userId || "").trim();
+  if (!userId) {
+    return {
+      ok: false,
+      message: "Sign in required to run this action.",
+      error: { category: "auth" },
+    };
+  }
+
+  const args = bridged.buildArgs(config, {
+    list: ctx.list,
+    notes: ctx.notes,
+    report: ctx.report,
+  });
+
+  // Inject Notion parent from runtime if missing
+  if (
+    actionId.startsWith("notion.") &&
+    connections.notionDefaultParent &&
+    !args.parent_id
+  ) {
+    args.parent_id = connections.notionDefaultParent;
+  }
+
+  try {
+    if (typeof window !== "undefined") {
+      const res = await fetch("/api/composio/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          toolSlug: bridged.toolSlug,
+          arguments: args,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) {
+        return {
+          ok: false,
+          message:
+            data.error ||
+            "Could not run this step. Connect the app under Connections and try again.",
+          error: { category: "unknown" },
+        };
+      }
+      return {
+        ok: true,
+        message: "Done",
+        data: data.result,
+      };
+    }
+
+    // Server path (cron / API)
+    const { executeComposioTool } = await import("./composio/client");
+    const { listUserAccounts, isFullyConnected } = await import("./composio/accounts");
+    const accounts = await listUserAccounts(userId);
+    const match = accounts.find(
+      (a) =>
+        isFullyConnected(a.status, a.isDisabled) &&
+        a.toolkit.toLowerCase() === bridged.toolkit.toLowerCase()
+    );
+    if (!match) {
+      return {
+        ok: false,
+        message: `Connect ${bridged.toolkit} under Connections before this step can run.`,
+        error: { category: "not_configured" },
+      };
+    }
+    const result = await executeComposioTool({
+      toolSlug: bridged.toolSlug,
+      userId,
+      arguments: args,
+      connectedAccountId: match.id,
+    });
+    if (!result.ok) {
+      return {
+        ok: false,
+        message: result.error || "Could not run this step.",
+        error: { category: "unknown" },
+      };
+    }
+    return { ok: true, message: "Done", data: result.data };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "Could not run this step.",
+      error: { category: "server_error" },
+    };
+  }
+}
+
 async function executeProviderAction(
   actionId: string,
   config: Record<string, string>,
-  connections: RuntimeConnectionConfig
+  connections: RuntimeConnectionConfig,
+  ctx: WorkflowContext
 ): Promise<ActionExecResult> {
+  // End-to-end path: Composio first
+  const viaComposio = await executeViaComposioBridge(
+    actionId,
+    config,
+    ctx,
+    connections
+  );
+  if (viaComposio) return viaComposio;
+
   const provider = actionId.split(".")[0];
   if (!PROVIDER_EXECUTE.includes(provider as (typeof PROVIDER_EXECUTE)[number])) {
     return {
@@ -325,7 +440,6 @@ async function executeProviderAction(
     };
   }
 
-  // Browser: live session JWT → existing HTTP execute routes
   if (typeof window !== "undefined") {
     if (provider === "mcp") {
       const authHdr = await browserAuthHeaders();
@@ -373,7 +487,6 @@ async function executeProviderAction(
     };
   }
 
-  // Server with user JWT: optional self-call (same routes as browser)
   if (connections.accessToken && connections.origin && provider !== "mcp") {
     try {
       const res = await fetch(
@@ -399,11 +512,10 @@ async function executeProviderAction(
         error: mapNormError(data.error),
       };
     } catch {
-      // fall through to direct server executor
+      /* fall through */
     }
   }
 
-  // Server (cron / background): all connectors via unified executor
   const userId = (connections.userId || "").trim();
   if (!userId) {
     return {
@@ -488,7 +600,7 @@ async function executeAction(
     }
     default: {
       if (simulate) return { ok: true, message: `Preview only — would run ${actionId}` };
-      return executeProviderAction(actionId, config, connections);
+      return executeProviderAction(actionId, config, connections, ctx);
     }
   }
 }
