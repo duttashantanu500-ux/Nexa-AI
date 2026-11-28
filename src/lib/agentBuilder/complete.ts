@@ -1,6 +1,7 @@
 /**
  * AI Employee Builder LLM call — multi-provider with local fallback.
  * Supports create (new hire) and edit (existing employee) modes.
+ * Product loop: connect apps → hire AI employee → run work → Work Board results.
  */
 import { registryCatalogForPrompt } from "./validate";
 import { callOpenAICompat, callGemini, callOllama } from "./modelClients";
@@ -10,20 +11,20 @@ import {
 } from "./liveAccountOptions";
 
 const OFF_TOPIC_CREATE =
-  "I'm here to help you hire and shape AI employees — roles that use your tools (Notion, Slack, HubSpot, Buffer, and more).\n\n" +
-  "Try something like:\n" +
-  "• Create a Notion page after each meeting\n" +
-  "• List new HubSpot contacts and summarize in Slack\n" +
-  "• Schedule a Buffer post every Monday\n\n" +
-  "What should your next AI employee do?";
+  "I hire and shape AI employees for real work on your connected apps.\n\n" +
+  "Describe a role, for example:\n" +
+  "• Research assistant that saves notes to Notion\n" +
+  "• Inbox helper that checks Gmail\n" +
+  "• Ops employee that posts updates to Slack\n\n" +
+  "What should this employee own?";
 
 const OFF_TOPIC_EDIT =
-  "I'm helping you update this AI employee — schedule, tools, steps, or purpose.\n\n" +
+  "I update this AI employee — schedule, apps, steps, or purpose.\n\n" +
   "Try:\n" +
-  "• Change schedule to every Friday at 5 PM\n" +
-  "• Add a Slack notification step\n" +
-  "• Use a different Notion parent page\n\n" +
-  "What would you like to change?";
+  "• Run every weekday at 9 AM\n" +
+  "• Add a Slack update step\n" +
+  "• Change the Notion destination\n\n" +
+  "What should change?";
 
 function getApiKey(...names: string[]): string | null {
   for (const name of names) {
@@ -38,11 +39,11 @@ function connectionSummary(
   liveOptions?: LiveAccountOptions
 ): string {
   if (!connections || !Object.keys(connections).length) {
-    return "Connection status unknown.";
+    return "No connected apps detected yet. Still propose the employee; mark apps that need connecting.";
   }
   const lines = Object.entries(connections).map(([id, status]) => `- ${id}: ${status}`);
   const live = liveOptions ? "\n\n" + formatLiveOptionsForPrompt(liveOptions) : "";
-  return `Live connection status:\n${lines.join("\n")}\nIf not connected, Status must be Connection required. When a connector IS connected, do NOT ask the user to "set a default page" as a blocker — instead use LIVE ACCOUNT TARGETS below (or ask them to pick one by name) and use the page, channel, or contact the user picks from their account list.${live}`;
+  return `Live connection status:\n${lines.join("\n")}\nIf not connected, Status must be Connection required. When a connector IS connected, do NOT ask the user to "set a default page" as a blocker — instead use LIVE ACCOUNT TARGETS below (or ask them to pick one by name) and use the page or channel the user picks.${live}`;
 }
 
 function existingAgentSummary(existing?: {
@@ -64,7 +65,7 @@ CURRENT EMPLOYEE (edit this — do not invent a brand-new hire):
 - Purpose: ${existing.purpose || existing.description || ""}
 - Schedule: ${sched?.frequency || "once"} ${sched?.time || ""} ${sched?.timezone || "UTC"} enabled=${Boolean(sched?.enabled)}
 - Steps:
-${stepLines || "  (none)"}
+steps || "  (none)"}
 
 You are refining THIS employee. Intent must be "update". Keep their identity unless the user asks to rename. Only change what they asked for.`;
 }
@@ -83,10 +84,10 @@ function buildSystemPrompt(
 ): string {
   const connBlock = connectionSummary(connections, liveOptions);
   if (mode === "edit") {
-    return `You are Nexa's AI Employee editor for an EXISTING employee — not a general chatbot and not the new-hire assistant.\n${existingAgentSummary(existing)}\n\nRegistry (only these actions):\n${registryCatalogForPrompt()}\n\n${connBlock}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"update","message":"short note about what you changed","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nRules: preserve existing steps the user did not ask to change; fewest changes; CRM=hubspot.*; Slack=slack.*; Notion=notion.*; social=buffer.*.\nWhen the user names a page/channel/contact, map it to LIVE ACCOUNT TARGETS and use the real page, channel, contact, or deal the user picks. Never invent targets.\nIf the user only greets, respond with {"off_topic":true,"message":"warm redirect toward changing schedule, tools, or steps"}. Never say you are here to create new AI employees.`;
+    return `You are Nexa employee editor for one EXISTING AI employee. Not a general chatbot. Not the new-hire desk.\n${existingAgentSummary(existing)}\n\nRegistry (only these actions):\n${registryCatalogForPrompt()}\n\n${connBlock}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"update","message":"short note about what you changed","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nRules: preserve steps the user did not ask to change; fewest changes; prefer registry actions for connected apps (Slack, Notion, Gmail, GitHub, etc.).\nWhen the user names a page/channel, map it to LIVE ACCOUNT TARGETS. Never invent targets or claim work already ran.\nIf the user only greets, respond with {"off_topic":true,"message":"warm redirect toward changing schedule, apps, or steps"}. You edit this employee only.`;
   }
 
-  return `You are Nexa's AI Employee Builder — not a general chatbot.\nPropose one AI employee using only this registry:\n\n${registryCatalogForPrompt()}\n\n${connBlock}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"create","message":"short note","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nRules: fewest steps; CRM=hubspot.*; Slack=slack.*; Notion=notion.*; social=buffer.*; custom=mcp.call_tool.\nIf connector not connected: still propose, connection required. When connected, use the page/channel/contact the user picks from LIVE ACCOUNT TARGETS — do not block on "set a default page".\nNever claim work ran. Schedules: once/daily/weekly/monthly only.\nIf the user is only greeting, joking, or asking general questions unrelated to hiring/configuring an AI employee, respond with {"off_topic":true,"message":"warm redirect toward describing a role or workflow"} — never invent a fake employee for small talk.`;
+  return `You are Nexa Hiring Desk. You design one AI employee at a time for a digital workforce product.\nUsers connect apps, hire employees with real steps, run work, and review outcomes on the Work Board.\nPropose one AI employee using only this registry:\n\n${registryCatalogForPrompt()}\n\n${connBlock}\n\nRespond with ONLY valid JSON:\n{"off_topic":false,"intent":"create","message":"short note","proposal":{"name":"string","description":"string","purpose":"string","trigger":"manual|schedule","schedule":{"frequency":"once|daily|weekly|monthly","time":"HH:MM","timezone":"UTC","enabled":true},"steps":[{"actionId":"from_registry","name":"label","config":{},"onError":"stop","requiresApproval":false}],"notes":""}}\n\nProduct loop: connect apps → hire AI employee with clear steps → user starts work → results appear on Work Board.\nRules: fewest steps; use registry actions only; Slack=slack.*; Notion=notion.*; local notes=local_data.*; custom=mcp.call_tool when needed.\nIf an app is not connected: still propose the employee and mark connection required. When connected, use LIVE ACCOUNT TARGETS — never invent page/channel IDs.\nNever claim work already ran. Schedules: once/daily/weekly/monthly only.\nGreetings or off-topic → {"off_topic":true,"message":"redirect to describing a role"}. Never invent a fake employee for small talk.\nSpeak to the user in plain language. Prefer "AI employee" over "agent". Never mention internal providers or model names.`;
 }
 
 export type BuilderCompleteResult =
@@ -306,7 +307,7 @@ export async function completeAgentBuilder(params: {
       kind: "proposal",
       message:
         `I'm updating **${params.existingAgent.name || "this employee"}**. ` +
-        "Tell me what to change — schedule, a step, or a tool (Slack, Notion, HubSpot, Buffer).",
+        "Tell me what to change — schedule, a step, or an app (Slack, Notion, Gmail, GitHub).",
       proposal: {
         name: params.existingAgent.name,
         description: params.existingAgent.description || params.existingAgent.purpose,
@@ -341,7 +342,7 @@ export async function completeAgentBuilder(params: {
   return {
     kind: "error",
     message:
-      "Could not design that employee yet. Try a concrete workflow — for example a Notion page, Slack message, or HubSpot contact.",
+      "Could not design that employee yet. Describe a concrete role — for example Notion notes, Slack updates, or Gmail checks.",
     thinking,
   };
 }
@@ -351,7 +352,7 @@ function looksOffTopic(text: string, mode: "create" | "edit"): boolean {
   if (!t) return false;
 
   const workHints =
-    /\b(agent|employee|workflow|automat|schedule|connect|slack|notion|github|hubspot|buffer|ideogram|crm|contact|deal|compan(?:y|ies)|list|filter|report|trigger|daily|weekly|hire|post|page|task|step|mcp|oauth|vault|comfy|research|summar|update|create a|build (an? |my )?|make (an? )?|change|rename|add|remove|friday|monday)\b/i;
+    /\b(agent|employee|workflow|automat|schedule|connect|slack|notion|github|gmail|outlook|google|hubspot|buffer|crm|contact|deal|compan(?:y|ies)|list|filter|report|trigger|daily|weekly|hire|post|page|task|step|mcp|oauth|vault|research|summar|update|create a|build (an? |my )?|make (an? )?|change|rename|add|remove|friday|monday|inbox|email)\b/i;
   if (workHints.test(t)) return false;
 
   if (
@@ -370,7 +371,7 @@ function looksOffTopic(text: string, mode: "create" | "edit"): boolean {
     return true;
   }
 
-  if (t.length < 12 && !/\b(notion|slack|hubspot|buffer|agent|employee|workflow)\b/i.test(t)) {
+  if (t.length < 12 && !/\b(notion|slack|gmail|github|employee|workflow)\b/i.test(t)) {
     return true;
   }
 
@@ -436,10 +437,8 @@ function formatLocalStructuredMessage(
   if (connections?.buffer === "connected") {
     tips.push("Buffer: pick a channel for create/schedule post steps.");
   }
-  if (connections?.hubspot === "connected") {
-    tips.push("HubSpot: pick a contact or deal when a step needs a specific record.");
-  }
   if (tips.length) lines.push(tips.join(" "));
+  lines.push("After you hire, open the employee and start work. Results show on the Work Board.");
   return lines.join("\n\n");
 }
 
@@ -454,107 +453,109 @@ function localFallbackProposal(
     if (wantsResearch) {
       steps.push({
         actionId: "local_data.list_from_text",
-        name: "List from text",
-        config: { text: "" },
+        name: "Collect research notes",
+        config: {},
         onError: "stop",
         requiresApproval: false,
       });
       steps.push({
         actionId: "local_data.report",
-        name: "Report",
-        config: { title: "Research report" },
+        name: "Write summary",
+        config: { title: "Research summary" },
         onError: "stop",
         requiresApproval: false,
       });
     }
     steps.push({
       actionId: "notion.create_page",
-      name: "Create page",
-      config: { title: "", content: "" },
+      name: "Save to Notion",
+      config: {},
       onError: "stop",
-      requiresApproval: true,
+      requiresApproval: false,
     });
     return {
-      name: wantsResearch ? "Research & Notion writer" : "Notion page creator",
+      name: wantsResearch ? "Research employee" : "Notion employee",
       description: wantsResearch
-        ? "Researches a topic, drafts a report, and saves it as a Notion page."
-        : "Creates a Notion page from your brief.",
+        ? "Researches a topic, writes a short summary, and saves it to Notion."
+        : "Creates structured pages in Notion from your brief.",
       purpose: wantsResearch
-        ? "Research, report, and publish to Notion"
-        : "Create Notion pages",
+        ? "Turn a research request into a Notion page"
+        : "Create Notion pages from instructions",
       trigger: "manual",
       schedule: { frequency: "once", time: "09:00", timezone: "UTC", enabled: false },
       steps,
-      notes:
-        connections?.notion === "connected"
-          ? "Notion is connected — pick a parent page from your account or name it in chat."
-          : "Connect Notion so this employee can save pages.",
+      notes: connections?.notion === "connected" ? "" : "Connect Notion before live runs.",
     };
   }
   if (/slack/.test(t)) {
     return {
-      name: "Slack notifier",
-      description: "Posts a message to a Slack channel.",
-      purpose: "Send Slack messages",
+      name: "Slack updates employee",
+      description: "Posts clear updates to a Slack channel you choose.",
+      purpose: "Keep the team informed in Slack",
       trigger: "manual",
       schedule: { frequency: "once", time: "09:00", timezone: "UTC", enabled: false },
       steps: [
         {
           actionId: "slack.post_message",
-          name: "Send message",
-          config: { channel: "", text: "" },
-          onError: "stop",
-          requiresApproval: true,
-        },
-      ],
-      notes:
-        connections?.slack === "connected"
-          ? "Slack is connected — pick a channel from your workspace."
-          : "Connect Slack so this employee can post.",
-    };
-  }
-  if (/hubspot|crm|contact/.test(t)) {
-    return {
-      name: "HubSpot contact helper",
-      description: "Lists or creates contacts in HubSpot.",
-      purpose: "Work with HubSpot contacts",
-      trigger: "manual",
-      schedule: { frequency: "once", time: "09:00", timezone: "UTC", enabled: false },
-      steps: [
-        {
-          actionId: "hubspot.list_contacts",
-          name: "List contacts",
-          config: { limit: "20" },
+          name: "Post Slack message",
+          config: {},
           onError: "stop",
           requiresApproval: false,
         },
       ],
-      notes:
-        connections?.hubspot === "connected"
-          ? "HubSpot is connected."
-          : "Connect HubSpot so this employee can use your CRM.",
+      notes: connections?.slack === "connected" ? "" : "Connect Slack before live runs.",
     };
   }
-  if (/buffer|social|post/.test(t)) {
+  if (/gmail|inbox|email/.test(t)) {
     return {
-      name: "Buffer social poster",
-      description: "Creates or schedules a social post in Buffer.",
-      purpose: "Schedule social posts",
+      name: "Inbox helper",
+      description: "Helps you review inbox-related work once Gmail is connected.",
+      purpose: "Support email triage workflows",
       trigger: "manual",
       schedule: { frequency: "once", time: "09:00", timezone: "UTC", enabled: false },
       steps: [
         {
-          actionId: "buffer.create_post",
-          name: "Create or schedule a post",
-          config: { channel: "", text: "" },
+          actionId: "local_data.note",
+          name: "Capture inbox notes",
+          config: {},
           onError: "stop",
-          requiresApproval: true,
+          requiresApproval: false,
+        },
+        {
+          actionId: "local_data.report",
+          name: "Summarize next actions",
+          config: { title: "Inbox summary" },
+          onError: "stop",
+          requiresApproval: false,
         },
       ],
-      notes:
-        connections?.buffer === "connected"
-          ? "Buffer is connected — pick a channel."
-          : "Connect Buffer so this employee can post.",
+      notes: "Connect Gmail under Connections for live inbox actions.",
+    };
+  }
+  if (/hire|employee|assistant|role|ops|sales|content/.test(t)) {
+    return {
+      name: "Operations employee",
+      description: "Captures the brief, produces a short report, and is ready for app steps you add.",
+      purpose: "Turn a work brief into a structured result",
+      trigger: "manual",
+      schedule: { frequency: "once", time: "09:00", timezone: "UTC", enabled: false },
+      steps: [
+        {
+          actionId: "local_data.note",
+          name: "Capture brief",
+          config: {},
+          onError: "stop",
+          requiresApproval: false,
+        },
+        {
+          actionId: "local_data.report",
+          name: "Produce report",
+          config: { title: "Work report" },
+          onError: "stop",
+          requiresApproval: false,
+        },
+      ],
+      notes: "Add Slack or Notion steps after connecting those apps.",
     };
   }
   return null;
