@@ -367,13 +367,13 @@ export default function WorkBoardPage() {
         <PageHeader
           page="activity"
           title="Work Board"
-          subtitle="See what your digital team is working on — status updates when work finishes or needs your approval."
+          subtitle="Live results from your AI employees — running, needs approval, done, or failed. This is where completed work shows up after you start a run."
           actions={
             <Link
               href="/agents"
               className="rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
             >
-              Digital team
+              AI team
             </Link>
           }
         />
@@ -405,7 +405,7 @@ export default function WorkBoardPage() {
           <p className="text-sm text-zinc-500">Loading work…</p>
         ) : agents.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-300 p-8 text-center dark:border-zinc-700">
-            <p className="text-sm text-zinc-600">No employees yet — hire a role first.</p>
+            <p className="text-sm text-zinc-600">No employees yet — hire one first, then start work.</p>
             <Link href="/agents/new" className="mt-2 inline-block text-sm text-indigo-600">
               Open Hiring Desk →
             </Link>
@@ -414,12 +414,12 @@ export default function WorkBoardPage() {
           <div className="rounded-xl border border-dashed border-zinc-300 p-8 text-center dark:border-zinc-700">
             <p className="text-sm text-zinc-600">
               {items.length === 0
-                ? "No work recorded yet. Open an employee and start work."
+                ? "No runs yet. Open an employee and press Start work — results land here."
                 : "No items in this filter."}
             </p>
             {items.length === 0 && (
               <Link href="/agents" className="mt-2 inline-block text-sm text-indigo-600">
-                Go to digital team →
+                Go to AI team →
               </Link>
             )}
           </div>
