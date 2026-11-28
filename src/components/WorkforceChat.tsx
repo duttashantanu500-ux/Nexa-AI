@@ -51,36 +51,67 @@ function isActive(status: string): boolean {
   return /ACTIVE|CONNECTED|SUCCESS|ENABLED/i.test(String(status || ""));
 }
 
-function guessToolSlug(toolkit: string, text: string): string | null {
+function guessTool(
+  toolkit: string,
+  text: string,
+  toolArgs?: Record<string, unknown>
+): { slug: string; args: Record<string, unknown> } | null {
   const t = text.toLowerCase();
-  const tk = toolkit.toLowerCase();
-  if (tk === "gmail") {
-    if (/send|compose/.test(t)) return null;
-    return "GMAIL_FETCH_EMAILS";
+  const tk = toolkit.toLowerCase().replace(/\s+/g, "");
+  const q = String(toolArgs?.query || "").trim();
+
+  if (tk === "gmail" || tk === "googlemail") {
+    if (/send|compose|write/.test(t)) {
+      return null; // write needs explicit confirm flow later
+    }
+    return {
+      slug: "GMAIL_FETCH_EMAILS",
+      args: { max_results: /unread|latest|recent/.test(t) ? 5 : 10 },
+    };
   }
   if (tk === "slack") {
-    if (/send|post/.test(t)) return null;
-    return "SLACK_LIST_CHANNELS";
+    if (/send|post|message/.test(t) && !/list|channels?/.test(t)) return null;
+    return { slug: "SLACK_LIST_CHANNELS", args: {} };
   }
   if (tk === "notion") {
-    if (/create|new page/.test(t)) return null;
-    return "NOTION_SEARCH";
+    if (/create|new page|write/.test(t)) return null;
+    return {
+      slug: "NOTION_SEARCH",
+      args: q ? { query: q } : { query: "" },
+    };
   }
-  if (tk === "hubspot") return "HUBSPOT_LIST_CONTACTS";
-  if (tk === "github") return "GITHUB_LIST_REPOS_FOR_AUTHENTICATED_USER";
-  if (tk === "googlecalendar") return "GOOGLECALENDAR_LIST_EVENTS";
-  if (tk === "googledrive") return "GOOGLEDRIVE_LIST_FILES";
-  if (tk === "googlesheets") return "GOOGLESHEETS_LIST_SPREADSHEETS";
+  if (tk === "github") {
+    if (/issue/.test(t)) return { slug: "GITHUB_LIST_ISSUES_FOR_REPO", args: {} };
+    return { slug: "GITHUB_LIST_REPOS_FOR_AUTHENTICATED_USER", args: {} };
+  }
+  if (tk === "googlecalendar" || tk === "calendar") {
+    return { slug: "GOOGLECALENDAR_LIST_EVENTS", args: {} };
+  }
+  if (tk === "googledrive" || tk === "drive") {
+    return { slug: "GOOGLEDRIVE_LIST_FILES", args: {} };
+  }
+  if (tk === "googlesheets" || tk === "sheets") {
+    return { slug: "GOOGLESHEETS_LIST_SPREADSHEETS", args: {} };
+  }
+  if (tk === "googledocs" || tk === "docs") {
+    return { slug: "GOOGLEDOCS_SEARCH_DOCUMENTS", args: q ? { query: q } : {} };
+  }
   if (tk === "outlook") {
     if (/send/.test(t)) return null;
-    return "OUTLOOK_LIST_MESSAGES";
+    if (/calendar|event/.test(t)) return { slug: "OUTLOOK_LIST_EVENTS", args: {} };
+    return { slug: "OUTLOOK_LIST_MESSAGES", args: {} };
   }
-  if (tk === "discord") return "DISCORD_LIST_CHANNELS";
-  if (tk === "linear") return "LINEAR_LIST_ISSUES";
-  if (tk === "asana") return "ASANA_GET_TASKS";
-  if (tk === "trello") return "TRELLO_GET_BOARDS";
-  if (tk === "jira") return "JIRA_GET_ALL_PROJECTS";
-  if (tk === "airtable") return "AIRTABLE_LIST_BASES";
+  if (tk === "discord") return { slug: "DISCORD_LIST_CHANNELS", args: {} };
+  if (tk === "linear") return { slug: "LINEAR_LIST_ISSUES", args: {} };
+  if (tk === "asana") return { slug: "ASANA_GET_TASKS", args: {} };
+  if (tk === "trello") return { slug: "TRELLO_GET_BOARDS", args: {} };
+  if (tk === "jira") return { slug: "JIRA_GET_ALL_PROJECTS", args: {} };
+  if (tk === "airtable") return { slug: "AIRTABLE_LIST_BASES", args: {} };
+  if (tk === "linkedin") return { slug: "LINKEDIN_GET_PROFILE", args: {} };
+  if (tk === "twitter" || tk === "x") return { slug: "TWITTER_USER_LOOKUP_ME", args: {} };
+  if (tk === "youtube") return { slug: "YOUTUBE_LIST_CHANNEL_VIDEOS", args: {} };
+  if (tk === "hubspot") return { slug: "HUBSPOT_LIST_CONTACTS", args: {} };
+  if (tk === "buffer") return { slug: "BUFFER_GET_PENDING_UPDATES", args: {} };
   return null;
 }
 
@@ -88,6 +119,9 @@ function softError(msg: string): string {
   const m = String(msg || "");
   if (/COMPOSIO|API_KEY|not configured/i.test(m)) {
     return "App connections aren’t available right now. Try again later.";
+  }
+  if (/not connected|no connected/i.test(m)) {
+    return "That app isn’t connected. Open Connections to link it.";
   }
   return (
     m
@@ -124,7 +158,7 @@ export function WorkforceChat({
   const [busy, setBusy] = useState(false);
   const [accounts, setAccounts] = useState<ConnAccount[]>([]);
   const [used, setUsed] = useState(0);
-  const [limit, setLimit] = useState(3);
+  const [limit, setLimit] = useState(5);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const refreshConnections = useCallback(async () => {
@@ -135,7 +169,7 @@ export function WorkforceChat({
     const active = listed.accounts.filter((a) => isActive(a.status));
     setAccounts(active);
     setUsed(listed.used);
-    setLimit(listed.limit || 3);
+    setLimit(listed.limit || 5);
   }, []);
 
   useEffect(() => {
@@ -171,7 +205,11 @@ export function WorkforceChat({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [lines, busy]);
 
-  const runAppOperation = async (text: string, toolkit: string) => {
+  const runAppOperation = async (
+    text: string,
+    toolkit: string,
+    toolArgs?: Record<string, unknown>
+  ) => {
     const s = loadOperatorState();
     const userId = s.user?.id || "";
     if (!userId) {
@@ -186,7 +224,7 @@ export function WorkforceChat({
     const active = listed.accounts.filter((a) => isActive(a.status));
     setAccounts(active);
     setUsed(listed.used);
-    setLimit(listed.limit || 3);
+    setLimit(listed.limit || 5);
 
     if (!active.length) {
       setLines((prev) => [
@@ -203,7 +241,8 @@ export function WorkforceChat({
     const match = active.find(
       (a) =>
         a.toolkit.toLowerCase() === toolkit.toLowerCase() ||
-        a.toolkit.toLowerCase().includes(toolkit.toLowerCase())
+        a.toolkit.toLowerCase().includes(toolkit.toLowerCase()) ||
+        toolkit.toLowerCase().includes(a.toolkit.toLowerCase())
     );
 
     if (!match) {
@@ -218,13 +257,13 @@ export function WorkforceChat({
       return;
     }
 
-    const toolSlug = guessToolSlug(toolkit, text);
-    if (!toolSlug) {
+    const tool = guessTool(toolkit, text, toolArgs);
+    if (!tool) {
       setLines((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `${label} is connected. Ask a specific read action (e.g. list, check, show).`,
+          content: `${label} is connected. For safety I only auto-run read actions from chat (list, check, show). Say something like “list channels” or “check inbox”.`,
         },
       ]);
       return;
@@ -232,9 +271,9 @@ export function WorkforceChat({
 
     const exec = await executeComposioTool({
       userId,
-      toolSlug,
+      toolSlug: tool.slug,
       connectedAccountId: match.id,
-      arguments: {},
+      arguments: tool.args,
     });
 
     if (!exec.ok) {
@@ -252,7 +291,7 @@ export function WorkforceChat({
       ...prev,
       {
         role: "assistant",
-        content: `${label}: ${formatToolResult(exec.result)}`,
+        content: `${label}:\n${formatToolResult(exec.result)}`,
       },
     ]);
   };
@@ -270,7 +309,7 @@ export function WorkforceChat({
     }
 
     if (result.intent === "app_operation" && result.toolkit) {
-      await runAppOperation(text, result.toolkit);
+      await runAppOperation(text, result.toolkit, result.toolArgs);
       return;
     }
 
@@ -283,9 +322,12 @@ export function WorkforceChat({
       const labels = active.map((a) => friendlyAppName(a.toolkit));
       const msg =
         labels.length > 0
-          ? `Connected (${listed.used}/${listed.limit || 3}): ${labels.join(", ")}.`
-          : `Nothing connected (${listed.used}/${listed.limit || 3} slots).`;
+          ? `Connected (${listed.used}/${listed.limit || 5}): ${labels.join(", ")}.`
+          : `Nothing connected (${listed.used}/${listed.limit || 5} slots).`;
       setLines((prev) => [...prev, { role: "assistant", content: msg }]);
+      if (!labels.length && result.navigateTo) {
+        window.setTimeout(() => router.push(result.navigateTo!), 400);
+      }
       return;
     }
 
@@ -319,12 +361,18 @@ export function WorkforceChat({
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
           Nexa
         </h2>
+        <p className="mt-0.5 text-[11px] text-zinc-500">
+          Team · apps · work — real actions only
+        </p>
       </div>
       <div className="flex max-h-80 min-h-[12rem] flex-col gap-2 overflow-y-auto px-4 py-3">
         {lines.length === 0 && (
-          <p className="text-sm text-zinc-400 dark:text-zinc-500">
-            Ask anything about your team, work, or connected apps.
-          </p>
+          <div className="space-y-1 text-sm text-zinc-400 dark:text-zinc-500">
+            <p>Ask anything about your team, work, or connected apps.</p>
+            <p className="text-xs">
+              Examples: “what’s connected”, “check gmail”, “list my team”, “hire a research employee”
+            </p>
+          </div>
         )}
         {lines.map((l, i) => (
           <div
