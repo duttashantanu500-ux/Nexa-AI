@@ -95,7 +95,6 @@ const KNOWN_TOOLKITS: { re: RegExp; slug: string }[] = [
   { re: /\bemail\b|\bmails?\b/i, slug: "gmail" },
 ];
 
-/** Prefer connected toolkit when user says generic “inbox / calendar / files”. */
 function inferToolkitFromContext(
   t: string,
   connectedSlugs?: string[]
@@ -145,7 +144,6 @@ export function detectToolkit(
 
 function findAgentId(text: string, ctx: WorkforceContext): string | undefined {
   const lower = text.toLowerCase();
-  // Prefer longer names first to avoid partial collisions
   const entries = Object.entries(ctx.agentIdsByName || {}).sort(
     (a, b) => b[0].length - a[0].length
   );
@@ -326,7 +324,6 @@ export function classifyWorkforceMessage(
     };
   }
 
-  // First employee shortcuts
   if (
     ctx.agentNames.length === 1 &&
     /\b(run|start) (it|work|them|the employee)\b/i.test(t)
@@ -361,7 +358,6 @@ export function classifyWorkforceMessage(
     };
   }
 
-  // Generic “check my stuff” with exactly one connected app
   if (APP_OP.test(t) && slugs.length === 1) {
     return {
       intent: "app_operation",
@@ -378,6 +374,47 @@ export function classifyWorkforceMessage(
     };
   }
 
+  if (/\b(stuck|not working|broken|nothing happens|empty board|no results|how do i start|get started|onboarding)\b/i.test(t)) {
+    if (!labels.length && !ctx.agentNames.length) {
+      return {
+        intent: "chat",
+        message:
+          "Quick path: (1) Open Connections and link an app. (2) Hire an AI employee. (3) Open them and Start work. Results show on the Work Board.",
+        useModel: true,
+      };
+    }
+    if (!labels.length) {
+      return {
+        intent: "connections",
+        message: "Link an app first so employees can use real accounts. Opening Connections.",
+        navigateTo: "/connections",
+      };
+    }
+    if (!ctx.agentNames.length) {
+      return {
+        intent: "hire",
+        message: "You have apps connected. Next: hire an AI employee. Opening Hiring Desk.",
+        navigateTo: "/agents/new",
+        hireHint: t,
+      };
+    }
+    return {
+      intent: "work_status",
+      message:
+        "Open an employee and press Start work. When a run finishes (or needs approval), it appears on the Work Board.",
+      navigateTo: "/activity",
+    };
+  }
+
+  if (/\b(schedule|daily|weekly|every day)\b/i.test(t) && /\b(employee|work|run|job)\b/i.test(t)) {
+    return {
+      intent: "hire",
+      message: "Schedules are set on the employee — open your team or Hiring Desk to set daily/weekly.",
+      navigateTo: ctx.agentNames.length ? "/agents" : "/agents/new",
+      hireHint: t,
+    };
+  }
+
   if (ctx.agentNames.length === 0 && labels.length === 0) {
     return {
       intent: "chat",
@@ -387,7 +424,6 @@ export function classifyWorkforceMessage(
     };
   }
 
-  // Contextual coaching default
   const tips: string[] = [];
   if (labels[0]) tips.push(`“check ${labels[0]}”`);
   if (ctx.agentNames[0]) tips.push(`“open ${ctx.agentNames[0]}”`);
