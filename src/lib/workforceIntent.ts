@@ -24,9 +24,7 @@ export type WorkforceContext = {
   agentIdsByName: Record<string, string>;
   recentRunCount?: number;
   failedRunCount?: number;
-  /** Friendly labels of fully connected apps, e.g. ["Gmail","Slack"] */
   connectedLabels?: string[];
-  /** toolkit slugs that are fully connected */
   connectedSlugs?: string[];
   connectionUsed?: number;
   connectionLimit?: number;
@@ -47,13 +45,13 @@ const REFUSE =
   /\b(hack|steal|bypass password|credit card|ssn|wire transfer|malware|ransomware|illegal)\b/i;
 
 const HIRE =
-  /\b(hire|create|build|make|set up|setup|need)\b.*\b(employee|agent|assistant|role|worker)\b|\b(new employee|new agent|hiring desk)\b|\b(employee|agent)\b.*\b(for|that|to)\b/i;
+  /\b(hire|create|build|make|set up|setup|need|want)\b.*\b(employee|assistant|role|worker|teammate)\b|\b(new employee|hiring desk)\b|\b(employee)\b.*\b(for|that|to)\b/i;
 
 const LIST_TEAM =
-  /\b(list (my )?(team|employees|agents)|who (do i|have i) (hired|got)|show (me )?(my )?(team|employees)|\bwho is on (my )?(team|staff))\b/i;
+  /\b(list (my )?(team|employees)|who (do i|have i) (hired|got)|show (me )?(my )?(team|employees)|\bwho is on (my )?(team|staff))\b/i;
 
 const STATUS =
-  /\b(what (did|have) (my )?(employees?|agents?|team) (do|done|accomplish)|work (board|history|status)|failed runs?|needs attention|today'?s (work|results?))\b/i;
+  /\b(what (did|have) (my )?(employees?|team) (do|done|accomplish)|work (board|history|status)|failed runs?|needs attention|today'?s (work|results?))\b/i;
 
 const LIST_CONNECTED =
   /\b(what('?s| is| are)? (my )?(connected|linked) (apps?|accounts?|tools?)|which apps? (are )?(connected|linked)|show (my )?connections?|list (my )?(connected )?apps?)\b/i;
@@ -72,7 +70,6 @@ const KNOWN_TOOLKITS: { re: RegExp; slug: string }[] = [
   { re: /\boutlook\b/i, slug: "outlook" },
   { re: /\bslack\b/i, slug: "slack" },
   { re: /\bnotion\b/i, slug: "notion" },
-  { re: /\bhubspot\b/i, slug: "hubspot" },
   { re: /\bgithub\b/i, slug: "github" },
   { re: /\bgoogle drive\b|\bgdrive\b/i, slug: "googledrive" },
   { re: /\bgoogle calendar\b|\bcalendar\b/i, slug: "googlecalendar" },
@@ -98,7 +95,6 @@ export function detectToolkit(
   for (const { re, slug } of KNOWN_TOOLKITS) {
     if (re.test(lower)) return slug;
   }
-  // Match against connected toolkit names appearing in the message
   if (connectedSlugs?.length) {
     for (const slug of connectedSlugs) {
       const s = slug.toLowerCase();
@@ -126,7 +122,7 @@ export function classifyWorkforceMessage(
   const name = ctx.userName ? `, ${ctx.userName}` : "";
   const labels = ctx.connectedLabels || [];
   const used = ctx.connectionUsed ?? labels.length;
-  const limit = ctx.connectionLimit ?? 3;
+  const limit = ctx.connectionLimit ?? 5;
 
   if (!t) {
     return { intent: "clarify", message: `What do you need${name}?` };
@@ -137,21 +133,32 @@ export function classifyWorkforceMessage(
   }
 
   if (/^(hi|hello|hey|yo|good (morning|afternoon|evening))[\s!.]*$/i.test(t)) {
-    return { intent: "chat", message: `Hi${name}.` };
+    const apps =
+      labels.length > 0
+        ? ` ${labels.slice(0, 4).join(", ")} connected.`
+        : "";
+    const team =
+      ctx.agentNames.length > 0
+        ? ` ${ctx.agentNames.length} on your team.`
+        : "";
+    return {
+      intent: "chat",
+      message: `Hi${name}.${apps}${team} Hire, check apps, or run work — say what you need.`,
+    };
   }
 
   if (CAPABILITIES.test(t) || /\bwhat can nexa do\b/i.test(t)) {
     const apps =
       labels.length > 0
-        ? `Connected apps (${used}/${limit}): ${labels.join(", ")}.`
-        : `No apps connected yet (${used}/${limit} slots).`;
+        ? `Connected (${used}/${limit}): ${labels.join(", ")}.`
+        : `No apps connected (${used}/${limit} slots).`;
     const team =
       ctx.agentNames.length > 0
         ? ` Team: ${ctx.agentNames.length} AI employee${ctx.agentNames.length === 1 ? "" : "s"}.`
         : " No AI employees yet.";
     return {
       intent: "capabilities",
-      message: `${apps}${team} I can work with connected apps, your team, and the Work Board — only real actions, never fake results.`,
+      message: `${apps}${team} I can hire employees, work with connected apps, and show the Work Board — only real actions.`,
     };
   }
 
@@ -178,9 +185,10 @@ export function classifyWorkforceMessage(
 
   if (
     HIRE.test(t) ||
-    /\b(social media|content|research|sales|ops|operations)\b.*\b(employee|agent|role)\b/i.test(
+    /\b(social media|content|research|sales|ops|operations|marketing)\b.*\b(employee|role|assistant)\b/i.test(
       t
-    )
+    ) ||
+    /\bhire\b/i.test(t)
   ) {
     return {
       intent: "hire",
@@ -209,7 +217,7 @@ export function classifyWorkforceMessage(
     if (!ctx.agentNames.length) {
       return {
         intent: "list_team",
-        message: "No AI employees yet.",
+        message: "No AI employees yet. Open Hiring Desk to hire one.",
         navigateTo: "/agents/new",
       };
     }
@@ -247,17 +255,24 @@ export function classifyWorkforceMessage(
   if (toolkit && APP_OP.test(t)) {
     return {
       intent: "app_operation",
-      message: `Working with ${toolkit}…`,
+      message: "Working…",
       toolkit,
     };
   }
 
-  // App name alone with connected account → treat as app operation prompt
   if (toolkit && (ctx.connectedSlugs || []).includes(toolkit)) {
     return {
       intent: "app_operation",
-      message: `Working with ${toolkit}…`,
+      message: "Working…",
       toolkit,
+    };
+  }
+
+  if (toolkit && !(ctx.connectedSlugs || []).includes(toolkit)) {
+    return {
+      intent: "connections",
+      message: `That app isn’t connected yet. Open Connections to link it (${used}/${limit} slots used).`,
+      navigateTo: "/connections",
     };
   }
 
@@ -269,9 +284,22 @@ export function classifyWorkforceMessage(
     };
   }
 
+  // Helpful default — never dump old “connect Notion Slack Buffer / hire once” spam
+  if (ctx.agentNames.length === 0 && labels.length === 0) {
+    return {
+      intent: "chat",
+      message:
+        "Start by connecting an app or hiring an AI employee. I only run real actions on accounts you authorize.",
+      useModel: false,
+    };
+  }
+
   return {
     intent: "chat",
-    message: "Tell me what you need.",
+    message:
+      labels.length > 0
+        ? `Try: “list my team”, “what’s connected”, or “check ${labels[0]}”.`
+        : "Try: “hire a research employee”, “list my team”, or “open connections”.",
     useModel: false,
   };
 }
